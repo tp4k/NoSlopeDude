@@ -616,4 +616,47 @@ mod tests {
             "0.009966469683777625".parse::<f64>().unwrap().to_bits()
         );
     }
+
+    /// `correct_scores_floats`'s raw-text search assumes `erosion` precedes
+    /// `verbosity.ratio` *within* one language's own object (see its own
+    /// doc comment) -- once it has found `erosion`, it searches forward for
+    /// `ratio` starting just past it, never backward. This report violates
+    /// that assumption for `scores.overall` (`verbosity` -- and so its own
+    /// `ratio` -- is written *before* `erosion`), so the forward search for
+    /// `overall`'s `ratio` skips past its own, genuinely-present value and
+    /// lands on `scores.java`'s `ratio` instead. `overall`'s real ratio
+    /// (`0.01`) and `java`'s (`0.99`) are grossly different so the
+    /// misaligned read is guaranteed to fail
+    /// [`MAX_RELATIVE_CORRECTION`]'s plausibility guard, proving that guard
+    /// actually rejects a misaligned search rather than only ever seeing
+    /// values close enough to pass. Widening `MAX_RELATIVE_CORRECTION` to
+    /// something like `1e9`, or deleting the `ensure!` in
+    /// `overwrite_checked`, makes this test fail.
+    #[test]
+    fn test_raw_text_recovery_rejects_a_misaligned_search() {
+        let raw = r#"{
+            "scan": { "target": "/x", "revision": { "sha": "deadbeef", "dirty": false, "unavailable_reason": null } },
+            "scores": {
+                "overall": {
+                    "verbosity": { "flagged_lines": 1, "scanned_lines": 1, "ratio": 0.01 },
+                    "erosion": 0.1
+                },
+                "java": {
+                    "erosion": 0.9,
+                    "verbosity": { "flagged_lines": 1, "scanned_lines": 1, "ratio": 0.99 }
+                },
+                "js_ts": { "erosion": 0.1, "verbosity": { "flagged_lines": 1, "scanned_lines": 1, "ratio": 0.1 } }
+            },
+            "findings": [],
+            "duplicates": [],
+            "top25": [],
+            "skipped_files": []
+        }"#;
+
+        let err = parse_report(raw).expect_err(
+            "a misaligned raw-text search over scores.overall's reordered fields \
+             must be rejected, not silently committed as a wrong number",
+        );
+        assert!(err.to_string().contains("implausible"), "error was: {err}");
+    }
 }
