@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 
 use nsd::cli::{Cli, Command as CliCommand};
 use nsd::model::Target;
@@ -56,6 +56,11 @@ fn test_binary_name_is_nsd() -> anyhow::Result<()> {
     assert!(
         stdout.contains("nsd"),
         "expected --help output to report the binary name nsd, got: {stdout}"
+    );
+    assert_eq!(
+        Cli::command().get_name(),
+        "nsd",
+        "the clap command's own name must be nsd, not just the --help output"
     );
     Ok(())
 }
