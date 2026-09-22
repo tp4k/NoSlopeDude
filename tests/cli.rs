@@ -50,3 +50,16 @@ fn test_missing_local_path_is_fatal_nonzero() -> anyhow::Result<()> {
     assert!(!status.success());
     Ok(())
 }
+
+#[test]
+fn test_binary_name_is_nsd() -> anyhow::Result<()> {
+    let output = Command::new(env!("CARGO_BIN_EXE_nsd"))
+        .arg("--help")
+        .output()?;
+    let stdout = String::from_utf8(output.stdout)?;
+    assert!(
+        stdout.contains("nsd"),
+        "expected --help output to report the binary name nsd, got: {stdout}"
+    );
+    Ok(())
+}
