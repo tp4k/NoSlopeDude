@@ -244,8 +244,6 @@ mod tests {
     /// pass while the real strip missed a quarter of the archived
     /// report's occurrences) and that hashing runs on the already
     /// normalized value, not the raw one.
-    ///
-    /// `build_digest` does not exist yet: this is WS-4's red commit.
     #[test]
     fn test_normalization_strips_excerpts_and_the_absolute_target() {
         let mut report = json!({
@@ -292,5 +290,89 @@ mod tests {
             .expect("body_blake3 is a string");
         assert!(body_blake3.starts_with("blake3:"));
         assert_eq!(body_blake3.len(), "blake3:".len() + 32);
+    }
+
+    /// Reproduces the exact literal that exposed this crate's pinned
+    /// `serde_json` release's float-parsing bug in the real
+    /// `java-fixture-01` archive (`scores.java.verbosity.ratio`): parsed
+    /// via plain `serde_json::from_str::<Value>`, `0.009966469683777625`
+    /// round-trips out as `0.009966469683777623`, one ULP low. Proves
+    /// `parse_report` recovers the correctly-rounded value instead.
+    ///
+    /// `parse_report` does not exist yet: this is the red half of this
+    /// discovered-bug fix.
+    #[test]
+    fn test_parse_report_corrects_a_known_serde_json_float_rounding_bug() {
+        let raw = r#"{
+            "scan": { "target": "/x", "revision": { "sha": "deadbeef", "dirty": false, "unavailable_reason": null } },
+            "scores": {
+                "overall": { "erosion": 0.1, "verbosity": { "flagged_lines": 1, "scanned_lines": 1, "ratio": 0.1 } },
+                "java": {
+                    "erosion": 0.1,
+                    "verbosity": { "flagged_lines": 1, "scanned_lines": 1, "ratio": 0.009966469683777625 }
+                },
+                "js_ts": { "erosion": 0.1, "verbosity": { "flagged_lines": 1, "scanned_lines": 1, "ratio": 0.1 } }
+            },
+            "findings": [],
+            "duplicates": [],
+            "top25": [],
+            "skipped_files": []
+        }"#;
+
+        let naive: Value = serde_json::from_str(raw).expect("naive parse");
+        let naive_ratio = naive["scores"]["java"]["verbosity"]["ratio"]
+            .as_f64()
+            .expect("naive ratio");
+        assert_ne!(
+            naive_ratio.to_bits(),
+            "0.009966469683777625".parse::<f64>().unwrap().to_bits(),
+            "this test's premise (plain serde_json mis-parses this literal) no longer holds; \
+             `parse_report`'s raw-text correction may now be unnecessary"
+        );
+
+        let corrected = parse_report(raw).expect("parse_report");
+        let corrected_ratio = corrected["scores"]["java"]["verbosity"]["ratio"]
+            .as_f64()
+            .expect("corrected ratio");
+        assert_eq!(
+            corrected_ratio.to_bits(),
+            "0.009966469683777625".parse::<f64>().unwrap().to_bits()
+        );
+    }
+
+    /// The same rounding bug reproduces when reading back a **committed
+    /// digest**, whose `top25` triples carry no `mass` key to search for
+    /// (`build_digest` already reduced them to bare `[cc, sloc, mass]`
+    /// arrays) -- `parse_digest` must recover the third slot positionally.
+    ///
+    /// `parse_digest` does not exist yet: this is the red half of this
+    /// discovered-bug fix.
+    #[test]
+    fn test_parse_digest_corrects_a_known_serde_json_float_rounding_bug_in_top25() {
+        let raw = r#"{
+            "scores": {
+                "overall": { "erosion": 0.1, "verbosity": { "flagged_lines": 1, "scanned_lines": 1, "ratio": 0.1 } },
+                "java": { "erosion": 0.1, "verbosity": { "flagged_lines": 1, "scanned_lines": 1, "ratio": 0.1 } },
+                "js_ts": { "erosion": 0.1, "verbosity": { "flagged_lines": 1, "scanned_lines": 1, "ratio": 0.1 } }
+            },
+            "top25": [
+                [19, 125, 0.009966469683777625]
+            ]
+        }"#;
+
+        let naive: Value = serde_json::from_str(raw).expect("naive parse");
+        let naive_mass = naive["top25"][0][2].as_f64().expect("naive mass");
+        assert_ne!(
+            naive_mass.to_bits(),
+            "0.009966469683777625".parse::<f64>().unwrap().to_bits(),
+            "this test's premise (plain serde_json mis-parses this literal) no longer holds"
+        );
+
+        let corrected = parse_digest(raw).expect("parse_digest");
+        let corrected_mass = corrected["top25"][0][2].as_f64().expect("corrected mass");
+        assert_eq!(
+            corrected_mass.to_bits(),
+            "0.009966469683777625".parse::<f64>().unwrap().to_bits()
+        );
     }
 }
