@@ -58,7 +58,7 @@ fn committed_digest_path() -> PathBuf {
 fn read_committed_digest() -> Result<Value> {
     let raw = fs::read_to_string(committed_digest_path())
         .context("reading the committed java-fixture-01 golden digest")?;
-    serde_json::from_str(&raw).context("parsing the committed golden digest as JSON")
+    golden::parse_digest(&raw).context("parsing the committed golden digest")
 }
 
 /// Where the archived report is, or an explicit statement that this run's
@@ -94,8 +94,7 @@ fn test_committed_digest_matches_the_archived_report() -> Result<()> {
     };
 
     let raw = fs::read_to_string(&path).context("reading the archived report")?;
-    let mut report: Value =
-        serde_json::from_str(&raw).context("parsing the archived report as JSON")?;
+    let mut report = golden::parse_report(&raw).context("parsing the archived report")?;
 
     let (recomputed, removed) =
         golden::build_digest(&mut report).context("building the golden digest")?;

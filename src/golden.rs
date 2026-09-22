@@ -16,6 +16,251 @@ use serde_json::{json, Value};
 
 use crate::hashing::Digest;
 
+/// Parses an archived report's raw JSON text into a `Value`, then repairs
+/// the float leaves this digest reads (`scores.*.erosion`,
+/// `scores.*.verbosity.ratio`, `top25[].mass`) against the same raw text.
+///
+/// This crate's pinned `serde_json` release (`Cargo.toml`, outside this
+/// workstream's fenced scope) parses at least one real literal in the
+/// `java-fixture-01` archive one ULP off its correctly-rounded value:
+/// `scores.java.verbosity.ratio`'s `0.009966469683777625` round-trips back
+/// out as `0.009966469683777623` through `serde_json::Value`, while Rust's
+/// own `str::parse::<f64>` gets the same literal exactly right (see
+/// `test_parse_report_corrects_a_known_serde_json_float_rounding_bug`
+/// below, which reproduces this exact literal). `float_roundtrip` /
+/// `arbitrary_precision` are `serde_json`'s own fixes for this, but both
+/// require an edit to `Cargo.toml`, which this workstream may not touch;
+/// re-deriving these specific leaves from the raw text is the compliant
+/// workaround. Every other field this digest reads is an integer or string,
+/// neither of which this bug touches.
+pub(crate) fn parse_report(raw: &str) -> Result<Value> {
+    let mut report: Value =
+        serde_json::from_str(raw).context("parsing the archived report as JSON")?;
+    correct_scores_floats(&mut report, raw)?;
+    correct_top25_masses_keyed(&mut report, raw)?;
+    Ok(report)
+}
+
+/// Parses a **committed digest**'s raw JSON text (the already-reduced
+/// `tests/golden/java-fixture-01.digest.json` shape, not the archived
+/// report) and applies the same raw-text float repair `parse_report` does.
+/// A plain `serde_json::from_str` on the committed file hits the exact same
+/// pinned-`serde_json` rounding bug `parse_report` works around -- the
+/// digest file is JSON text like any other, and re-parsing it with the
+/// buggy parser reintroduces the bug on read, even though the file on disk
+/// already holds the correctly-rounded literal. `top25` here is already
+/// reduced to bare `[cc, sloc, mass]` triples (no `mass` key survives
+/// `build_digest`), so the mass leaves are found positionally rather than
+/// by key -- see `correct_top25_masses_positional`.
+pub(crate) fn parse_digest(raw: &str) -> Result<Value> {
+    let mut digest: Value =
+        serde_json::from_str(raw).context("parsing the committed digest as JSON")?;
+    correct_scores_floats(&mut digest, raw)?;
+    correct_top25_masses_positional(&mut digest, raw)?;
+    Ok(digest)
+}
+
+/// How far a raw-text-recovered float may drift from what `serde_json`
+/// itself parsed before it stops looking like the expected sub-ULP rounding
+/// correction and starts looking like this function found the wrong number
+/// entirely (a misaligned key search, for instance). Generous relative to a
+/// true ULP (~1e-16 for values in this report's range), tight relative to a
+/// real mismatch.
+const MAX_RELATIVE_CORRECTION: f64 = 1e-9;
+
+/// Re-parses `scores.overall/java/js_ts.{erosion, verbosity.ratio}` from
+/// `raw`'s own text and overwrites `report`'s already-parsed values with
+/// the result. Each language's object is located independently from a
+/// fixed `scores`-object anchor, rather than chaining the search cursor
+/// across languages: the archived report writes them `overall`, `java`,
+/// `js_ts`, but the committed digest's `serde_json::Map` (a `BTreeMap`)
+/// serializes object keys sorted, so there `java` comes first. Only the
+/// two fields *within* one language's own object (`erosion` before
+/// `verbosity.ratio`) are guaranteed to stay in that relative order.
+fn correct_scores_floats(report: &mut Value, raw: &str) -> Result<()> {
+    let scores_start = find_key_pos(raw, "scores", 0)?;
+    for lang in ["overall", "java", "js_ts"] {
+        let lang_pos = find_key_pos(raw, lang, scores_start)?;
+        let (erosion, next) = number_for_key(raw, "erosion", lang_pos)?;
+        let (ratio, _) = number_for_key(raw, "ratio", next)?;
+
+        let language = report
+            .get_mut("scores")
+            .and_then(|scores| scores.get_mut(lang))
+            .with_context(|| format!("normalized report is missing scores.{lang}"))?;
+        overwrite_checked(&mut language["erosion"], erosion)?;
+        overwrite_checked(&mut language["verbosity"]["ratio"], ratio)?;
+    }
+    Ok(())
+}
+
+/// Re-parses every `top25[].mass` from `raw`'s own text, in the array's own
+/// order (JSON arrays -- unlike `serde_json`'s `BTreeMap`-backed objects --
+/// preserve document order in both the raw text and the parsed `Value`, so
+/// a plain left-to-right walk of each stays aligned with the other), and
+/// overwrites `report`'s already-parsed values with the result.
+fn correct_top25_masses_keyed(report: &mut Value, raw: &str) -> Result<()> {
+    let entry_count = report
+        .get("top25")
+        .and_then(Value::as_array)
+        .context("report is missing a `top25` array")?
+        .len();
+
+    let mut cursor = find_key_pos(raw, "top25", 0)?;
+    let mut masses = Vec::with_capacity(entry_count);
+    for _ in 0..entry_count {
+        let (mass, next) = number_for_key(raw, "mass", cursor)?;
+        masses.push(mass);
+        cursor = next;
+    }
+
+    let entries = report
+        .get_mut("top25")
+        .and_then(Value::as_array_mut)
+        .context("report is missing a `top25` array")?;
+    for (entry, mass) in entries.iter_mut().zip(masses) {
+        overwrite_checked(&mut entry["mass"], mass)?;
+    }
+    Ok(())
+}
+
+/// Re-parses every `top25[i][2]` (the `mass` slot of each `[cc, sloc,
+/// mass]` triple) from `raw`'s own text, in the array's own order, and
+/// overwrites `digest`'s already-parsed values with the result. Unlike
+/// [`correct_top25_masses_keyed`], the committed digest's triples carry no
+/// key names, so each triple's three numbers are found positionally:
+/// skip to the first number after `[`, skip to the second, skip to (and
+/// keep) the third.
+fn correct_top25_masses_positional(digest: &mut Value, raw: &str) -> Result<()> {
+    let entry_count = digest
+        .get("top25")
+        .and_then(Value::as_array)
+        .context("digest is missing a `top25` array")?
+        .len();
+
+    let mut cursor = find_key_pos(raw, "top25", 0)?;
+    let mut masses = Vec::with_capacity(entry_count);
+    for _ in 0..entry_count {
+        cursor = skip_to_number(raw, cursor);
+        let (_cc, next) = number_after(raw, cursor)?;
+        cursor = skip_to_number(raw, next);
+        let (_sloc, next) = number_after(raw, cursor)?;
+        cursor = skip_to_number(raw, next);
+        let (mass, next) = number_after(raw, cursor)?;
+        masses.push(mass);
+        cursor = next;
+    }
+
+    let entries = digest
+        .get_mut("top25")
+        .and_then(Value::as_array_mut)
+        .context("digest is missing a `top25` array")?;
+    for (entry, mass) in entries.iter_mut().zip(masses) {
+        let triple = entry
+            .as_array_mut()
+            .context("a top25 entry is not a [cc, sloc, mass] triple")?;
+        let slot = triple
+            .get_mut(2)
+            .context("a top25 entry has fewer than 3 elements")?;
+        overwrite_checked(slot, mass)?;
+    }
+    Ok(())
+}
+
+/// Skips forward from `from` past any character that cannot start a JSON
+/// number (whitespace, `,`, `[`, `]`), stopping at the first digit or `-`.
+fn skip_to_number(raw: &str, from: usize) -> usize {
+    let bytes = raw.as_bytes();
+    let mut i = from;
+    while i < bytes.len() && bytes[i] != b'-' && !bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    i
+}
+
+/// Overwrites `*slot` (a `serde_json`-parsed number) with `corrected`,
+/// after checking the two agree to within [`MAX_RELATIVE_CORRECTION`] --
+/// the guard that turns a raw-text search that landed on the wrong key into
+/// a loud error instead of a silently wrong digest.
+fn overwrite_checked(slot: &mut Value, corrected: f64) -> Result<()> {
+    let original = slot
+        .as_f64()
+        .context("expected a float at the location being corrected")?;
+    let tolerance = original.abs() * MAX_RELATIVE_CORRECTION;
+    anyhow::ensure!(
+        (corrected - original).abs() <= tolerance,
+        "raw-text float recovery landed on an implausible value: \
+         serde_json parsed {original}, raw text search found {corrected}"
+    );
+    *slot = json!(corrected);
+    Ok(())
+}
+
+/// Finds the byte offset just past the literal `"key"` (its closing quote)
+/// at or after `from`. Returning the position *after* the key, rather than
+/// at its opening quote, matters for a key like `"top25"`, whose own text
+/// contains digits: a scan for the next number that started inside the key
+/// text itself would misread `25` from the key name as the first number of
+/// the value that follows.
+fn find_key_pos(raw: &str, key: &str, from: usize) -> Result<usize> {
+    let pattern = format!("\"{key}\"");
+    raw[from..]
+        .find(pattern.as_str())
+        .map(|offset| from + offset + pattern.len())
+        .with_context(|| format!("could not find key `{key}` at or after byte {from}"))
+}
+
+/// Finds `"key"`'s value, assuming it is a bare JSON number, at or after
+/// `from`, correctly rounded via `str::parse`. Returns the value and the
+/// byte offset just past the number token, so callers can chain searches
+/// forward without ever searching backward into text already consumed.
+fn number_for_key(raw: &str, key: &str, from: usize) -> Result<(f64, usize)> {
+    let key_pos = find_key_pos(raw, key, from)?;
+    let colon_pos = raw[key_pos..]
+        .find(':')
+        .map(|offset| key_pos + offset + 1)
+        .with_context(|| format!("no `:` after key `{key}` at byte {key_pos}"))?;
+    number_after(raw, colon_pos)
+}
+
+/// Parses the JSON number token starting at or after `pos` (skipping
+/// leading whitespace), and returns it plus the byte offset just past it.
+fn number_after(raw: &str, pos: usize) -> Result<(f64, usize)> {
+    let bytes = raw.as_bytes();
+    let mut i = pos;
+    while i < bytes.len() && (bytes[i] as char).is_whitespace() {
+        i += 1;
+    }
+    let start = i;
+    if i < bytes.len() && bytes[i] == b'-' {
+        i += 1;
+    }
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i < bytes.len() && bytes[i] == b'.' {
+        i += 1;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+    }
+    if i < bytes.len() && (bytes[i] == b'e' || bytes[i] == b'E') {
+        i += 1;
+        if i < bytes.len() && (bytes[i] == b'+' || bytes[i] == b'-') {
+            i += 1;
+        }
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+    }
+    anyhow::ensure!(start < i, "expected a JSON number at byte {pos}");
+    let token = &raw[start..i];
+    let value = token
+        .parse()
+        .with_context(|| format!("parsing raw JSON number literal {token:?}"))?;
+    Ok((value, i))
+}
+
 /// The neutral label that replaces `scan.target`'s absolute checkout path.
 pub(crate) const LABEL: &str = "java-fixture-01";
 
@@ -244,6 +489,8 @@ mod tests {
     /// pass while the real strip missed a quarter of the archived
     /// report's occurrences) and that hashing runs on the already
     /// normalized value, not the raw one.
+    ///
+    /// `build_digest` does not exist yet: this is WS-4's red commit.
     #[test]
     fn test_normalization_strips_excerpts_and_the_absolute_target() {
         let mut report = json!({
@@ -298,9 +545,6 @@ mod tests {
     /// via plain `serde_json::from_str::<Value>`, `0.009966469683777625`
     /// round-trips out as `0.009966469683777623`, one ULP low. Proves
     /// `parse_report` recovers the correctly-rounded value instead.
-    ///
-    /// `parse_report` does not exist yet: this is the red half of this
-    /// discovered-bug fix.
     #[test]
     fn test_parse_report_corrects_a_known_serde_json_float_rounding_bug() {
         let raw = r#"{
@@ -344,9 +588,6 @@ mod tests {
     /// digest**, whose `top25` triples carry no `mass` key to search for
     /// (`build_digest` already reduced them to bare `[cc, sloc, mass]`
     /// arrays) -- `parse_digest` must recover the third slot positionally.
-    ///
-    /// `parse_digest` does not exist yet: this is the red half of this
-    /// discovered-bug fix.
     #[test]
     fn test_parse_digest_corrects_a_known_serde_json_float_rounding_bug_in_top25() {
         let raw = r#"{
