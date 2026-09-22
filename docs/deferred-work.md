@@ -4,7 +4,6 @@
 
 | Date | Run | Item | Why deferred | Source |
 |---|---|---|---|---|
-| 2026-09-18 | 2026-09-18-0924-code-quality-scanner | extract D11 executable-line-counting logic into one shared function instead of three hand-maintained copies (`src/metrics/mod.rs`, `src/clones/mod.rs`, `src/rules/mod.rs:335-380`/`:420-425`) | works correctly as three copies today; consolidating touches 3 files outside any single workstream's scope | triage-ws4-r1, reaffirmed triage-ws4-r2/r4 |
 | 2026-09-18 | 2026-09-18-0924-code-quality-scanner | fix the pre-existing `position`→`rposition` mutation survivor at `src/rules/mod.rs:313` | unpinned-but-correct mutant predating WS-4's diff; no WS-4 round touched this line | triage-ws4-r4 |
 | 2026-09-18 | 2026-09-18-0924-code-quality-scanner | restore/pin the dropped `language == LanguageFamily::JsTs` guard mutant at `src/rules/mod.rs:339` (Java also has `interface_declaration`, reachable via a Java 16+ local interface) | unpinned-but-correct mutant predating WS-4's diff | triage-ws4-r4 |
 | 2026-09-18 | 2026-09-18-0924-code-quality-scanner | pin `always_returns`'s `.last()`→`.first()` mutation survivor at `src/rules/mod.rs:389`, and verify `docs/wasteful-rules.md:49`'s "a block whose last direct statement is a terminator" claim against multi-statement `if` branches (only single-statement branches are fixtured today) | unpinned-but-correct mutant predating WS-4's diff; the doc claim rides on it and is unverified for the untested shape | triage-ws4-r4 |
