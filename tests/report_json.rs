@@ -1,0 +1,494 @@
+//! WS-5: `report.json` — one assertion per bullet-5 item, the scan-settings
+//! round trip (D6/D17), the D18 incomplete marker, and the bracket-exact
+//! source spans acceptance criterion.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use agent_slope::model::{RemoteTarget, Revision, ScanSettings, Target, DEFAULT_MIN_CLONE_LINES};
+use agent_slope::pipeline::{self, PipelineOutput};
+use agent_slope::report::{self, ReportInput};
+
+fn fixture_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/report")
+}
+
+/// Runs the full pipeline against `root`, writing the two reports into a
+/// fresh temp directory that is kept alive for the caller's lifetime.
+fn run_scan(
+    root: &Path,
+    configure: impl FnOnce(&mut ScanSettings),
+) -> (tempfile::TempDir, PipelineOutput) {
+    let output_dir = tempfile::tempdir().expect("tempdir");
+    let mut settings = ScanSettings {
+        output: output_dir.path().to_path_buf(),
+        include_tests: true,
+        exclude: Vec::new(),
+        min_clone_lines: DEFAULT_MIN_CLONE_LINES,
+    };
+    configure(&mut settings);
+    let target_input = root
+        .to_str()
+        .expect("fixture path is valid UTF-8")
+        .to_string();
+    let output = pipeline::run(&target_input, settings).expect("pipeline run should succeed");
+    (output_dir, output)
+}
+
+#[test]
+fn test_json_report_contains_every_required_section() {
+    let (_dir, output) = run_scan(&fixture_root(), |_| {});
+    let json_text =
+        fs::read_to_string(output.settings.output.join("report.json")).expect("report.json exists");
+    let value: serde_json::Value = serde_json::from_str(&json_text).expect("valid JSON");
+
+    // Overall and per-language-family scores.
+    for family in ["overall", "java", "js_ts"] {
+        let scores = &value["scores"][family];
+        assert!(scores["erosion"].is_number(), "{family} erosion missing");
+        assert!(
+            scores["verbosity"]["ratio"].is_number(),
+            "{family} verbosity ratio missing"
+        );
+    }
+
+    // Per-family verbosity is the rules stage's own published score, not an
+    // interchangeable slot: value-level equality against
+    // `output.rules.verbosity`, plus java != js_ts so a swap is detectable.
+    for (family, published) in [
+        ("overall", &output.rules.verbosity.overall),
+        ("java", &output.rules.verbosity.java),
+        ("js_ts", &output.rules.verbosity.js_ts),
+    ] {
+        assert_eq!(
+            value["scores"][family]["verbosity"]["flagged_lines"]
+                .as_u64()
+                .unwrap(),
+            published.flagged_lines as u64,
+            "{family} verbosity flagged_lines should match the rules stage's own score"
+        );
+    }
+    assert_ne!(
+        output.rules.verbosity.java.flagged_lines, output.rules.verbosity.js_ts.flagged_lines,
+        "fixture should distinguish java and js_ts verbosity so a slot swap is detectable"
+    );
+
+    // Rule IDs and source excerpts.
+    let findings = value["findings"].as_array().expect("findings array");
+    assert!(!findings.is_empty(), "fixture should trigger rule findings");
+    assert_eq!(findings.len(), output.rules.findings.len());
+    for (index, finding) in findings.iter().enumerate() {
+        assert!(finding["rule_id"].is_string());
+        assert!(finding["location"]["excerpt"].is_string());
+        assert!(!finding["location"]["excerpt"].as_str().unwrap().is_empty());
+
+        // Value-level equality against the rules stage's own published
+        // finding at the same index (D20/D22): a family_label swap or a
+        // dropped flagged-line does not fool this.
+        let expected = &output.rules.findings[index];
+        let path = finding["location"]["relative_path"].as_str().unwrap();
+        let language = finding["language"].as_str().unwrap();
+        assert_eq!(
+            language == "java",
+            path.ends_with(".java"),
+            "a finding's language should match its file extension: {finding:?}"
+        );
+        assert_eq!(finding["rule_id"].as_str().unwrap(), expected.rule_id);
+        let flagged_lines: Vec<usize> = finding["flagged_lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|line| line.as_u64().unwrap() as usize)
+            .collect();
+        assert_eq!(flagged_lines, expected.flagged_lines);
+    }
+
+    // Duplicate locations.
+    let duplicates = value["duplicates"].as_array().expect("duplicates array");
+    assert!(
+        !duplicates.is_empty(),
+        "fixture should trigger a clone group"
+    );
+    assert_eq!(duplicates.len(), output.clones.groups.len());
+    for (index, group) in duplicates.iter().enumerate() {
+        let locations = group["locations"].as_array().expect("locations array");
+        assert!(
+            locations.len() >= 2,
+            "a clone group has at least two occurrences"
+        );
+        for location in locations {
+            assert!(location["relative_path"].is_string());
+        }
+        assert_eq!(
+            group["redundant_lines"].as_u64().unwrap() as usize,
+            output.clones.groups[index].redundant_lines,
+            "redundant_lines should match the clones stage's own published group"
+        );
+    }
+
+    // Top-25 functions.
+    let top25 = value["top25"].as_array().expect("top25 array");
+    assert!(
+        !top25.is_empty(),
+        "fixture should have at least one callable"
+    );
+    assert_eq!(top25.len(), output.metrics.top25.len());
+    for (index, callable) in top25.iter().enumerate() {
+        assert!(callable["name"].is_string());
+        assert!(callable["cc"].is_number());
+
+        // Value-level equality against the metrics stage's own published
+        // top-25 row at the same index (D8/D13).
+        let expected = &output.metrics.top25[index];
+        let path = callable["location"]["relative_path"].as_str().unwrap();
+        let language = callable["language"].as_str().unwrap();
+        assert_eq!(
+            language == "java",
+            path.ends_with(".java"),
+            "a top-25 row's language should match its file extension: {callable:?}"
+        );
+        assert_eq!(callable["cc"].as_u64().unwrap() as u32, expected.cc);
+        assert_eq!(callable["sloc"].as_u64().unwrap() as usize, expected.sloc);
+        assert!((callable["mass"].as_f64().unwrap() - expected.mass).abs() < 1e-9);
+    }
+
+    // Scan settings.
+    assert!(value["scan"]["target"].is_string());
+    assert!(value["scan"]["include_tests"].is_boolean());
+    assert!(value["scan"]["exclude"].is_array());
+    assert!(value["scan"]["min_clone_lines"].is_number());
+    assert!(value["scan"]["revision"].is_object());
+    assert!(
+        value["scan"]["revision"]["dirty"].is_boolean(),
+        "a scan inside a git work tree publishes the D6 dirty flag"
+    );
+
+    // Skipped files.
+    let skipped = value["skipped_files"]
+        .as_array()
+        .expect("skipped_files array");
+    assert!(
+        skipped
+            .iter()
+            .any(|file| file["reason"] == "parse_syntax_error"),
+        "Broken.java should be recorded with its parse-failure reason: {skipped:?}"
+    );
+
+    // Assumptions-mandated adaptation label (non-equivalence disclosure).
+    assert_eq!(
+        value["adaptation"]["cc_rules_doc"].as_str().unwrap(),
+        "docs/cc-rules.md"
+    );
+    assert!(!value["adaptation"]["summary"].as_str().unwrap().is_empty());
+}
+
+fn fixture_erosion_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/report_erosion")
+}
+
+#[test]
+fn test_erosion_is_computed_per_language_family() {
+    // The only other fixture (`tests/fixtures/report`) has no callable with
+    // `cc > CC_EROSION_THRESHOLD`, so every family's erosion is `0.0` there
+    // — a `java_callables`/`js_ts_callables` slot swap (D20) is
+    // undetectable on it. This fixture has one Java callable with 11 `if`
+    // statements (`cc == 12`) and no JS/TS file at all, so java erosion
+    // must be nonzero while js_ts erosion stays exactly zero.
+    let (_dir, output) = run_scan(&fixture_erosion_root(), |_| {});
+    let json_text =
+        fs::read_to_string(output.settings.output.join("report.json")).expect("report.json exists");
+    let value: serde_json::Value = serde_json::from_str(&json_text).expect("valid JSON");
+
+    assert!(
+        value["scores"]["java"]["erosion"].as_f64().unwrap() > 0.0,
+        "the high-complexity Java callable should erode the java score: {value}"
+    );
+    assert_eq!(
+        value["scores"]["js_ts"]["erosion"].as_f64().unwrap(),
+        0.0,
+        "a fixture with no JS/TS callable should have zero js_ts erosion: {value}"
+    );
+    assert_eq!(
+        value["scores"]["overall"]["erosion"].as_f64().unwrap(),
+        output.metrics.erosion,
+        "overall erosion is WS-2's own published value"
+    );
+}
+
+#[test]
+fn test_erosion_zero_is_never_rendered_as_negative_zero() {
+    // `metrics::erosion` sums an empty filtered slice when no callable
+    // exceeds the CC threshold; on this toolchain `Iterator::sum` over an
+    // empty `f64` sequence is `-0.0`, and `-0.0 / total_mass` stays `-0.0`.
+    // `-0.0 == 0.0` numerically, but a report literally printing
+    // "-0.0000" reads as a defect to a human, so the report layer
+    // normalizes the sign of an exact zero on display — it does not
+    // change any nonzero score.
+    let (_dir, output) = run_scan(&fixture_root(), |_| {});
+    let json_text =
+        fs::read_to_string(output.settings.output.join("report.json")).expect("report.json exists");
+    assert!(
+        !json_text.contains("-0.0"),
+        "no score should render as negative zero: {json_text}"
+    );
+}
+
+#[test]
+fn test_scan_settings_round_trip() {
+    // A fresh, never-git-initialized directory isolates this assertion from
+    // this repo's own ambient git state (this tree is a live git work tree
+    // shared by other workstreams' agents, so its `dirty`/`sha` are not
+    // this test's to depend on).
+    let source_dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        source_dir.path().join("Sample.java"),
+        "public class Sample { public void run() {} }\n",
+    )
+    .expect("write fixture file");
+
+    let (_dir, output) = run_scan(source_dir.path(), |settings| {
+        settings.include_tests = false;
+        settings.exclude = vec!["**/vendor/**".to_string(), "**/generated/**".to_string()];
+        settings.min_clone_lines = 42;
+    });
+
+    let scan = &output.report.scan;
+    assert!(!scan.include_tests);
+    assert_eq!(
+        scan.exclude,
+        vec!["**/vendor/**".to_string(), "**/generated/**".to_string()]
+    );
+    assert_eq!(scan.min_clone_lines, 42);
+    assert_eq!(scan.target, source_dir.path().to_str().unwrap().to_string());
+    assert_eq!(
+        scan.revision.unavailable_reason.as_deref(),
+        Some("not_a_git_repository")
+    );
+    assert_eq!(scan.revision.sha, None);
+    assert_eq!(scan.revision.dirty, None);
+
+    // A clean, fully-parseable scan is not incomplete (D18): hard-coding
+    // `incomplete: true` unconditionally would pass every other test here,
+    // since they all scan a fixture with a deliberate parse failure.
+    assert!(
+        !output.report.incomplete,
+        "a scan with no parse failure should not be marked incomplete"
+    );
+}
+
+#[test]
+fn test_incomplete_marker_set_on_parse_failure() {
+    let (_dir, output) = run_scan(&fixture_root(), |_| {});
+    assert!(
+        output.report.incomplete,
+        "Broken.java's syntax error should mark the report incomplete"
+    );
+
+    let broken = output
+        .report
+        .skipped_files
+        .iter()
+        .find(|file| file.relative_path == Path::new("src/Broken.java"))
+        .expect("Broken.java should be listed as skipped");
+    assert_eq!(broken.reason, "parse_syntax_error");
+}
+
+#[test]
+fn test_terminal_summary_carries_the_scores() {
+    // The terminal summary (main.rs prints `report::terminal_summary`) had
+    // zero test coverage: gutting it to an empty string kept the suite
+    // green. Spawn the built binary, capture stdout, and assert it carries
+    // the same numbers as that same run's own `report.json` — derived from
+    // the JSON, not a pasted literal, so the two cannot silently diverge.
+    let output_dir = tempfile::tempdir().expect("tempdir");
+    let command_output = std::process::Command::new(env!("CARGO_BIN_EXE_agent_slope"))
+        .args(["scan", fixture_root().to_str().unwrap(), "--output"])
+        .arg(output_dir.path())
+        .output()
+        .expect("spawn agent_slope");
+    assert!(command_output.status.success());
+    let stdout = String::from_utf8(command_output.stdout).expect("stdout is valid UTF-8");
+
+    let json_text =
+        fs::read_to_string(output_dir.path().join("report.json")).expect("report.json exists");
+    let value: serde_json::Value = serde_json::from_str(&json_text).expect("valid JSON");
+
+    let overall_erosion = value["scores"]["overall"]["erosion"].as_f64().unwrap();
+    let overall_ratio = value["scores"]["overall"]["verbosity"]["ratio"]
+        .as_f64()
+        .unwrap();
+    let java_erosion = value["scores"]["java"]["erosion"].as_f64().unwrap();
+    let java_ratio = value["scores"]["java"]["verbosity"]["ratio"]
+        .as_f64()
+        .unwrap();
+    let js_ts_erosion = value["scores"]["js_ts"]["erosion"].as_f64().unwrap();
+    let js_ts_ratio = value["scores"]["js_ts"]["verbosity"]["ratio"]
+        .as_f64()
+        .unwrap();
+
+    // Asserting the whole labelled line (not just a bare number that could
+    // come from any family) pins each family to its own row: deleting a
+    // family's writeln! block, or swapping which family's numbers get
+    // printed on which line, both survived the bare-number checks this
+    // replaces.
+    assert!(
+        stdout.contains(&format!(
+            "  overall:  {overall_erosion:.4} / {overall_ratio:.4}\n"
+        )),
+        "stdout should carry the overall scores line: {stdout}"
+    );
+    assert!(
+        stdout.contains(&format!(
+            "  java:     {java_erosion:.4} / {java_ratio:.4}\n"
+        )),
+        "stdout should carry the java scores line: {stdout}"
+    );
+    assert!(
+        stdout.contains(&format!(
+            "  js_ts:    {js_ts_erosion:.4} / {js_ts_ratio:.4}\n"
+        )),
+        "stdout should carry the js_ts scores line: {stdout}"
+    );
+    assert!(
+        stdout.contains("Incomplete (a file failed to parse): true"),
+        "stdout should carry the incomplete marker: {stdout}"
+    );
+}
+
+#[test]
+fn test_a_parse_failure_is_not_fatal() {
+    // Exit code 0 despite the incomplete marker (D18): a parse failure
+    // degrades the scan, it does not fail it.
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_agent_slope"))
+        .args(["scan", fixture_root().to_str().unwrap(), "--output"])
+        .arg(tempfile::tempdir().expect("tempdir").path())
+        .status()
+        .expect("spawn agent_slope");
+    assert!(status.success(), "a parse failure alone must not be fatal");
+}
+
+#[cfg(unix)]
+#[test]
+fn test_unwritable_output_directory_is_fatal() {
+    // D18's third reserved fatal condition: an unwritable `--output`
+    // directory. main.rs's `create_dir_all` is a no-op on an already-
+    // existing directory, so the actual failure surfaces when `report::run`
+    // tries to write `report.json` into it.
+    use std::os::unix::fs::PermissionsExt;
+
+    let output_dir = tempfile::tempdir().expect("tempdir");
+    fs::set_permissions(output_dir.path(), fs::Permissions::from_mode(0o555))
+        .expect("set read-only permissions");
+
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_agent_slope"))
+        .args(["scan", fixture_root().to_str().unwrap(), "--output"])
+        .arg(output_dir.path())
+        .status()
+        .expect("spawn agent_slope");
+
+    // Restore the mode before the tempdir drops, so it can be cleaned up.
+    fs::set_permissions(output_dir.path(), fs::Permissions::from_mode(0o755))
+        .expect("restore permissions");
+
+    assert!(
+        !status.success(),
+        "an unwritable --output directory must be fatal"
+    );
+}
+
+#[test]
+fn test_source_spans_match_the_inspected_code() {
+    let (_dir, output) = run_scan(&fixture_root(), |_| {});
+    let report = &output.report;
+
+    // Findings and duplicate locations carry a real, possibly multi-line
+    // span (D22/D14): each one must bracket exactly the lines the rule (or
+    // clone detector) actually flagged, read back off disk.
+    for finding in &report.findings {
+        assert_bracket_exact(&fixture_root(), &finding.location);
+    }
+    for group in &report.duplicates {
+        for location in &group.locations {
+            assert_bracket_exact(&fixture_root(), location);
+        }
+    }
+
+    // Top-25 rows (D8's `Callable`) only publish a declaration line, not a
+    // body end line (see docs/report-format.md's "Top-25 span" note) — the
+    // excerpt is that single line, read back off disk, not the callable's
+    // whole body.
+    assert!(!report.top25.is_empty());
+    for callable in &report.top25 {
+        assert_eq!(
+            callable.location.start_line, callable.location.end_line,
+            "a top-25 row's span is its single declaration line: {callable:?}"
+        );
+        assert_bracket_exact(&fixture_root(), &callable.location);
+    }
+}
+
+fn assert_bracket_exact(root: &Path, location: &report::SourceLocation) {
+    let text = fs::read_to_string(root.join(&location.relative_path))
+        .expect("fixture file backing a location should be readable");
+    let lines: Vec<&str> = text.lines().collect();
+    let expected = lines[location.start_line - 1..location.end_line].join("\n");
+    assert_eq!(
+        location.excerpt, expected,
+        "{:?} does not bracket exactly the inspected code",
+        location
+    );
+}
+
+#[test]
+fn test_remote_target_links_point_at_the_scanned_revision() {
+    // No network access: `aggregate` is exercised directly with a
+    // hand-crafted `Target::Remote` and a known sha, so the D6 GitHub
+    // blob-URL construction is asserted deterministically.
+    let target = Target::Remote(RemoteTarget {
+        url: "https://github.com/an-owner/a-repo".to_string(),
+    });
+    let revision = Revision {
+        sha: Some("deadbeefcafe".to_string()),
+        dirty: Some(false),
+        unavailable_reason: None,
+    };
+    let (_dir, output) = run_scan(&fixture_root(), |_| {});
+    let input = ReportInput {
+        target: &target,
+        target_input: "https://github.com/an-owner/a-repo",
+        root: &fixture_root(),
+        revision: &revision,
+        settings: &output.settings,
+        discover: &output.discover,
+        parse_failures: &output.parse_failures,
+        metrics: &output.metrics,
+        clones: &output.clones,
+        rules: &output.rules,
+    };
+    let report = report::aggregate(&input);
+    let finding = report
+        .findings
+        .first()
+        .expect("fixture should have at least one finding");
+    assert!(finding.location.is_remote_link);
+    // Pinned so the encoded literal below is checked against a known path:
+    // `"` (0x22) sorts before `S`, so the XSS-payload-named fixture file is
+    // deterministically `findings[0]`.
+    assert_eq!(
+        finding.location.relative_path,
+        Path::new("src/\"><img onerror=1>.js")
+    );
+    // D6's blob URL percent-encodes each path segment (space, `"`, `<`, `>`
+    // are not valid in a URL path): the raw filename must not appear.
+    let expected_prefix =
+        "https://github.com/an-owner/a-repo/blob/deadbeefcafe/src/%22%3E%3Cimg%20onerror%3D1%3E.js";
+    assert!(
+        finding.location.link.starts_with(expected_prefix),
+        "{} should start with {expected_prefix}",
+        finding.location.link
+    );
+    assert!(finding.location.link.ends_with(&format!(
+        "#L{}-L{}",
+        finding.location.start_line, finding.location.end_line
+    )));
+}
