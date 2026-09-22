@@ -72,10 +72,28 @@ enum ArchiveGate {
 }
 
 fn archive_gate() -> ArchiveGate {
-    match std::env::var_os(ARCHIVED_REPORT_ENV_VAR) {
+    classify_archive_gate(std::env::var_os(ARCHIVED_REPORT_ENV_VAR))
+}
+
+/// Pure classification of a possibly-absent `NSD_ARCHIVED_REPORT` value,
+/// split out from `archive_gate`'s `env::var_os` call so `None` (the var is
+/// unset) and `Some("")` (the var is set but empty) can each be asserted
+/// directly, rather than only observed indirectly through whatever the test
+/// process's own environment happens to carry when it runs.
+fn classify_archive_gate(raw: Option<OsString>) -> ArchiveGate {
+    match raw {
         Some(path) if !path.is_empty() => ArchiveGate::Resolved(PathBuf::from(path)),
         _ => ArchiveGate::Pending,
     }
+}
+
+/// The notice printed on every pending arm below -- extracted so the call
+/// sites cannot drift apart and so a test can assert its content once.
+fn pending_notice() -> String {
+    format!(
+        "PENDING: {ARCHIVED_REPORT_ENV_VAR} is unset -- java-fixture-01's \
+         reproducibility gate is pending, not passing, this run"
+    )
 }
 
 /// Recomputes the digest from the archived report and asserts it against
@@ -86,10 +104,7 @@ fn test_committed_digest_matches_the_archived_report() -> Result<()> {
     let path = match archive_gate() {
         ArchiveGate::Resolved(path) => path,
         ArchiveGate::Pending => {
-            println!(
-                "PENDING: {ARCHIVED_REPORT_ENV_VAR} is unset -- the java-fixture-01 \
-                 reproducibility gate is not exercised this run"
-            );
+            println!("{}", pending_notice());
             return Ok(());
         }
     };
@@ -149,10 +164,7 @@ fn test_committed_digest_matches_the_archived_report() -> Result<()> {
 fn test_gate_is_reported_pending_when_the_archive_is_absent() {
     match archive_gate() {
         ArchiveGate::Pending => {
-            println!(
-                "PENDING: {ARCHIVED_REPORT_ENV_VAR} is unset -- java-fixture-01's \
-                 reproducibility gate is pending, not passing, this run"
-            );
+            println!("{}", pending_notice());
         }
         ArchiveGate::Resolved(_) => {
             // The archive-backed leg is running in this invocation; the
