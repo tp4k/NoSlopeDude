@@ -5,6 +5,7 @@
 pub mod cli;
 pub mod discover;
 pub(crate) mod exec_lines;
+pub(crate) mod hashing;
 pub mod model;
 pub mod pipeline;
 pub mod target;
