@@ -5,11 +5,11 @@
 //! wasteful-code rules, not a port and not a claim of numerical
 //! equivalence — see `docs/wasteful-rules.md`.
 //!
-//! D11's per-line "named, non-comment leaf" rule is reimplemented here
-//! (`is_executable_leaf`, `for_each_descendant`) rather than imported: WS-2's
-//! version (`src/metrics/mod.rs`) is private and Do-not-touch for this
-//! stream, the same reason WS-3 gives for its own independent copy
-//! (`src/clones/mod.rs`).
+//! D11's per-line "named, non-comment leaf" rule (`is_comment_kind`,
+//! `collect_executable_lines`, and the `is_executable_leaf` predicate
+//! `collect_executable_lines` applies) is shared, imported from
+//! `src/exec_lines.rs`; only `for_each_descendant`, this module's own
+//! traversal helper, stays independently implemented here.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
@@ -18,6 +18,7 @@ use rayon::prelude::*;
 use tree_sitter::Node;
 
 use crate::clones::redundant_occurrences;
+use crate::exec_lines::{collect_executable_lines, is_comment_kind};
 use crate::model::{
     CloneGroup, ClonesResult, FileLanguageLines, LanguageFamily, MetricsResult, RuleFinding,
     RuleId, RulesResult, VerbosityScore, VerbosityScores,
@@ -399,43 +400,6 @@ fn statement_children<'tree>(node: Node<'tree>, language: LanguageFamily) -> Vec
     node.named_children(&mut cursor)
         .filter(|child| !is_comment_kind(child.kind(), language))
         .collect()
-}
-
-/// D11 (reimplemented, see the module doc comment): every distinct 1-based
-/// source line within `node`'s span that has at least one leaf token
-/// belonging to a named, non-comment node — so `node`'s own closing-brace
-/// line, if it holds nothing else, is excluded.
-fn collect_executable_lines(node: Node, language: LanguageFamily, lines: &mut BTreeSet<usize>) {
-    for_each_descendant(node, |leaf| {
-        if is_executable_leaf(leaf, language) {
-            let start = leaf.start_position().row + 1;
-            let end = leaf.end_position().row + 1;
-            for line in start..=end {
-                lines.insert(line);
-            }
-        }
-    });
-}
-
-const BARE_CONTROL_FLOW_KINDS: &[&str] =
-    &["break_statement", "continue_statement", "return_statement"];
-
-fn is_bare_control_flow(node: Node) -> bool {
-    BARE_CONTROL_FLOW_KINDS.contains(&node.kind()) && node.named_child_count() == 0
-}
-
-fn is_executable_leaf(node: Node, language: LanguageFamily) -> bool {
-    if !node.is_named() || is_comment_kind(node.kind(), language) {
-        return false;
-    }
-    node.child_count() == 0 || is_bare_control_flow(node)
-}
-
-fn is_comment_kind(kind: &str, language: LanguageFamily) -> bool {
-    match language {
-        LanguageFamily::Java => matches!(kind, "line_comment" | "block_comment"),
-        LanguageFamily::JsTs => kind == "comment",
-    }
 }
 
 /// Iterative pre-order traversal via a single reused `TreeCursor` (no

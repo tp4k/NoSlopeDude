@@ -12,6 +12,7 @@ use std::cmp::Ordering;
 use rayon::prelude::*;
 use tree_sitter::{Node, TreeCursor};
 
+use crate::exec_lines::is_executable_leaf;
 use crate::model::{
     Callable, FileScanSummary, LanguageFamily, MetricsResult, SyntaxBlock, CC_EROSION_THRESHOLD,
 };
@@ -399,34 +400,6 @@ fn operator_text<'a>(node: Node, source: &'a str) -> &'a str {
     node.child_by_field_name("operator")
         .and_then(|operator| operator.utf8_text(source.as_bytes()).ok())
         .unwrap_or("")
-}
-
-/// D11: a leaf token's line counts toward SLOC when the leaf is named and
-/// is not a comment.
-fn is_comment_kind(kind: &str, language: LanguageFamily) -> bool {
-    match language {
-        LanguageFamily::Java => matches!(kind, "line_comment" | "block_comment"),
-        LanguageFamily::JsTs => kind == "comment",
-    }
-}
-
-/// Node kinds whose *bare* form (no label, no returned expression) has only
-/// anonymous keyword/`;` children, so the generic `child_count() == 0` leaf
-/// check misses them entirely — undercounting a line holding only `break;`,
-/// `continue;` or `return;`. A `return expr;` still isn't matched here since
-/// its own line is already covered by `expr`'s leaf tokens.
-const BARE_CONTROL_FLOW_KINDS: &[&str] =
-    &["break_statement", "continue_statement", "return_statement"];
-
-fn is_bare_control_flow(node: Node) -> bool {
-    BARE_CONTROL_FLOW_KINDS.contains(&node.kind()) && node.named_child_count() == 0
-}
-
-fn is_executable_leaf(node: Node, language: LanguageFamily) -> bool {
-    if !node.is_named() || is_comment_kind(node.kind(), language) {
-        return false;
-    }
-    node.child_count() == 0 || is_bare_control_flow(node)
 }
 
 /// Every `{ … }` scope block in a file — module level and inside a

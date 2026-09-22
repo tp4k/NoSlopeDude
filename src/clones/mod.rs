@@ -7,12 +7,12 @@
 //! the first occurrence (D14). `docs/clone-detection.md` documents the
 //! algorithm; this module implements it.
 //!
-//! The D11 per-line "named, non-comment leaf" rule that measures a block's
-//! source lines is reimplemented here (`is_executable_leaf`,
-//! `accumulate_line`) rather than imported: WS-2's version
-//! (`src/metrics/mod.rs`) is private, and this stream's Do-not-touch
-//! forbids editing WS-2's files to expose it — see round 1's report,
-//! Refactor requests.
+//! D11's per-line "named, non-comment leaf" rule that measures a block's
+//! source lines is shared: `is_executable_leaf` and `is_comment_kind` are
+//! imported from `src/exec_lines.rs`. `accumulate_line` stays
+//! independently implemented here — it counts a run's total lines with a
+//! `last_counted_line` watermark, a different contract from
+//! `exec_lines`'s distinct-line `BTreeSet`.
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
@@ -22,6 +22,7 @@ use std::path::PathBuf;
 use rayon::prelude::*;
 use tree_sitter::Node;
 
+use crate::exec_lines::{is_comment_kind, is_executable_leaf};
 use crate::model::{CloneGroup, CloneLocation, ClonesResult, LanguageFamily};
 use crate::parse::ParsedFile;
 
@@ -452,31 +453,6 @@ fn family_prefix(language: LanguageFamily) -> &'static str {
     match language {
         LanguageFamily::Java => "java",
         LanguageFamily::JsTs => "js_ts",
-    }
-}
-
-/// D11's per-line rule (reimplemented, see the module doc comment):
-/// distinct 1-based source lines across a run's statements that contain at
-/// least one leaf token belonging to a named node and not a comment,
-/// including the documented bare `break`/`continue`/`return` exception.
-const BARE_CONTROL_FLOW_KINDS: &[&str] =
-    &["break_statement", "continue_statement", "return_statement"];
-
-fn is_bare_control_flow(node: Node) -> bool {
-    BARE_CONTROL_FLOW_KINDS.contains(&node.kind()) && node.named_child_count() == 0
-}
-
-fn is_executable_leaf(node: Node, language: LanguageFamily) -> bool {
-    if !node.is_named() || is_comment_kind(node.kind(), language) {
-        return false;
-    }
-    node.child_count() == 0 || is_bare_control_flow(node)
-}
-
-fn is_comment_kind(kind: &str, language: LanguageFamily) -> bool {
-    match language {
-        LanguageFamily::Java => matches!(kind, "line_comment" | "block_comment"),
-        LanguageFamily::JsTs => kind == "comment",
     }
 }
 

@@ -5,12 +5,86 @@
 //! definition. This is also the function M0b's IR lowers to as its single
 //! `executable` rule (`nsd-plan-final.md` M0a step 2).
 
+use std::collections::BTreeSet;
+
+use tree_sitter::Node;
+
+use crate::model::LanguageFamily;
+
+/// D11: a leaf token's line counts toward SLOC when the leaf is named and
+/// is not a comment.
+pub(crate) fn is_comment_kind(kind: &str, language: LanguageFamily) -> bool {
+    match language {
+        LanguageFamily::Java => matches!(kind, "line_comment" | "block_comment"),
+        LanguageFamily::JsTs => kind == "comment",
+    }
+}
+
+/// Node kinds whose *bare* form (no label, no returned expression) has only
+/// anonymous keyword/`;` children, so the generic `child_count() == 0` leaf
+/// check misses them entirely — undercounting a line holding only `break;`,
+/// `continue;` or `return;`. A `return expr;` still isn't matched here since
+/// its own line is already covered by `expr`'s leaf tokens.
+const BARE_CONTROL_FLOW_KINDS: &[&str] =
+    &["break_statement", "continue_statement", "return_statement"];
+
+fn is_bare_control_flow(node: Node) -> bool {
+    BARE_CONTROL_FLOW_KINDS.contains(&node.kind()) && node.named_child_count() == 0
+}
+
+pub(crate) fn is_executable_leaf(node: Node, language: LanguageFamily) -> bool {
+    if !node.is_named() || is_comment_kind(node.kind(), language) {
+        return false;
+    }
+    node.child_count() == 0 || is_bare_control_flow(node)
+}
+
+/// D11: every distinct 1-based source line within `node`'s span that has
+/// at least one leaf token belonging to a named, non-comment node — so
+/// `node`'s own closing-brace line, if it holds nothing else, is excluded.
+pub(crate) fn collect_executable_lines(
+    node: Node,
+    language: LanguageFamily,
+    lines: &mut BTreeSet<usize>,
+) {
+    for_each_descendant(node, |leaf| {
+        if is_executable_leaf(leaf, language) {
+            let start = leaf.start_position().row + 1;
+            let end = leaf.end_position().row + 1;
+            for line in start..=end {
+                lines.insert(line);
+            }
+        }
+    });
+}
+
+/// Iterative pre-order traversal via a single reused `TreeCursor` (no
+/// native call-stack growth): visits `root` and every descendant. Private
+/// to this module — `collect_executable_lines`'s own traversal, not shared
+/// with the other modules' independent traversal helpers.
+fn for_each_descendant<'tree>(root: Node<'tree>, mut visit: impl FnMut(Node<'tree>)) {
+    let mut cursor = root.walk();
+    loop {
+        visit(cursor.node());
+        if cursor.goto_first_child() {
+            continue;
+        }
+        loop {
+            if cursor.goto_next_sibling() {
+                break;
+            }
+            if !cursor.goto_parent() {
+                return;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use tree_sitter::{Node, Parser, Tree};
 
     use super::*;
-    use crate::model::LanguageFamily;
 
     fn parse_java(source: &str) -> Tree {
         let mut parser = Parser::new();
@@ -61,6 +135,9 @@ mod tests {
 
         let returning = parse_java("class C {\n    int m() {\n        return 1;\n    }\n}\n");
         let returning_statement = find_by_kind(returning.root_node(), "return_statement");
-        assert!(!is_executable_leaf(returning_statement, LanguageFamily::Java));
+        assert!(!is_executable_leaf(
+            returning_statement,
+            LanguageFamily::Java
+        ));
     }
 }
