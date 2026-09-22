@@ -10,9 +10,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use agent_slope::model::{ScanSettings, DEFAULT_MIN_CLONE_LINES};
-use agent_slope::pipeline::{self, PipelineOutput};
-use agent_slope::report::SourceLocation;
+use nsd::model::{ScanSettings, DEFAULT_MIN_CLONE_LINES};
+use nsd::pipeline::{self, PipelineOutput};
+use nsd::report::SourceLocation;
 
 /// One `if`, base CC 1 -> `cc == 2`. Three executable body lines (the `if`
 /// header and the two `return`s; both `}` lines are anonymous-only and do

@@ -3,13 +3,13 @@ use std::process::Command;
 
 use clap::Parser;
 
-use agent_slope::cli::{Cli, Command as CliCommand};
-use agent_slope::model::Target;
-use agent_slope::target::classify;
+use nsd::cli::{Cli, Command as CliCommand};
+use nsd::model::Target;
+use nsd::target::classify;
 
 #[test]
 fn test_min_clone_lines_defaults_to_10() -> anyhow::Result<()> {
-    let cli = Cli::try_parse_from(["agent_slope", "scan", "some/path", "--output", "out"])?;
+    let cli = Cli::try_parse_from(["nsd", "scan", "some/path", "--output", "out"])?;
     let CliCommand::Scan(args) = cli.command;
     assert_eq!(args.min_clone_lines, 10);
     Ok(())
@@ -17,7 +17,7 @@ fn test_min_clone_lines_defaults_to_10() -> anyhow::Result<()> {
 
 #[test]
 fn test_output_directory_is_required() {
-    let result = Cli::try_parse_from(["agent_slope", "scan", "some/path"]);
+    let result = Cli::try_parse_from(["nsd", "scan", "some/path"]);
     assert!(result.is_err());
 }
 
@@ -39,12 +39,8 @@ fn test_github_url_is_recognised_as_remote_target() {
 #[test]
 fn test_missing_local_path_is_fatal_nonzero() -> anyhow::Result<()> {
     let output_dir = tempfile::tempdir()?;
-    let status = Command::new(env!("CARGO_BIN_EXE_agent_slope"))
-        .args([
-            "scan",
-            "/definitely/does/not/exist/agent-slope-fixture",
-            "--output",
-        ])
+    let status = Command::new(env!("CARGO_BIN_EXE_nsd"))
+        .args(["scan", "/definitely/does/not/exist/nsd-fixture", "--output"])
         .arg(output_dir.path())
         .status()?;
     assert!(!status.success());

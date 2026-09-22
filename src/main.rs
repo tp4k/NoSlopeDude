@@ -3,10 +3,10 @@ use std::process::ExitCode;
 use anyhow::Context;
 use clap::Parser;
 
-use agent_slope::cli::{Cli, Command};
-use agent_slope::model::ScanSettings;
-use agent_slope::pipeline;
-use agent_slope::report;
+use nsd::cli::{Cli, Command};
+use nsd::model::ScanSettings;
+use nsd::pipeline;
+use nsd::report;
 
 fn main() -> ExitCode {
     let cli = Cli::parse();

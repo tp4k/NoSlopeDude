@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
-use agent_slope::model::{DiscoveredFile, LanguageFamily};
-use agent_slope::parse::{self, ParsedFile};
-use agent_slope::rules::{self, ALL_RULE_IDS};
+use nsd::model::{DiscoveredFile, LanguageFamily};
+use nsd::parse::{self, ParsedFile};
+use nsd::rules::{self, ALL_RULE_IDS};
 
 const JAVA: LanguageFamily = LanguageFamily::Java;
 const JS_TS: LanguageFamily = LanguageFamily::JsTs;

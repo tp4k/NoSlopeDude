@@ -1,11 +1,11 @@
 use std::path::{Path, PathBuf};
 
-use agent_slope::model::{
+use nsd::model::{
     CloneGroup, CloneLocation, ClonesResult, DiscoveredFile, FileLanguageLines, LanguageFamily,
     RuleFinding,
 };
-use agent_slope::parse;
-use agent_slope::{metrics, rules};
+use nsd::parse;
+use nsd::{metrics, rules};
 
 const JAVA: LanguageFamily = LanguageFamily::Java;
 const JS_TS: LanguageFamily = LanguageFamily::JsTs;

@@ -151,7 +151,7 @@ Sections, in document order, each its own `<section id="...">`:
 
 ## Terminal summary
 
-Printed to stdout by `agent_slope::report::terminal_summary`: the scan
+Printed to stdout by `nsd::report::terminal_summary`: the scan
 settings, the three families' erosion and verbosity ratio, the count of
 findings/duplicate groups/top-25 rows/skipped files, the `incomplete`
 marker, and the adaptation note — the same numbers as the two files, in

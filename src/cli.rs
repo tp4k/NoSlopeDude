@@ -7,10 +7,7 @@ use clap::{Parser, Subcommand};
 use crate::model::DEFAULT_MIN_CLONE_LINES;
 
 #[derive(Debug, Parser)]
-#[command(
-    name = "agent_slope",
-    about = "Code quality scanner for Java and JS/TS"
-)]
+#[command(name = "nsd", about = "Code quality scanner for Java and JS/TS")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,

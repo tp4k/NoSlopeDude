@@ -40,9 +40,9 @@ pub fn render_html(report: &Report) -> String {
     let mut out = String::new();
     let _ = write!(
         out,
-        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>agent_slope report</title><style>{STYLE}</style></head><body>"
+        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>nsd report</title><style>{STYLE}</style></head><body>"
     );
-    let _ = write!(out, "<h1>agent_slope scan report</h1>");
+    let _ = write!(out, "<h1>nsd scan report</h1>");
     render_scan_section(&mut out, report);
     render_scores_section(&mut out, report);
     render_findings_section(&mut out, report);

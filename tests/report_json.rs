@@ -5,9 +5,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use agent_slope::model::{RemoteTarget, Revision, ScanSettings, Target, DEFAULT_MIN_CLONE_LINES};
-use agent_slope::pipeline::{self, PipelineOutput};
-use agent_slope::report::{self, ReportInput};
+use nsd::model::{RemoteTarget, Revision, ScanSettings, Target, DEFAULT_MIN_CLONE_LINES};
+use nsd::pipeline::{self, PipelineOutput};
+use nsd::report::{self, ReportInput};
 
 fn fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/report")
@@ -301,11 +301,11 @@ fn test_terminal_summary_carries_the_scores() {
     // the same numbers as that same run's own `report.json` — derived from
     // the JSON, not a pasted literal, so the two cannot silently diverge.
     let output_dir = tempfile::tempdir().expect("tempdir");
-    let command_output = std::process::Command::new(env!("CARGO_BIN_EXE_agent_slope"))
+    let command_output = std::process::Command::new(env!("CARGO_BIN_EXE_nsd"))
         .args(["scan", fixture_root().to_str().unwrap(), "--output"])
         .arg(output_dir.path())
         .output()
-        .expect("spawn agent_slope");
+        .expect("spawn nsd");
     assert!(command_output.status.success());
     let stdout = String::from_utf8(command_output.stdout).expect("stdout is valid UTF-8");
 
@@ -359,11 +359,11 @@ fn test_terminal_summary_carries_the_scores() {
 fn test_a_parse_failure_is_not_fatal() {
     // Exit code 0 despite the incomplete marker (D18): a parse failure
     // degrades the scan, it does not fail it.
-    let status = std::process::Command::new(env!("CARGO_BIN_EXE_agent_slope"))
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_nsd"))
         .args(["scan", fixture_root().to_str().unwrap(), "--output"])
         .arg(tempfile::tempdir().expect("tempdir").path())
         .status()
-        .expect("spawn agent_slope");
+        .expect("spawn nsd");
     assert!(status.success(), "a parse failure alone must not be fatal");
 }
 
@@ -380,11 +380,11 @@ fn test_unwritable_output_directory_is_fatal() {
     fs::set_permissions(output_dir.path(), fs::Permissions::from_mode(0o555))
         .expect("set read-only permissions");
 
-    let status = std::process::Command::new(env!("CARGO_BIN_EXE_agent_slope"))
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_nsd"))
         .args(["scan", fixture_root().to_str().unwrap(), "--output"])
         .arg(output_dir.path())
         .status()
-        .expect("spawn agent_slope");
+        .expect("spawn nsd");
 
     // Restore the mode before the tempdir drops, so it can be cleaned up.
     fs::set_permissions(output_dir.path(), fs::Permissions::from_mode(0o755))

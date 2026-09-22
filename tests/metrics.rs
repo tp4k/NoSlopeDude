@@ -1,11 +1,9 @@
 use std::path::PathBuf;
 
-use agent_slope::metrics;
-use agent_slope::model::{
-    Callable, DiscoveredFile, LanguageFamily, ParseFailureReason, ScanSettings,
-};
-use agent_slope::parse::{self, ParsedFile};
-use agent_slope::pipeline;
+use nsd::metrics;
+use nsd::model::{Callable, DiscoveredFile, LanguageFamily, ParseFailureReason, ScanSettings};
+use nsd::parse::{self, ParsedFile};
+use nsd::pipeline;
 
 fn fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/metrics")
@@ -265,10 +263,7 @@ const DEEP_NESTING_LEVELS: usize = 15_000;
 
 #[test]
 fn test_deeply_nested_file_does_not_abort_the_scan() {
-    let dir = std::env::temp_dir().join(format!(
-        "agent_slope_ws2_deep_nest_test_{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("nsd_ws2_deep_nest_test_{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("create temp dir for the deep-nesting fixture");
 
     let opening = "[".repeat(DEEP_NESTING_LEVELS);

@@ -13,9 +13,9 @@
 use std::path::Path;
 use std::process::Command;
 
-use agent_slope::model::{ScanSettings, DEFAULT_MIN_CLONE_LINES};
-use agent_slope::pipeline;
-use agent_slope::report::SourceLocation;
+use nsd::model::{ScanSettings, DEFAULT_MIN_CLONE_LINES};
+use nsd::pipeline;
+use nsd::report::SourceLocation;
 
 const IS_NUMBER_URL: &str = "https://github.com/jonschlinkert/is-number";
 

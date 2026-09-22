@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use agent_slope::discover::discover;
-use agent_slope::model::{LanguageFamily, ScanSettings, SkipReason};
+use nsd::discover::discover;
+use nsd::model::{LanguageFamily, ScanSettings, SkipReason};
 
 fn fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/discover/sample")
@@ -16,7 +16,7 @@ fn settings(include_tests: bool, exclude: &[&str]) -> ScanSettings {
     }
 }
 
-fn discovered_paths(result: &agent_slope::discover::DiscoverResult) -> Vec<String> {
+fn discovered_paths(result: &nsd::discover::DiscoverResult) -> Vec<String> {
     let mut paths: Vec<String> = result
         .discovered
         .iter()
@@ -26,10 +26,7 @@ fn discovered_paths(result: &agent_slope::discover::DiscoverResult) -> Vec<Strin
     paths
 }
 
-fn reason_for(
-    result: &agent_slope::discover::DiscoverResult,
-    relative_path: &str,
-) -> Option<SkipReason> {
+fn reason_for(result: &nsd::discover::DiscoverResult, relative_path: &str) -> Option<SkipReason> {
     result
         .skipped
         .iter()

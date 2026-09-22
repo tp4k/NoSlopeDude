@@ -5,9 +5,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use agent_slope::model::{RemoteTarget, Revision, ScanSettings, Target, DEFAULT_MIN_CLONE_LINES};
-use agent_slope::pipeline::{self, PipelineOutput};
-use agent_slope::report::{self, ReportInput};
+use nsd::model::{RemoteTarget, Revision, ScanSettings, Target, DEFAULT_MIN_CLONE_LINES};
+use nsd::pipeline::{self, PipelineOutput};
+use nsd::report::{self, ReportInput};
 
 fn fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/report")

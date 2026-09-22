@@ -8,7 +8,7 @@
 # nonzero naming both URLs, per the observable acceptance.
 set -euo pipefail
 
-FIXTURE_ROOT="${1:-${TMPDIR:-/tmp}/agent_slope-perf-fixture}"
+FIXTURE_ROOT="${1:-${TMPDIR:-/tmp}/nsd-perf-fixture}"
 
 SPRING_URL="https://github.com/spring-projects/spring-framework"
 SPRING_SHA="e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9"

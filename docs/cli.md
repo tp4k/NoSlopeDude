@@ -3,7 +3,7 @@
 ## `scan`
 
 ```
-agent_slope scan <folder-or-github-url> --output <directory> [--include-tests] [--exclude <glob>]... [--min-clone-lines <n>]
+nsd scan <folder-or-github-url> --output <directory> [--include-tests] [--exclude <glob>]... [--min-clone-lines <n>]
 ```
 
 Scans a local folder or a public GitHub repository (a shallow, single-branch

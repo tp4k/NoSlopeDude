@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 MEASUREMENTS_FILE="$REPO_ROOT/docs/measurements.md"
 
-FIXTURE_ROOT="${1:-${TMPDIR:-/tmp}/agent_slope-perf-fixture}"
+FIXTURE_ROOT="${1:-${TMPDIR:-/tmp}/nsd-perf-fixture}"
 SPRING_DIR="$FIXTURE_ROOT/spring-framework"
 ANGULAR_DIR="$FIXTURE_ROOT/angular"
 
@@ -24,7 +24,7 @@ SPRING_SHA="$(git -C "$SPRING_DIR" rev-parse HEAD)"
 ANGULAR_SHA="$(git -C "$ANGULAR_DIR" rev-parse HEAD)"
 
 (cd "$REPO_ROOT" && cargo build --release)
-BIN="$REPO_ROOT/target/release/agent_slope"
+BIN="$REPO_ROOT/target/release/nsd"
 
 OUTPUT_DIR="$(mktemp -d)"
 TIME_LOG="$(mktemp)"

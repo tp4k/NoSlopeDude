@@ -17,7 +17,7 @@ The fixture is two cloned public repositories, not a generated tree
   `a783c4e7b753929ababa610e305112b82aaa0eb0` — the JS/TS half.
 
 `scripts/fetch_perf_fixture.sh` shallow-fetches both into one fixture root
-(default `${TMPDIR:-/tmp}/agent_slope-perf-fixture`, overridable by its
+(default `${TMPDIR:-/tmp}/nsd-perf-fixture`, overridable by its
 first argument), pinned by sha with a same-URL default-branch fallback if
 a pin is ever unreachable. `scripts/perf_scan.sh` then runs exactly one
 scan of that root under `/usr/bin/time -l` and appends a row below.

@@ -1,14 +1,15 @@
 [package]
-name = "agent_slope"
+name = "nsd"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.90"
 
 [lib]
-name = "agent_slope"
+name = "nsd"
 path = "src/lib.rs"
 
 [[bin]]
-name = "agent_slope"
+name = "nsd"
 path = "src/main.rs"
 
 [dependencies]

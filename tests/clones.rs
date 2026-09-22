@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
-use agent_slope::clones::{self, redundant_occurrences};
-use agent_slope::model::{DiscoveredFile, LanguageFamily, ScanSettings};
-use agent_slope::parse::{self, ParsedFile};
-use agent_slope::pipeline;
+use nsd::clones::{self, redundant_occurrences};
+use nsd::model::{DiscoveredFile, LanguageFamily, ScanSettings};
+use nsd::parse::{self, ParsedFile};
+use nsd::pipeline;
 
 fn fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/clones")
