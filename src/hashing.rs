@@ -1,9 +1,10 @@
 //! Crate-internal (WS-3): one versioned BLAKE3 digest, replacing
-//! `src/clones/mod.rs`'s two `DefaultHasher` (SipHash) streams. `HASH_VERSION`
-//! is hashed into every digest's input as its first byte (not merely stored
-//! beside the result), so bumping it changes every digest this module
-//! produces — the property M5's persisted cache key needs: an algorithm
-//! change must invalidate old entries, never silently collide with them.
+//! `src/clones/mod.rs`'s two SipHash streams (`std`'s prior default hasher).
+//! `HASH_VERSION` is hashed into every digest's input as its first byte (not
+//! merely stored beside the result), so bumping it changes every digest this
+//! module produces — the property M5's persisted cache key needs: an
+//! algorithm change must invalidate old entries, never silently collide with
+//! them.
 
 use blake3::Hasher;
 

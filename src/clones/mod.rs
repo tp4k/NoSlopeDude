@@ -14,15 +14,14 @@
 //! `last_counted_line` watermark, a different contract from
 //! `exec_lines`'s distinct-line `BTreeSet`.
 
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
 use rayon::prelude::*;
 use tree_sitter::Node;
 
 use crate::exec_lines::{is_comment_kind, is_executable_leaf};
+use crate::hashing::Digest;
 use crate::model::{CloneGroup, CloneLocation, ClonesResult, LanguageFamily};
 use crate::parse::ParsedFile;
 
@@ -34,12 +33,6 @@ const MIN_CANDIDATE_STATEMENTS: usize = 2;
 /// stream — a control character that cannot appear in Java/JS/TS source
 /// text, so it can never be confused with token content.
 const TOKEN_SEPARATOR: char = '\u{1}';
-
-/// Distinguishes `RunFingerprint`'s two `DefaultHasher` streams: fed only
-/// into the "hi" stream, before any content, so two runs with identical
-/// content produce two different 64-bit halves rather than the same half
-/// twice.
-const FINGERPRINT_HI_SEED: u8 = 1;
 
 /// One candidate or grouped occurrence before it is exposed as a
 /// `CloneLocation` — carries `statement_count` too, needed only internally
@@ -414,38 +407,32 @@ fn normalized_statement_tokens(statement: Node, language: LanguageFamily, source
     tokens
 }
 
-/// D14's grouping key: a 128-bit fingerprint of a run's normalized token
-/// stream (family prefix, then every statement's `normalized_statement_
-/// tokens` in order), never materialised as the concatenated `String`
-/// itself (perf row 2 — coordinator-approved change from D14's original
-/// "exact normalized token strings, not hashes": the collision probability
-/// at these candidate volumes is a non-concern in practice, the same
-/// principle content-addressed systems rely on). `std` has no built-in
-/// 128-bit hasher and this stream may not add a dependency, so the two
-/// halves are independent `DefaultHasher` (SipHash) streams fed the same
-/// bytes and seeded one bit apart.
+/// D14's grouping key: a versioned BLAKE3 digest (`src/hashing.rs`) of a
+/// run's normalized token stream (family prefix, then every statement's
+/// `normalized_statement_tokens` in order), never materialised as the
+/// concatenated `String` itself (perf row 2 — coordinator-approved change
+/// from D14's original "exact normalized token strings, not hashes": the
+/// collision probability at these candidate volumes is a non-concern in
+/// practice, the same principle content-addressed systems rely on). WS-3
+/// replaces the two SipHash streams (`std`'s prior default hasher) this used
+/// to be with one digest safe to persist once M5's cache keys on it.
 struct RunFingerprint {
-    lo: DefaultHasher,
-    hi: DefaultHasher,
+    digest: Digest,
 }
 
 impl RunFingerprint {
     fn new(family_prefix: &str) -> Self {
-        let mut lo = DefaultHasher::new();
-        let mut hi = DefaultHasher::new();
-        FINGERPRINT_HI_SEED.hash(&mut hi);
-        family_prefix.hash(&mut lo);
-        family_prefix.hash(&mut hi);
-        RunFingerprint { lo, hi }
+        RunFingerprint {
+            digest: Digest::new(family_prefix),
+        }
     }
 
     fn push(&mut self, statement_tokens: &str) {
-        statement_tokens.hash(&mut self.lo);
-        statement_tokens.hash(&mut self.hi);
+        self.digest.push(statement_tokens.as_bytes());
     }
 
     fn finish(&self) -> u128 {
-        ((self.hi.finish() as u128) << 64) | (self.lo.finish() as u128)
+        self.digest.finish()
     }
 }
 

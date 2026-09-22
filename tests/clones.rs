@@ -244,6 +244,45 @@ fn test_cross_language_blocks_never_group() {
     );
 }
 
+/// WS-3: proves the family prefix survived the hasher swap to BLAKE3
+/// by forming an actual group per language, not merely absence of a
+/// merged one (`test_cross_language_blocks_never_group` above already
+/// covers absence). Each language here has an internal duplicate pair of
+/// the same normalized token text `test_cross_language_blocks_never_group`
+/// uses, so the digest's family prefix, not the digest input, is the only
+/// thing that can keep the two languages' groups apart.
+#[test]
+fn test_family_prefix_separates_identical_token_streams() {
+    let files = parsed_files(&[
+        ("__tests__/FamilyPrefixJavaA.java", JAVA),
+        ("__tests__/FamilyPrefixJavaB.java", JAVA),
+        ("__tests__/FamilyPrefixJsA.js", JS_TS),
+        ("__tests__/FamilyPrefixJsB.js", JS_TS),
+    ]);
+    let result = clones::run(&files, 2);
+    assert_eq!(result.groups.len(), 2, "{:?}", result.groups);
+    let java_groups: Vec<_> = result
+        .groups
+        .iter()
+        .filter(|group| group.language == JAVA)
+        .collect();
+    let js_groups: Vec<_> = result
+        .groups
+        .iter()
+        .filter(|group| group.language == JS_TS)
+        .collect();
+    assert_eq!(java_groups.len(), 1, "{:?}", result.groups);
+    assert_eq!(js_groups.len(), 1, "{:?}", result.groups);
+    assert_eq!(java_groups[0].locations.len(), 2, "{:?}", java_groups[0]);
+    assert_eq!(js_groups[0].locations.len(), 2, "{:?}", js_groups[0]);
+    for location in &java_groups[0].locations {
+        assert!(location.relative_path.to_string_lossy().ends_with(".java"));
+    }
+    for location in &js_groups[0].locations {
+        assert!(location.relative_path.to_string_lossy().ends_with(".js"));
+    }
+}
+
 /// D11 reused: a comment-only line inside a run does not count toward its
 /// source-line total, so a run that is only ≥10 physical lines *because*
 /// one of them is a comment must not qualify at `--min-clone-lines 10`
