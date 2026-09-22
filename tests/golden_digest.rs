@@ -18,6 +18,7 @@ mod golden;
 mod hashing;
 
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
 
@@ -159,6 +160,39 @@ fn test_gate_is_reported_pending_when_the_archive_is_absent() {
             // ordinary (archive-absent) developer/CI run instead.
         }
     }
+}
+
+/// `classify_archive_gate` is the pure decision `archive_gate` delegates to;
+/// tested directly (not through `env::var_os`, which only the process's own
+/// environment can drive) so the unset case, the set-but-empty case, and the
+/// set-and-non-empty case are each pinned rather than only exercised
+/// incidentally by whichever of the three the test process happens to run
+/// under.
+#[test]
+fn test_classify_archive_gate() {
+    assert!(matches!(classify_archive_gate(None), ArchiveGate::Pending));
+    assert!(matches!(
+        classify_archive_gate(Some(OsString::new())),
+        ArchiveGate::Pending
+    ));
+    match classify_archive_gate(Some(OsString::from("/x"))) {
+        ArchiveGate::Resolved(path) => assert_eq!(path, PathBuf::from("/x")),
+        ArchiveGate::Pending => panic!("a non-empty path must resolve, not read as pending"),
+    }
+}
+
+/// The pending notice both pending arms above print must actually say the
+/// run is pending and name the env var a developer needs to set -- proving
+/// the two call sites cannot silently drift into printing nothing or an
+/// unrelated message.
+#[test]
+fn test_pending_notice_names_the_env_var() {
+    let notice = pending_notice();
+    assert!(notice.contains("PENDING"), "notice was: {notice:?}");
+    assert!(
+        notice.contains(ARCHIVED_REPORT_ENV_VAR),
+        "notice was: {notice:?}"
+    );
 }
 
 /// Runs unconditionally (no archive needed): the committed digest file
