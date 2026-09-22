@@ -229,24 +229,21 @@ fn test_committed_digest_carries_no_paths_names_or_excerpts() -> Result<()> {
 
     /// The one field this digest carries whose value is a fixed,
     /// hand-authored free-text label rather than anything read out of the
-    /// archive: `language` is `"Java, with a small JS/TS component"`
-    /// (`src/golden.rs`'s `LANGUAGE` constant, verbatim from
-    /// `nsd-plan-final.md`'s *Measured starting state* row), and that
-    /// `/` in `"JS/TS"` is not a path. Every archive-derived leaf this
-    /// digest holds is a number (`scores`, `clones`, `findings_by_rule_id`,
+    /// archive: `src/golden.rs`'s `LANGUAGE` constant, verbatim from
+    /// `nsd-plan-final.md`'s *Measured starting state* row. The `/` in
+    /// `"JS/TS"` is not a path. Every archive-derived leaf this digest holds
+    /// is a number (`scores`, `clones`, `findings_by_rule_id`,
     /// `skips_by_reason`, `top25` -- see the leaf-number check below), so
-    /// `language` is the only string value that needs this named exemption
-    /// from the widened path-shape scan; `label`, `authorship`,
+    /// this exact string is the only value that needs a named exemption
+    /// from the widened path-shape scan; the exemption is by exact value,
+    /// not by key, so a path-shaped string substituted for a genuine
+    /// `language` value would still be caught. `label`, `authorship`,
     /// `revision_sha`, and `body_blake3` are separately pinned to their
     /// exact expected values right below, which is a strictly stronger
     /// check than a path-shape scan for each of them.
-    const FREE_TEXT_VALUE_KEY: &str = "language";
+    const EXPECTED_LANGUAGE: &str = "Java, with a small JS/TS component";
 
-    fn walk(
-        value: &Value,
-        forbidden_keys_found: &mut BTreeMap<String, ()>,
-        check_value_shape: bool,
-    ) {
+    fn walk(value: &Value, forbidden_keys_found: &mut BTreeMap<String, ()>) {
         match value {
             Value::Object(map) => {
                 for (key, nested) in map {
@@ -257,13 +254,12 @@ fn test_committed_digest_carries_no_paths_names_or_excerpts() -> Result<()> {
                         !contains_path_shape_chars(key),
                         "committed digest carries a path-shaped object key: {key:?}"
                     );
-                    let nested_check_value_shape = check_value_shape && key != FREE_TEXT_VALUE_KEY;
-                    walk(nested, forbidden_keys_found, nested_check_value_shape);
+                    walk(nested, forbidden_keys_found);
                 }
             }
             Value::Array(items) => {
                 for item in items {
-                    walk(item, forbidden_keys_found, check_value_shape);
+                    walk(item, forbidden_keys_found);
                 }
             }
             Value::String(text) => {
@@ -271,7 +267,7 @@ fn test_committed_digest_carries_no_paths_names_or_excerpts() -> Result<()> {
                     !text.starts_with('/'),
                     "committed digest carries an absolute-path-shaped string value: {text:?}"
                 );
-                if check_value_shape {
+                if text != EXPECTED_LANGUAGE {
                     assert!(
                         !contains_path_shape_chars(text),
                         "committed digest carries a path-shaped string value: {text:?}"
@@ -284,7 +280,7 @@ fn test_committed_digest_carries_no_paths_names_or_excerpts() -> Result<()> {
 
     let committed = read_committed_digest()?;
     let mut forbidden_keys_found = BTreeMap::new();
-    walk(&committed, &mut forbidden_keys_found, true);
+    walk(&committed, &mut forbidden_keys_found);
     assert!(
         forbidden_keys_found.is_empty(),
         "committed digest carries forbidden keys: {:?}",
@@ -325,6 +321,10 @@ fn test_committed_digest_carries_no_paths_names_or_excerpts() -> Result<()> {
     assert_eq!(
         committed["revision_sha"],
         Value::String("c6671504394b7c862dac032bc7c7364ad3af8b7f".to_string())
+    );
+    assert_eq!(
+        committed["language"],
+        Value::String(EXPECTED_LANGUAGE.to_string())
     );
 
     let body_blake3 = committed["body_blake3"]
