@@ -17,7 +17,7 @@ mod golden;
 #[path = "../src/hashing.rs"]
 mod hashing;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
@@ -220,19 +220,50 @@ fn test_committed_digest_carries_no_paths_names_or_excerpts() -> Result<()> {
         "detail",
     ];
 
-    fn walk(value: &Value, forbidden_keys_found: &mut BTreeMap<String, ()>) {
+    /// A path/link-shaped string can appear anywhere -- not just leading
+    /// with `/` -- so this is deliberately wider than the pre-existing
+    /// `starts_with('/')` check it sits alongside, additively.
+    fn contains_path_shape_chars(text: &str) -> bool {
+        text.contains('/') || text.contains('\\') || text.contains('~')
+    }
+
+    /// The one field this digest carries whose value is a fixed,
+    /// hand-authored free-text label rather than anything read out of the
+    /// archive: `language` is `"Java, with a small JS/TS component"`
+    /// (`src/golden.rs`'s `LANGUAGE` constant, verbatim from
+    /// `nsd-plan-final.md`'s *Measured starting state* row), and that
+    /// `/` in `"JS/TS"` is not a path. Every archive-derived leaf this
+    /// digest holds is a number (`scores`, `clones`, `findings_by_rule_id`,
+    /// `skips_by_reason`, `top25` -- see the leaf-number check below), so
+    /// `language` is the only string value that needs this named exemption
+    /// from the widened path-shape scan; `label`, `authorship`,
+    /// `revision_sha`, and `body_blake3` are separately pinned to their
+    /// exact expected values right below, which is a strictly stronger
+    /// check than a path-shape scan for each of them.
+    const FREE_TEXT_VALUE_KEY: &str = "language";
+
+    fn walk(
+        value: &Value,
+        forbidden_keys_found: &mut BTreeMap<String, ()>,
+        check_value_shape: bool,
+    ) {
         match value {
             Value::Object(map) => {
                 for (key, nested) in map {
                     if FORBIDDEN_KEYS.contains(&key.as_str()) {
                         forbidden_keys_found.insert(key.clone(), ());
                     }
-                    walk(nested, forbidden_keys_found);
+                    assert!(
+                        !contains_path_shape_chars(key),
+                        "committed digest carries a path-shaped object key: {key:?}"
+                    );
+                    let nested_check_value_shape = check_value_shape && key != FREE_TEXT_VALUE_KEY;
+                    walk(nested, forbidden_keys_found, nested_check_value_shape);
                 }
             }
             Value::Array(items) => {
                 for item in items {
-                    walk(item, forbidden_keys_found);
+                    walk(item, forbidden_keys_found, check_value_shape);
                 }
             }
             Value::String(text) => {
@@ -240,6 +271,12 @@ fn test_committed_digest_carries_no_paths_names_or_excerpts() -> Result<()> {
                     !text.starts_with('/'),
                     "committed digest carries an absolute-path-shaped string value: {text:?}"
                 );
+                if check_value_shape {
+                    assert!(
+                        !contains_path_shape_chars(text),
+                        "committed digest carries a path-shaped string value: {text:?}"
+                    );
+                }
             }
             _ => {}
         }
@@ -247,12 +284,127 @@ fn test_committed_digest_carries_no_paths_names_or_excerpts() -> Result<()> {
 
     let committed = read_committed_digest()?;
     let mut forbidden_keys_found = BTreeMap::new();
-    walk(&committed, &mut forbidden_keys_found);
+    walk(&committed, &mut forbidden_keys_found, true);
     assert!(
         forbidden_keys_found.is_empty(),
         "committed digest carries forbidden keys: {:?}",
         forbidden_keys_found.keys().collect::<Vec<_>>()
     );
+
+    const EXPECTED_TOP_LEVEL_KEYS: [&str; 11] = [
+        "authorship",
+        "body_blake3",
+        "clones",
+        "findings_by_rule_id",
+        "hash_version",
+        "label",
+        "language",
+        "revision_sha",
+        "scores",
+        "skips_by_reason",
+        "top25",
+    ];
+    let top_level = committed
+        .as_object()
+        .context("committed digest is not a JSON object")?;
+    let top_level_keys: BTreeSet<&str> = top_level.keys().map(String::as_str).collect();
+    let expected_top_level_keys: BTreeSet<&str> = EXPECTED_TOP_LEVEL_KEYS.into_iter().collect();
+    assert_eq!(
+        top_level_keys, expected_top_level_keys,
+        "committed digest's top-level key set must be exactly the eleven A1 fields"
+    );
+
+    assert_eq!(
+        committed["label"],
+        Value::String("java-fixture-01".to_string())
+    );
+    assert_eq!(
+        committed["authorship"],
+        Value::String("unknown".to_string())
+    );
+    assert_eq!(
+        committed["revision_sha"],
+        Value::String("c6671504394b7c862dac032bc7c7364ad3af8b7f".to_string())
+    );
+
+    let body_blake3 = committed["body_blake3"]
+        .as_str()
+        .context("body_blake3 is not a string")?;
+    let hex = body_blake3
+        .strip_prefix("blake3:")
+        .with_context(|| format!("body_blake3 is missing the blake3: prefix: {body_blake3:?}"))?;
+    assert_eq!(
+        hex.len(),
+        32,
+        "body_blake3's hex portion must be 32 characters: {hex:?}"
+    );
+    assert!(
+        hex.chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+        "body_blake3's hex portion must be lowercase hex: {hex:?}"
+    );
+
+    const EXPECTED_LANGUAGES: [&str; 3] = ["overall", "java", "js_ts"];
+    const EXPECTED_LANGUAGE_KEYS: [&str; 2] = ["erosion", "verbosity"];
+    const EXPECTED_VERBOSITY_KEYS: [&str; 3] = ["flagged_lines", "ratio", "scanned_lines"];
+    let scores = committed["scores"]
+        .as_object()
+        .context("scores is not an object")?;
+    let score_langs: BTreeSet<&str> = scores.keys().map(String::as_str).collect();
+    let expected_langs: BTreeSet<&str> = EXPECTED_LANGUAGES.into_iter().collect();
+    assert_eq!(
+        score_langs, expected_langs,
+        "scores must cover exactly {{overall, java, js_ts}}"
+    );
+    for lang in EXPECTED_LANGUAGES {
+        let lang_obj = scores
+            .get(lang)
+            .and_then(Value::as_object)
+            .with_context(|| format!("scores.{lang} is not an object"))?;
+        let lang_keys: BTreeSet<&str> = lang_obj.keys().map(String::as_str).collect();
+        let expected_lang_keys: BTreeSet<&str> = EXPECTED_LANGUAGE_KEYS.into_iter().collect();
+        assert_eq!(
+            lang_keys, expected_lang_keys,
+            "scores.{lang}'s key set must be exactly {{erosion, verbosity}}"
+        );
+        let verbosity = lang_obj
+            .get("verbosity")
+            .and_then(Value::as_object)
+            .with_context(|| format!("scores.{lang}.verbosity is not an object"))?;
+        let verbosity_keys: BTreeSet<&str> = verbosity.keys().map(String::as_str).collect();
+        let expected_verbosity_keys: BTreeSet<&str> = EXPECTED_VERBOSITY_KEYS.into_iter().collect();
+        assert_eq!(
+            verbosity_keys, expected_verbosity_keys,
+            "scores.{lang}.verbosity's key set must be exactly \
+             {{flagged_lines, ratio, scanned_lines}}"
+        );
+    }
+
+    fn assert_all_leaves_are_numbers(value: &Value, path: &str) {
+        match value {
+            Value::Object(map) => {
+                for (key, nested) in map {
+                    assert_all_leaves_are_numbers(nested, &format!("{path}.{key}"));
+                }
+            }
+            Value::Array(items) => {
+                for (index, item) in items.iter().enumerate() {
+                    assert_all_leaves_are_numbers(item, &format!("{path}[{index}]"));
+                }
+            }
+            other => assert!(other.is_number(), "{path} is not a number: {other:?}"),
+        }
+    }
+
+    for field in [
+        "scores",
+        "clones",
+        "findings_by_rule_id",
+        "skips_by_reason",
+        "top25",
+    ] {
+        assert_all_leaves_are_numbers(&committed[field], field);
+    }
 
     Ok(())
 }
