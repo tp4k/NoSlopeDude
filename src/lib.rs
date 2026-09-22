@@ -5,6 +5,7 @@
 pub mod cli;
 pub mod discover;
 pub(crate) mod exec_lines;
+#[cfg(test)]
 pub(crate) mod golden;
 pub(crate) mod hashing;
 pub mod model;
