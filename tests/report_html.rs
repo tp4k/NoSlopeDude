@@ -128,6 +128,21 @@ fn test_html_escapes_source_excerpts_and_paths() {
 }
 
 #[test]
+fn test_html_title_and_heading_name_nsd() {
+    let (_dir, output) = run_scan(&fixture_root(), |_| {});
+    let html = written_html(&output);
+
+    assert!(
+        html.contains("<title>nsd report</title>"),
+        "expected the <title> to name nsd: {html}"
+    );
+    assert!(
+        html.contains("<h1>nsd scan report</h1>"),
+        "expected the <h1> to name nsd: {html}"
+    );
+}
+
+#[test]
 fn test_html_is_self_contained() {
     let (_dir, output) = run_scan(&fixture_root(), |_| {});
     let html = written_html(&output);
