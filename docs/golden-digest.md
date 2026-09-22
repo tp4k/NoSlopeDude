@@ -26,7 +26,7 @@ nothing else:
 | `clones` | `{ group_count, total_redundant_lines }` over the archive's duplicate groups |
 | `skips_by_reason` | each skip reason's file count |
 | `top25` | the top 25 callables as `[cc, sloc, mass]` triples, in the archive's own order — names and locations dropped |
-| `body_blake3` | an algorithm-prefixed lowercase-hex BLAKE3 (`blake3:<32 hex chars>`) of the normalized report body |
+| `body_blake3` | `blake3:` followed by 32 lowercase hex characters — the leading 16 bytes of a versioned, domain-separated BLAKE3 digest over the normalized report body, **not** a plain BLAKE3 hash of the body bytes (see *A BLAKE3 framing note* below) |
 
 No absolute path, private repository name, source excerpt, or callable name
 appears anywhere in this file.
@@ -41,9 +41,28 @@ in two steps (A1):
 2. `scan.target` (the archive's absolute checkout path) is replaced with the
    neutral `label` above.
 
-`body_blake3` is a versioned BLAKE3 (`src/hashing.rs`'s `Digest`) over the
-serialized bytes of the normalized report, so it changes if the archive's
-content changes but never encodes the checkout path or any excerpt.
+### A BLAKE3 framing note
+
+`body_blake3` is **not** a plain BLAKE3 hash of the normalized body's
+serialized bytes — it is `src/hashing.rs`'s versioned, domain-separated
+`Digest`, and reproducing it requires the exact same framing:
+
+1. The current `HASH_VERSION` byte (`1` as of WS-3) is fed first, as the
+   hash input's very first byte.
+2. The `"golden-digest-body"` family prefix is pushed next, keeping this
+   digest's hash space separate from `src/clones/mod.rs`'s per-language
+   family prefixes even on identical input bytes.
+3. The normalized report body's serialized bytes are pushed last.
+
+Steps 2 and 3 are each framed by their own 8-byte little-endian length
+prefix ahead of the bytes themselves, so no ambiguity can arise between
+where one pushed slice ends and the next begins. `body_blake3` itself is
+only the *leading 16 bytes* of the resulting BLAKE3 output, read as a
+little-endian `u128` and formatted as the 32 lowercase hex characters after
+the `blake3:` prefix — not the full 32-byte BLAKE3 digest. It still changes
+if the archive's content changes and never encodes the checkout path or any
+excerpt, but it cannot be reproduced by hashing the body bytes alone with a
+generic BLAKE3 tool.
 
 ## A float-parsing correction
 
