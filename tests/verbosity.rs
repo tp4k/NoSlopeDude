@@ -195,6 +195,19 @@ fn test_unparsed_files_excluded_from_denominator_and_marked_incomplete() {
         .iter()
         .find(|summary| summary.relative_path == Path::new("broken/Broken.java"))
         .expect("Broken.java should still reach the metrics stage under salvage");
+    // Pinned to the fixture's actual, literal value -- not derived from the
+    // same computation the sum-identity assertion below re-derives it from,
+    // so that assertion cannot hold vacuously for a broken pruning that
+    // still contributes *some* value here (e.g. counting the pruned
+    // callable's own lines back in). `broken/Broken.java` (package + blank
+    // + class decl + blank + damaged `method` + `}` x2) survives pruning
+    // with exactly its package and class-declaration lines counted: 2.
+    assert_eq!(
+        broken_summary.scanned_lines, 2,
+        "Broken.java's surviving (non-pruned) scanned-line count changed -- \
+         update this pin only after confirming the new value is still exactly \
+         the class wrapper's lines, not the damaged callable's own"
+    );
     assert!(
         metrics_result
             .callables
