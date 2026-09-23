@@ -105,7 +105,7 @@ silently re-baseline an unexplained difference"), which this procedure
 remains available for a human operator to run deliberately, with the two
 proofs below, if a *genuine* corpus-composition change is ever needed.
 
-### Known gap: two pre-existing damaged fixtures under `tests/fixtures/ir/`
+### Resolved: two pre-existing damaged fixtures under `tests/fixtures/ir/`
 
 WS-6 discovered, empirically (a diagnostic scan of the full `tests/fixtures/`
 tree lists every parse failure across the whole corpus), that
@@ -116,43 +116,67 @@ direct damage-kind assertions) also carry a `SyntaxError`, and are walked
 into the clean corpus by `clean_corpus_sources()`'s membership rule.
 (A third, `tests/fixtures/ir/TsUsingParameter.ts`, also carries a
 `SyntaxError` but nets zero surviving scanned lines, so it does not itself
-move a number — see below.)
+move a score, only its own `skipped_files` entry — see below.)
 
 Before salvage, a `SyntaxError` file was dropped wholesale regardless of
 which corpus scanned it, so these two contributed nothing to
 `clean.report.json`'s scores and the original decision-1 malformed list
 (predating WS-6) never needed to name them; the committed baseline itself,
-however, already carries their *skip bookkeeping* — three
+however, already carried their *skip bookkeeping* — three
 `skipped_files` entries (`parse_syntax_error`) and `incomplete: true` — since
 `build_skipped_files` rendered every parse failure unconditionally at
 capture time.
 
 Salvage means a `SyntaxError` file is lowered like any other file now, so
-leaving these fixtures on the clean corpus's walk moves two numbers on a
+leaving these fixtures on the clean corpus's walk moved two numbers on a
 target this gate has no mechanism to declare a delta on at all
 (`test_clean_corpus_report_is_byte_identical_to_the_pre_ir_baseline` is an
-unconditional `assert_eq!`, with no `DECLARED_DELTAS`-style escape hatch):
-confirmed by running the clean-corpus test with only this stream's `src/`
-production changes applied (no test or fixture edits) — `+2` scanned lines
-overall (`+1` java from `JavaVarargsAnnotation.java`'s surviving class
-wrapper, `+1` js_ts from `JsxUnterminatedEntity.tsx`'s), and all three
-fixtures' `skipped_files` entries disappear (`incomplete` itself stays
-`true` on both sides, since `metrics`/`rules` incomplete tracking still
-sees the residual `ParseFailure`s regardless).
+unconditional `assert_eq!`, with no `DECLARED_DELTAS`-style escape hatch).
+This is authorized by `plan.md` Decision 20 (`plan.md:1000`, `:1030`),
+which added `tests/golden/neutrality/` to WS-6's own file scope for exactly
+this re-capture, the same way it did for WS-3 round 1's
+`tests/fixtures/parity/` addition.
 
-Excluding these two from the clean corpus (the same
-`CLEAN_CORPUS_ONLY_EXCLUSIONS` mechanism `Mixed.java`/`Mixed.ts` use) does
-not resolve this: the committed `clean.report.json` baseline was captured
-*with* them present, so removing them instead swaps which direction the
-byte-identity assertion fails in (the three `skipped_files` entries and the
-`+2` scanned lines both move, just the other way) rather than eliminating
-the divergence. The only way to make `test_clean_corpus_report_is_byte_
-identical_to_the_pre_ir_baseline` pass again, either way, is an authorized
-re-capture of `clean.report.json` under the corrected corpus composition
-via the Proof A/B procedure above — which is exactly the WS-2-owned
-baseline regeneration this stream's brief forbids without asking first.
-This is left as an open question for the coordinator; see the round's
-implementer report.
+**Proof A** (`bash scripts/neutrality_gate.sh`, no args) was run first;
+it reports a pre-existing, out-of-scope divergence (`/scores/java/erosion`,
+against the pinned pre-IR commit, which spans the *whole* IR-retargeting
+effort plus this operator script's own known gap: it has no
+`CLEAN_CORPUS_ONLY_EXCLUSIONS`-equivalent, so its naive "clean" corpus also
+sweeps in `tests/fixtures/salvage/Mixed.java`/`Mixed.ts`). That divergence
+is unrelated to, and unaffected by, the capture below — re-running it
+after the capture reproduces the identical first-divergence pointer, since
+this script never reads `tests/golden/neutrality/` in its default mode; see
+the round's implementer report for the full trace. It is not this gate's
+mechanism and is left untouched (`scripts/neutrality_gate.sh` is not in
+this stream's scope to edit).
+
+**Proof B**, a control diff against the *Rust harness's* own
+`clean_corpus_sources()` (which already excludes
+`CLEAN_CORPUS_ONLY_EXCLUSIONS`), additionally excluding the two
+score-moving fixtures, compared against the then-committed
+`clean.report.json`: confirmed the only residual difference was
+`/skipped_files` (from the third fixture, `TsUsingParameter.ts`, still
+present and still losing its own now-universally-suppressed
+`SyntaxError` skip entry, with zero score impact) — proving nothing else
+in the clean corpus moved.
+
+**Capture**: `NSD_NEUTRALITY_CAPTURE=1 bash scripts/neutrality_gate.sh
+--capture` (delegating to `cargo test --test neutrality`) re-captured
+`clean.report.json` from `HEAD`. The resulting diff is bounded to exactly
+what the analysis above predicted: all three `skipped_files` entries
+(`JavaVarargsAnnotation.java`, `JsxUnterminatedEntity.tsx`,
+`TsUsingParameter.ts`) disappear, and `scores.{overall,java,js_ts}
+.verbosity.scanned_lines` gain `+2`/`+1`/`+1` respectively (`java` from
+`JavaVarargsAnnotation.java`'s surviving class wrapper, `js_ts` from
+`JsxUnterminatedEntity.tsx`'s), with `verbosity.ratio` moving arithmetically
+from that; `erosion` itself does not move on any of the three aggregates,
+and `incomplete` stays `true` on both sides. The same capture invocation
+also rewrites `malformed.report.json` unconditionally (both corpus tests
+share the one `NSD_NEUTRALITY_CAPTURE` env var); that file's would-be
+change was reverted byte-for-byte before committing, since it was not
+authorized and this stream's own `DECLARED_DELTAS` mechanism already
+tolerates the same divergence there without a baseline change — see the
+round's implementer report.
 
 ## Normalization
 

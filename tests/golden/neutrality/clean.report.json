@@ -15,24 +15,24 @@
       "erosion": 0.3204595479773351,
       "verbosity": {
         "flagged_lines": 227,
-        "scanned_lines": 1006,
-        "ratio": 0.22564612326043737
+        "scanned_lines": 1008,
+        "ratio": 0.2251984126984127
       }
     },
     "java": {
       "erosion": 0.39608172508205486,
       "verbosity": {
         "flagged_lines": 154,
-        "scanned_lines": 629,
-        "ratio": 0.24483306836248012
+        "scanned_lines": 630,
+        "ratio": 0.24444444444444444
       }
     },
     "js_ts": {
       "erosion": 0.21875136287677102,
       "verbosity": {
         "flagged_lines": 73,
-        "scanned_lines": 377,
-        "ratio": 0.19363395225464192
+        "scanned_lines": 378,
+        "ratio": 0.1931216931216931
       }
     }
   },
@@ -1022,21 +1022,6 @@
     {
       "relative_path": "discover/sample/target/classes/Cached.java",
       "reason": "dependency_or_build_output",
-      "detail": null
-    },
-    {
-      "relative_path": "ir/JavaVarargsAnnotation.java",
-      "reason": "parse_syntax_error",
-      "detail": null
-    },
-    {
-      "relative_path": "ir/JsxUnterminatedEntity.tsx",
-      "reason": "parse_syntax_error",
-      "detail": null
-    },
-    {
-      "relative_path": "ir/TsUsingParameter.ts",
-      "reason": "parse_syntax_error",
       "detail": null
     }
   ],
