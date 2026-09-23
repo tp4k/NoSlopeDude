@@ -1,0 +1,370 @@
+//! WS-6: error-span salvage and the `SkipReason` split
+//! (`nsd-plan-final.md`, *Architecture* -> salvage row). `parse::parse_one`
+//! no longer drops a whole file on `tree.root_node().has_error()`; IR-level
+//! typed damage spans (`src/lower/mod.rs::lower_file`) drive fail-closed
+//! exclusion at entity (callable) granularity instead. These tests exercise
+//! the full pipeline, not the lowering in isolation, since the salvage
+//! guarantee is about what every analyzer stage (which each independently
+//! re-lowers a `ParsedFile`, `src/metrics/mod.rs`'s own doc comment) ends up
+//! publishing.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use nsd::model::{ScanSettings, SkipReason, DEFAULT_MIN_CLONE_LINES};
+use nsd::pipeline::{self, PipelineOutput};
+
+fn fixtures_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
+}
+
+/// Runs the full pipeline against `root`, writing the two reports into a
+/// fresh temp directory that is kept alive for the caller's lifetime (the
+/// returned `TempDir` guard must be held by the caller, or the directory --
+/// and any `report.json`/`report.html` inside it -- is deleted the moment
+/// this function returns).
+fn run_scan(
+    root: &Path,
+    configure: impl FnOnce(&mut ScanSettings),
+) -> (tempfile::TempDir, PipelineOutput) {
+    let output_dir = tempfile::tempdir().expect("tempdir");
+    let mut settings = ScanSettings {
+        output: output_dir.path().to_path_buf(),
+        include_tests: true,
+        exclude: Vec::new(),
+        min_clone_lines: DEFAULT_MIN_CLONE_LINES,
+    };
+    configure(&mut settings);
+    let target_input = root
+        .to_str()
+        .expect("fixture path is valid UTF-8")
+        .to_string();
+    let output = pipeline::run(&target_input, settings).expect("pipeline run should succeed");
+    (output_dir, output)
+}
+
+/// The new fixture the brief requires: at least two callables, exactly one
+/// intersecting damage, in both a `.java` and a `.ts` file (the parity
+/// test below). Deliberately not `tests/fixtures/rules/broken/`, whose one
+/// callable is wholly damaged -- it cannot exercise "an undamaged callable
+/// in the same file is still measured" at all.
+fn salvage_fixture_root() -> PathBuf {
+    fixtures_root().join("salvage")
+}
+
+/// The undamaged half of a partially-damaged file is measured, not dropped
+/// wholesale: `Mixed.java`'s `safe` callable sits beside a damaged `broken`
+/// method in the same file, and still shows up with real cc/sloc.
+#[test]
+fn test_callables_outside_the_damaged_span_are_measured() {
+    let (_dir, output) = run_scan(&salvage_fixture_root(), |_| {});
+
+    let safe = output
+        .metrics
+        .callables
+        .iter()
+        .find(|callable| {
+            callable.name == "safe" && callable.relative_path == Path::new("Mixed.java")
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "expected a measured `safe` callable: {:?}",
+                output.metrics.callables
+            )
+        });
+    assert_eq!(safe.cc, 2, "one `if` beyond the implicit base path");
+    assert!(
+        safe.sloc >= 2,
+        "safe's body has at least the if and both returns: {safe:?}"
+    );
+
+    assert!(
+        !output
+            .metrics
+            .callables
+            .iter()
+            .any(|callable| callable.name == "broken"
+                && callable.relative_path == Path::new("Mixed.java")),
+        "a damaged callable must not appear in metrics.callables: {:?}",
+        output.metrics.callables
+    );
+}
+
+/// Fail-closed is preserved on the pre-existing wholly-damaged fixture:
+/// `Broken.java`'s one callable (`method`) stays unmeasured, and `Good.java`
+/// beside it in the same scan (`classify`) is unaffected.
+#[test]
+fn test_callables_intersecting_the_damaged_span_are_not_measured() {
+    let root = fixtures_root().join("rules/broken");
+    let (_dir, output) = run_scan(&root, |_| {});
+
+    assert!(
+        !output
+            .metrics
+            .callables
+            .iter()
+            .any(|callable| callable.name == "method"),
+        "Broken.java's one callable is wholly damaged and must stay unmeasured: {:?}",
+        output.metrics.callables
+    );
+    let classify = output
+        .metrics
+        .callables
+        .iter()
+        .find(|callable| callable.name == "classify")
+        .unwrap_or_else(|| {
+            panic!(
+                "Good.java's callable must be unaffected: {:?}",
+                output.metrics.callables
+            )
+        });
+    assert_eq!(classify.relative_path, PathBuf::from("Good.java"));
+}
+
+/// The same damage shape, salvaged the same way, in both languages: proof
+/// the capability lives at the IR level (`lower::lower_file`) and is not
+/// something either per-grammar lowering (`src/lower/java.rs` /
+/// `src/lower/jsts.rs`) implements separately.
+#[test]
+fn test_salvage_is_identical_in_both_languages() {
+    let (_dir, output) = run_scan(&salvage_fixture_root(), |_| {});
+
+    for relative_path in ["Mixed.java", "Mixed.ts"] {
+        let path = Path::new(relative_path);
+        assert!(
+            output
+                .metrics
+                .callables
+                .iter()
+                .any(|callable| callable.name == "safe" && callable.relative_path == path),
+            "{relative_path}'s undamaged `safe` callable should be measured: {:?}",
+            output.metrics.callables
+        );
+        assert!(
+            !output
+                .metrics
+                .callables
+                .iter()
+                .any(|callable| callable.name == "broken" && callable.relative_path == path),
+            "{relative_path}'s damaged `broken` callable must stay unmeasured: {:?}",
+            output.metrics.callables
+        );
+    }
+}
+
+/// `broken/Broken.ts` used to be dropped wholesale and rendered in
+/// `skipped_files` with `reason: "parse_syntax_error"`. It now salvage-
+/// parses: it disappears from `skipped_files` entirely, while `incomplete`
+/// stays driven by its residual damage (it is *also* still present in
+/// `parse_failures`, so `pipeline.rs`'s own untouched
+/// `!parse_failures.is_empty()` plumbing keeps working) rather than by a
+/// whole-file drop -- proven by the file still reaching the metrics stage
+/// (its file scan summary exists).
+#[test]
+fn test_a_file_with_damage_is_no_longer_listed_as_a_whole_file_skip() {
+    let root = fixtures_root().join("metrics/broken");
+    let (_dir, output) = run_scan(&root, |_| {});
+
+    assert!(
+        !output
+            .report
+            .skipped_files
+            .iter()
+            .any(|file| file.relative_path == Path::new("Broken.ts")),
+        "Broken.ts should no longer be listed as skipped: {:?}",
+        output.report.skipped_files
+    );
+    assert_eq!(
+        output.parse_failures.len(),
+        1,
+        "{:?}",
+        output.parse_failures
+    );
+    assert_eq!(
+        output.parse_failures[0].relative_path,
+        PathBuf::from("Broken.ts")
+    );
+    assert_eq!(
+        output.metrics.file_scan_summaries.len(),
+        1,
+        "Broken.ts should still be handed to the metrics stage: {:?}",
+        output.metrics.file_scan_summaries
+    );
+    assert!(
+        output.report.incomplete,
+        "residual damage in Broken.ts should still mark the report incomplete"
+    );
+}
+
+/// A scan whose only skips are policy skips (`test`, `gitignore`,
+/// `user_exclude`) reports `incomplete: false`: the `SkipReason` split
+/// drives `incomplete` only from an analysis-failure skip, never from a
+/// deliberate policy exclusion.
+#[test]
+fn test_incomplete_is_driven_only_by_analysis_failure() {
+    let source_dir = tempfile::tempdir().expect("tempdir");
+    let root = source_dir.path();
+    fs::write(
+        root.join("Sample.java"),
+        "public class Sample { public void run() {} }\n",
+    )
+    .expect("write clean fixture file");
+    fs::write(
+        root.join("AppTest.java"),
+        "public class AppTest { public void run() {} }\n",
+    )
+    .expect("write test-glob fixture file");
+    fs::write(
+        root.join("Excluded.java"),
+        "public class Excluded { public void run() {} }\n",
+    )
+    .expect("write user-exclude fixture file");
+    fs::write(
+        root.join("Ignored.java"),
+        "public class Ignored { public void run() {} }\n",
+    )
+    .expect("write gitignore fixture file");
+    fs::write(root.join(".gitignore"), "Ignored.java\n").expect("write .gitignore");
+
+    let (_dir, output) = run_scan(root, |settings| {
+        settings.include_tests = false;
+        settings.exclude = vec!["**/Excluded.java".to_string()];
+    });
+
+    assert!(
+        output
+            .discover
+            .skipped
+            .iter()
+            .any(|file| file.reason == SkipReason::Test),
+        "AppTest.java should be skipped via the Test glob: {:?}",
+        output.discover.skipped
+    );
+    assert!(
+        output
+            .discover
+            .skipped
+            .iter()
+            .any(|file| file.reason == SkipReason::Gitignore),
+        "Ignored.java should be skipped via .gitignore: {:?}",
+        output.discover.skipped
+    );
+    assert!(
+        output
+            .discover
+            .skipped
+            .iter()
+            .any(|file| file.reason == SkipReason::UserExclude),
+        "Excluded.java should be skipped via --exclude: {:?}",
+        output.discover.skipped
+    );
+    assert!(
+        !output
+            .discover
+            .skipped
+            .iter()
+            .any(|file| file.reason == SkipReason::Unreadable),
+        "no analysis-failure skip should be present in this scan: {:?}",
+        output.discover.skipped
+    );
+    assert!(
+        !output.report.incomplete,
+        "a scan whose only skips are policy skips should not be marked incomplete: {:?}",
+        output.discover.skipped
+    );
+}
+
+/// The `SkipReason` split is a model-level split, not a relabeling: every
+/// legacy label string is untouched, byte-for-byte.
+#[test]
+fn test_policy_skip_labels_are_byte_identical_to_the_legacy_labels() {
+    assert_eq!(SkipReason::Gitignore.label(), "gitignore");
+    assert_eq!(
+        SkipReason::DependencyOrBuildOutput.label(),
+        "dependency_or_build_output"
+    );
+    assert_eq!(SkipReason::GeneratedCode.label(), "generated_code");
+    assert_eq!(SkipReason::Test.label(), "test");
+    assert_eq!(SkipReason::UserExclude.label(), "user_exclude");
+    assert_eq!(SkipReason::Unreadable.label(), "unreadable");
+}
+
+/// `report.json`'s top-level key set is exactly what it was before salvage:
+/// item 8's "retain legacy JSON serialization through this gate".
+#[test]
+fn test_report_json_gains_no_new_top_level_field() {
+    let (_dir, output) = run_scan(&salvage_fixture_root(), |_| {});
+    let json_text =
+        fs::read_to_string(output.settings.output.join("report.json")).expect("report.json exists");
+    let value: serde_json::Value = serde_json::from_str(&json_text).expect("valid JSON");
+
+    let mut keys: Vec<&str> = value
+        .as_object()
+        .expect("report.json is a JSON object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    let mut expected_keys = vec![
+        "adaptation",
+        "duplicates",
+        "findings",
+        "incomplete",
+        "scan",
+        "scores",
+        "skipped_files",
+        "top25",
+    ];
+    expected_keys.sort_unstable();
+    assert_eq!(
+        keys, expected_keys,
+        "report.json must keep its exact pre-salvage top-level key set: {keys:?}"
+    );
+}
+
+/// The reverse direction from `test_incomplete_is_driven_only_by_analysis_failure`:
+/// an analysis-failure skip (an unreadable subdirectory, discovered but
+/// never even reaching parsing) still flips `incomplete` to `true`, with no
+/// parse failure and no analyzer-level incompleteness involved at all --
+/// proving `incomplete` really is driven by `SkipReason::is_analysis_failure`
+/// and not merely left permanently `false` by this split.
+#[cfg(unix)]
+#[test]
+fn test_unreadable_subdirectory_skip_marks_incomplete() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let unreadable_dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        unreadable_dir.path().join("readable.js"),
+        "module.exports = {};\n",
+    )
+    .expect("write readable fixture file");
+    let locked = unreadable_dir.path().join("locked");
+    fs::create_dir(&locked).expect("create locked dir");
+    fs::write(locked.join("secret.js"), "module.exports = {};\n").expect("write locked file");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).expect("lock down");
+
+    let outcome = std::panic::catch_unwind(|| run_scan(unreadable_dir.path(), |_| {}));
+
+    // Restore the mode before propagating any panic, so a failing
+    // assertion below still leaves a cleanable tree.
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).expect("unlock");
+    let (_dir, output) = match outcome {
+        Ok(result) => result,
+        Err(payload) => std::panic::resume_unwind(payload),
+    };
+
+    assert!(
+        output.parse_failures.is_empty(),
+        "the locked subdirectory never reaches parsing at all: {:?}",
+        output.parse_failures
+    );
+    assert!(
+        !output.metrics.incomplete,
+        "no parse failure occurred, so the analyzer-level incomplete stays false"
+    );
+    assert!(
+        output.report.incomplete,
+        "an unreadable-subdirectory skip should still mark the report incomplete"
+    );
+}
