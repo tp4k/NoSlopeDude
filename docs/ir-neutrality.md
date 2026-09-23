@@ -28,23 +28,24 @@ Two mechanisms, kept deliberately separate:
 
 | file | corpus |
 |---|---|
-| `clean.report.json` | all of `tests/fixtures/` **minus** the three malformed sources below and **minus** `CLEAN_CORPUS_ONLY_EXCLUSIONS` — intended to be zero parse failures, so any measurement delta here is an unambiguous IR fidelity bug (see *Known gap* below: two pre-existing `tests/fixtures/ir/` fixtures currently break this invariant) |
+| `clean.report.json` | all of `tests/fixtures/` **minus** the three malformed sources below — intended to be zero parse failures, so any measurement delta here is an unambiguous IR fidelity bug (see *Resolved* below: two damaged `tests/fixtures/ir/` fixtures and salvage's own two `tests/fixtures/salvage/` fixtures all carry a `SyntaxError` and are on this walk) |
 | `malformed.report.json` | exactly `tests/fixtures/metrics/broken/Broken.ts`, `tests/fixtures/rules/broken/Broken.java`, `tests/fixtures/report/src/Broken.java` — parse failures the fixture salvage/`SkipReason` work is expected to eventually touch |
 
 WS-6 also introduced `tests/fixtures/salvage/Mixed.java` and `Mixed.ts`
 (`tests/salvage.rs`'s own fixtures, one clean callable and one damaged
-callable each). They are excluded from `clean.report.json`'s walk via
-`tests/neutrality.rs::CLEAN_CORPUS_ONLY_EXCLUSIONS`, a list kept
-deliberately separate from `MALFORMED_CORPUS_SOURCES`: folding a new
-fixture into `MALFORMED_CORPUS_SOURCES` would also grow
-`malformed.report.json`'s own scanned corpus past what its baseline was
-captured from — a corpus-*size* change (a `/top25` length mismatch, a
-`scanned_lines` total moved by a file the baseline never saw at all), which
-`DECLARED_DELTAS` has no way to express as a per-field delta.
-`CLEAN_CORPUS_ONLY_EXCLUSIONS` only ever shrinks the clean-corpus walk;
-`Mixed.java`/`Mixed.ts` never enter either scanned corpus, and needed no
-baseline re-capture at all, since neither baseline was ever captured with
-them present.
+callable each). An earlier round of this stream excluded them from
+`clean.report.json`'s walk via a since-deleted
+`tests/neutrality.rs::CLEAN_CORPUS_ONLY_EXCLUSIONS` list, kept separate
+from `MALFORMED_CORPUS_SOURCES` for the reason given below — but that
+left the two fixtures covered by *neither* Rust corpus test, which
+Decision 20 does not authorize (see *Resolved*, second entry). They now
+join the clean corpus like any other fixture, and `clean.report.json` has
+been re-captured to account for them. Folding them into
+`MALFORMED_CORPUS_SOURCES` instead remains the wrong fix: it would also
+grow `malformed.report.json`'s own scanned corpus past what its baseline
+was captured from — a corpus-*size* change (a `/top25` length mismatch, a
+`scanned_lines` total moved by a file the baseline never saw at all),
+which `DECLARED_DELTAS` has no way to express as a per-field delta.
 
 Both corpora are **copied** at test time (and at script run time) into a
 fresh temporary directory, mirroring each source's path relative to
@@ -94,16 +95,17 @@ over the failure, is:
    into the top 25, the displaced `/top25` rows — nothing else.
 
 `tests/fixtures/salvage/` (WS-6) was the fixture addition this note
-originally anticipated triggering this procedure. It ended up not needing
-it: `Mixed.java`/`Mixed.ts` are excluded from the clean-corpus walk via
-`CLEAN_CORPUS_ONLY_EXCLUSIONS` instead (see the table above) rather than
-folded into `MALFORMED_CORPUS_SOURCES`, so neither committed baseline ever
-needed to change on their account. WS-6's own brief separately forbids
-regenerating either baseline under `tests/golden/neutrality/` at all
-(`AGENTS.md`, *Verification*: "never substitute invented results or
-silently re-baseline an unexplained difference"), which this procedure
-remains available for a human operator to run deliberately, with the two
-proofs below, if a *genuine* corpus-composition change is ever needed.
+originally anticipated triggering this procedure, and it did: `Mixed.java`
+and `Mixed.ts` join the clean corpus (see the third *Resolved* entry
+below) exactly as Decision 20 (`plan.md:1000`, `:1030`) prescribes — an
+earlier round of this stream instead excluded them from the clean-corpus
+walk via a `CLEAN_CORPUS_ONLY_EXCLUSIONS` list, which has since been
+deleted. WS-6's own brief separately forbids regenerating either baseline
+under `tests/golden/neutrality/` at all (`AGENTS.md`, *Verification*:
+"never substitute invented results or silently re-baseline an unexplained
+difference"), which this procedure remains available for a human operator
+to run deliberately, with the two proofs below, if a *genuine*
+corpus-composition change is ever needed.
 
 ### Resolved: two pre-existing damaged fixtures under `tests/fixtures/ir/`
 
@@ -137,24 +139,59 @@ which added `tests/golden/neutrality/` to WS-6's own file scope for exactly
 this re-capture, the same way it did for WS-3 round 1's
 `tests/fixtures/parity/` addition.
 
-**Proof A** (`bash scripts/neutrality_gate.sh`, no args) was run first;
-it reports a pre-existing, out-of-scope divergence (`/scores/java/erosion`,
-against the pinned pre-IR commit, which spans the *whole* IR-retargeting
-effort plus this operator script's own known gap: it has no
-`CLEAN_CORPUS_ONLY_EXCLUSIONS`-equivalent, so its naive "clean" corpus also
-sweeps in `tests/fixtures/salvage/Mixed.java`/`Mixed.ts`). That divergence
-is unrelated to, and unaffected by, the capture below — re-running it
-after the capture reproduces the identical first-divergence pointer, since
-this script never reads `tests/golden/neutrality/` in its default mode; see
-the round's implementer report for the full trace. It is not this gate's
-mechanism and is left untouched (`scripts/neutrality_gate.sh` is not in
-this stream's scope to edit).
+**Proof A** (`bash scripts/neutrality_gate.sh`, no args) diffs the current
+`HEAD` binary against the pinned pre-IR commit directly, live, on the same
+copied corpus — it never reads `tests/golden/neutrality/`, so it is a
+second, independent proof of the same underlying claim the committed
+baselines make, not a re-derivation of them. Its true, measured result,
+established by running the identical command at three points in this
+stream's history (recorded here rather than only in a round's own
+implementer report, since a later reader of this file has no other way to
+find it):
+
+- **`1d1bb8a`** (`4cc8742^`, the commit immediately before WS-6 touched
+  anything): exit 0, `NEUTRALITY: identical on 2 corpora`.
+- **`8af5134`** (WS-6 round 2, `CLEAN_CORPUS_ONLY_EXCLUSIONS` still
+  present): exit 1, `NEUTRALITY: clean corpus diverged at
+  /scores/java/erosion`.
+- **`1ccfeac`** (WS-6 round 3, after `CLEAN_CORPUS_ONLY_EXCLUSIONS` was
+  deleted and `Mixed.java`/`Mixed.ts` joined the Rust harness's own clean
+  corpus): still exit 1, still `NEUTRALITY: clean corpus diverged at
+  /scores/java/erosion` — the identical first-divergence pointer.
+
+This divergence is **WS-6-introduced, not pre-existing**: it was absent at
+`1d1bb8a` and present at every commit inside this stream measured so far.
+It is also, as of round 3, no longer explained by
+`CLEAN_CORPUS_ONLY_EXCLUSIONS` (that mechanism is gone). A full diff
+against the pinned pre-IR binary's own render (round 3, see the
+implementer report's Verification section for the exact `jq` invocation)
+names the actual, remaining cause precisely: five fixtures carry a
+`SyntaxError` and are walked into this script's unfiltered "clean" corpus
+(`tests/fixtures/ir/JavaVarargsAnnotation.java`,
+`tests/fixtures/ir/JsxUnterminatedEntity.tsx`,
+`tests/fixtures/ir/TsUsingParameter.ts`, `tests/fixtures/salvage/Mixed.java`,
+`tests/fixtures/salvage/Mixed.ts`) — salvage measures all five partially
+now, while the *pinned pre-IR binary* still drops each wholesale
+(`skipped_files` shrinks from 13 entries to 8 on the `HEAD` side; the five
+`parse_syntax_error` entries are exactly the five named above). This is
+inherent to what this operator script computes — a live diff against a
+fixed pre-commit-WS-6 binary — and is not itself a bug in the Rust
+harness's own gate (which compares `HEAD` against a baseline captured
+*from* `HEAD`'s own behavior, so it does not see this at all: both
+`tests/neutrality.rs` corpus tests are green). It is an **open,
+WS-6-caused gap** left for a teamlead/coordinator decision (move the
+pinned pre-IR commit forward, or give this script its own
+malformed/exclusion list mirroring `MALFORMED_CORPUS_SOURCES`) — not a
+pre-existing one, and not this round's to silently work around.
+`scripts/neutrality_gate.sh` is out of this stream's scope to edit and
+stays untouched.
 
 **Proof B**, a control diff against the *Rust harness's* own
-`clean_corpus_sources()` (which already excludes
-`CLEAN_CORPUS_ONLY_EXCLUSIONS`), additionally excluding the two
-score-moving fixtures, compared against the then-committed
-`clean.report.json`: confirmed the only residual difference was
+`clean_corpus_sources()` (at round 2 time, this excluded
+`CLEAN_CORPUS_ONLY_EXCLUSIONS`, since deleted — see the third *Resolved*
+entry below), additionally excluding the two score-moving fixtures,
+compared against the then-committed `clean.report.json`: confirmed the
+only residual difference was
 `/skipped_files` (from the third fixture, `TsUsingParameter.ts`, still
 present and still losing its own now-universally-suppressed
 `SyntaxError` skip entry, with zero score impact) — proving nothing else
@@ -178,7 +215,37 @@ authorized and this stream's own `DECLARED_DELTAS` mechanism already
 tolerates the same divergence there without a baseline change — see the
 round's implementer report.
 
-## Normalization
+### Resolved (round 3): `tests/fixtures/salvage/Mixed.java`/`Mixed.ts` joining the clean corpus
+
+Round 2 added `CLEAN_CORPUS_ONLY_EXCLUSIONS` (`tests/neutrality.rs`),
+excluding these two fixtures from `clean_corpus_sources()`'s walk instead
+of following the procedure above — leaving them covered by neither Rust
+corpus test, which Decision 20 does not authorize (it names this exact
+addition as one that "changes clean-corpus membership … so WS-6
+re-captures within its own round", the same pattern already used for the
+two fixtures in the entry above). Round 3 deleted that list and let the
+two fixtures join `clean_corpus_sources()` like any other fixture.
+
+Predicted bound before capturing: each fixture contributes one clean
+callable (`safe`) that is measured, and one damaged callable (`broken`)
+that salvage excludes but whose surrounding wrapper lines still count per
+D12 (`scanned_lines` is unconditioned on callable boundaries) —
+`scores.{overall,java,js_ts}.verbosity.scanned_lines` should move by a
+small positive delta, `erosion`/`ratio` should move arithmetically with
+it, and nothing else (no new `skipped_files` entry: a partially damaged
+file is no longer a whole-file skip; no new finding: `safe` trips none of
+the six rules; no `top25` change).
+
+**Capture**: `NSD_NEUTRALITY_CAPTURE=1 cargo test --test neutrality
+test_clean_corpus_report_is_byte_identical_to_the_pre_ir_baseline`
+re-captured `clean.report.json` from `HEAD`; `git status --short`
+afterwards showed exactly that one golden file and `tests/neutrality.rs`
+itself changed (`malformed.report.json` untouched, since this narrower
+invocation — unlike `scripts/neutrality_gate.sh --capture` — runs only
+the one test). The resulting diff matched the prediction exactly:
+`scanned_lines` moved `+10`/`+6`/`+4` (overall/java/js_ts) with
+`erosion`/`ratio` moving arithmetically, nothing else. See the round 3
+implementer report for the full committed diff.
 
 Two normalization mechanisms exist, at two different levels:
 
