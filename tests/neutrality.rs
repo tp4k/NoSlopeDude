@@ -473,7 +473,16 @@ enum ArchiveGate {
 }
 
 fn archive_gate() -> ArchiveGate {
-    match std::env::var_os(ARCHIVED_REPORT_ENV_VAR) {
+    classify_archive_gate(std::env::var_os(ARCHIVED_REPORT_ENV_VAR))
+}
+
+/// Pure classification of a possibly-absent `NSD_ARCHIVED_REPORT` value,
+/// split out from `archive_gate`'s `env::var_os` call so `None` (the var is
+/// unset) and `Some("")` (the var is set but empty) can each be asserted
+/// directly, rather than only observed indirectly through whatever the test
+/// process's own environment happens to carry when it runs.
+fn classify_archive_gate(raw: Option<OsString>) -> ArchiveGate {
+    match raw {
         Some(path) if !path.is_empty() => ArchiveGate::Resolved(PathBuf::from(path)),
         _ => ArchiveGate::Pending,
     }
@@ -487,7 +496,16 @@ fn pending_notice() -> String {
 }
 
 fn verification_required() -> bool {
-    std::env::var_os(REQUIRE_ARCHIVE_VERIFIED_ENV_VAR).is_some_and(|value| !value.is_empty())
+    classify_verification_requirement(std::env::var_os(REQUIRE_ARCHIVE_VERIFIED_ENV_VAR))
+}
+
+/// Pure classification of a possibly-absent `NSD_REQUIRE_ARCHIVE_VERIFIED`
+/// value, split out the same way `classify_archive_gate` is: so `None` and
+/// `Some("")` (unset, and set-but-empty) can each be asserted directly as
+/// "not required", rather than only observed through the process's own
+/// environment.
+fn classify_verification_requirement(raw: Option<OsString>) -> bool {
+    matches!(raw, Some(value) if !value.is_empty())
 }
 
 fn required_but_pending_message() -> String {
