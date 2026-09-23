@@ -393,6 +393,23 @@ fn test_malformed_corpus_report_matches_its_baseline_with_declared_deltas_only()
         diffs.is_empty(),
         "malformed corpus report.json carries undeclared deltas: {diffs:?}"
     );
+
+    // `is_declared` suppresses an array-length mismatch at `/skipped_files`
+    // regardless of what the new length actually is -- the declared delta's
+    // intent is specifically the documented 3-to-0 shrink (every
+    // `MALFORMED_CORPUS_SOURCES` entry's whole-file skip disappearing under
+    // salvage), not "any change to this array is fine". Pin the actual
+    // length directly so a regression that leaves a stray skip entry behind
+    // (or introduces a new one) cannot hide behind the declared delta.
+    let skipped_files = actual["skipped_files"]
+        .as_array()
+        .expect("report has a skipped_files array");
+    assert_eq!(
+        skipped_files.len(),
+        0,
+        "expected every MALFORMED_CORPUS_SOURCES entry's skip to have disappeared under \
+         salvage, found: {skipped_files:?}"
+    );
 }
 
 /// Every fixture under `tests/fixtures/` must land in exactly one of the two
