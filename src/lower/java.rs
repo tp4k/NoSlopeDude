@@ -35,8 +35,8 @@ fn is_default_label(node: Node) -> bool {
     node.child(0).is_some_and(|child| child.kind() == "default")
 }
 
-fn decision_kind(node: Node) -> Option<DecisionKind> {
-    match node.kind() {
+fn decision_kind(node: Node, kind: &str) -> Option<DecisionKind> {
+    match kind {
         "if_statement" => Some(DecisionKind::Branch),
         "for_statement" | "enhanced_for_statement" | "while_statement" | "do_statement" => {
             Some(DecisionKind::Loop)
@@ -63,29 +63,28 @@ fn operator_text<'tree>(node: Node<'tree>) -> Option<&'tree str> {
 /// Whether `node` itself is the block directly forming a `catch` clause's
 /// body -- an O(1) check; `src/lower/mod.rs`'s `build_ir` combines this with
 /// the parent's own already-computed flag to answer "or sits inside it"
-/// without walking back up the tree per node.
-fn is_catch_body_root(node: Node) -> bool {
-    is_block_kind(node.kind())
-        && node
-            .parent()
-            .is_some_and(|parent| parent.kind() == "catch_clause")
+/// without walking back up the tree per node. `parent_kind` is the caller's
+/// already-threaded parent (`build_ir` passes it down the traversal instead
+/// of calling `node.parent()`, which in tree-sitter 0.25.10 restarts at the
+/// tree root and descends, turning one linear tree build into `Θ(depth)`
+/// work per node).
+fn is_catch_body_root(kind: &str, parent_kind: Option<&str>) -> bool {
+    is_block_kind(kind) && parent_kind == Some("catch_clause")
 }
 
 /// D15's Java clone-candidate containers (`clones::statement_children`'s
 /// Java arms, re-derived here since that function is private): a direct
 /// named, non-comment child of a `block`/`constructor_body`, or a
 /// `switch_block_statement_group`'s direct child other than its own
-/// `switch_label`.
-pub(super) fn is_clone_statement(node: Node) -> bool {
-    if !node.is_named() || is_comment_kind(node.kind(), LanguageFamily::Java) {
+/// `switch_label`. Takes the already-threaded `parent_kind` rather than
+/// calling `node.parent()` -- see `is_catch_body_root`'s doc comment.
+pub(super) fn is_clone_statement(node: Node, kind: &str, parent_kind: Option<&str>) -> bool {
+    if !node.is_named() || is_comment_kind(kind, LanguageFamily::Java) {
         return false;
     }
-    let Some(parent) = node.parent() else {
-        return false;
-    };
-    match parent.kind() {
-        "block" | "constructor_body" => true,
-        "switch_block_statement_group" => node.kind() != "switch_label",
+    match parent_kind {
+        Some("block") | Some("constructor_body") => true,
+        Some("switch_block_statement_group") => kind != "switch_label",
         _ => false,
     }
 }
@@ -94,13 +93,10 @@ pub(super) fn is_clone_statement(node: Node) -> bool {
 /// failures*): a varargs parameter's annotation, e.g.
 /// `void m(Class<?> @Nullable ... cs)`, produces an `ERROR` node directly
 /// inside `formal_parameters`. Anything else `ERROR`/`MISSING` falls back to
-/// `Unclassified` rather than going untyped.
-fn classify_damage(node: Node) -> Option<DamageKind> {
-    if node.is_error()
-        && node
-            .parent()
-            .is_some_and(|parent| parent.kind() == "formal_parameters")
-    {
+/// `Unclassified` rather than going untyped. Takes the already-threaded
+/// `parent_kind` -- see `is_catch_body_root`'s doc comment.
+fn classify_damage(node: Node, parent_kind: Option<&str>) -> Option<DamageKind> {
+    if node.is_error() && parent_kind == Some("formal_parameters") {
         return Some(DamageKind::JavaVarargsAnnotation);
     }
     if node.is_error() || node.is_missing() {
@@ -109,15 +105,21 @@ fn classify_damage(node: Node) -> Option<DamageKind> {
     None
 }
 
-pub(super) fn classify(node: Node, _source: &str) -> Classification {
+/// `parent` is the tree-sitter `Node` `src/lower/mod.rs`'s `build_ir` already
+/// holds for this node's parent (threaded down the traversal in a stack
+/// mirroring its own node stack), so nothing below this point calls
+/// `node.parent()`. `kind`/`parent_kind` are each computed exactly once here
+/// and threaded into every helper, rather than every helper re-deriving
+/// `node.kind()` (a strlen + full-UTF8-validate call) independently.
+pub(super) fn classify(node: Node, _source: &str, parent: Option<Node>) -> Classification {
+    let kind = node.kind();
+    let parent_kind = parent.map(|parent| parent.kind());
     Classification {
-        decision: decision_kind(node),
-        is_terminator: TERMINATOR_KINDS.contains(&node.kind()),
-        in_block: node
-            .parent()
-            .is_some_and(|parent| is_block_kind(parent.kind())),
-        is_catch_body_root: is_catch_body_root(node),
-        is_clone_statement: is_clone_statement(node),
-        damage: classify_damage(node),
+        decision: decision_kind(node, kind),
+        is_terminator: TERMINATOR_KINDS.contains(&kind),
+        in_block: parent_kind.is_some_and(is_block_kind),
+        is_catch_body_root: is_catch_body_root(kind, parent_kind),
+        is_clone_statement: is_clone_statement(node, kind, parent_kind),
+        damage: classify_damage(node, parent_kind),
     }
 }

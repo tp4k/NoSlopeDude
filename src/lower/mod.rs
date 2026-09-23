@@ -95,10 +95,19 @@ struct Classification {
     damage: Option<DamageKind>,
 }
 
-fn classify(node: Node, language: LanguageFamily, source: &str) -> Classification {
+/// `parent` is `build_ir`'s already-threaded parent `Node` (see that
+/// function's own doc comment for why: `node.parent()` restarts at the tree
+/// root in tree-sitter 0.25.10, so threading it down the traversal keeps the
+/// whole lowering `Θ(n)` instead of `Θ(n·depth)`).
+fn classify(
+    node: Node,
+    language: LanguageFamily,
+    source: &str,
+    parent: Option<Node>,
+) -> Classification {
     match language {
-        LanguageFamily::Java => java::classify(node, source),
-        LanguageFamily::JsTs => jsts::classify(node, source),
+        LanguageFamily::Java => java::classify(node, source, parent),
+        LanguageFamily::JsTs => jsts::classify(node, source, parent),
     }
 }
 
@@ -107,14 +116,19 @@ fn classify(node: Node, language: LanguageFamily, source: &str) -> Classificatio
 /// re-derived here (that function is private to `src/clones/mod.rs`, and
 /// this stream may not widen it). `java::classify`/`jsts::classify` each call
 /// their own copy directly to populate `Classification::is_clone_statement`;
-/// this dispatcher exists only for the floor test below, which needs to
-/// enumerate the tree-sitter nodes it compares the lowering's tokens
-/// against.
+/// this dispatcher exists only for tests below, which need to enumerate the
+/// tree-sitter nodes they compare the lowering's tokens against. Test-only,
+/// so deriving `node.parent()` directly (rather than threading it, as
+/// `build_ir` does for the production path) is fine: nothing here runs
+/// against the deep-nesting perf fixture.
 #[cfg(test)]
 fn is_clone_statement(node: Node, language: LanguageFamily) -> bool {
+    let kind = node.kind();
+    let parent = node.parent();
+    let parent_kind = parent.map(|parent| parent.kind());
     match language {
-        LanguageFamily::Java => java::is_clone_statement(node),
-        LanguageFamily::JsTs => jsts::is_clone_statement(node),
+        LanguageFamily::Java => java::is_clone_statement(node, kind, parent_kind),
+        LanguageFamily::JsTs => jsts::is_clone_statement(node, kind, parent, parent_kind),
     }
 }
 
@@ -202,12 +216,18 @@ fn build_ir(
     // `parent_in_catch_body` is the already-computed `in_catch_body` flag of
     // this node's own parent (or `false` for `root`), inherited rather than
     // re-derived -- see `Classification::is_catch_body_root`'s doc comment.
+    // `parent` is this node's own parent `Node` (`None` for `root`),
+    // threaded down the traversal by the caller for the same reason: a
+    // `node.parent()` call restarts at the tree root and descends in
+    // tree-sitter 0.25.10, so re-deriving it per node would turn this
+    // otherwise-linear tree build into `Θ(n·depth)` work.
     let open = |node: Node,
+                parent: Option<Node>,
                 parent_in_catch_body: bool,
                 damage_out: &mut Vec<DamageSpan>|
      -> (IrNode, bool) {
         let span = Span::from_node(node);
-        let classification = classify(node, language, source);
+        let classification = classify(node, language, source, parent);
         if let Some(kind) = classification.damage {
             damage_out.push(DamageSpan { kind, span });
         }
@@ -225,24 +245,36 @@ fn build_ir(
             in_block: classification.in_block,
             in_catch_body,
             token,
-            children: Vec::new(),
+            children: Vec::with_capacity(node.child_count()),
         };
         (ir_node, in_catch_body)
     };
 
     let mut cursor = root.walk();
-    let (root_node, root_in_catch_body) = open(root, false, damage_out);
+    let (root_node, root_in_catch_body) = open(root, None, false, damage_out);
     let mut stack: Vec<IrNode> = vec![root_node];
     // Mirrors `stack`'s depth exactly: `catch_flags[i]` is `stack[i]`'s own
     // `in_catch_body` flag, so a child node reads its parent's flag in O(1)
     // via `catch_flags.last()` instead of walking back up the tree.
     let mut catch_flags: Vec<bool> = vec![root_in_catch_body];
+    // Mirrors `stack`'s depth exactly too: `parents[i]` is the tree-sitter
+    // `Node` that `stack[i]` was itself opened from, so a child node reads
+    // its parent's `Node` in O(1) via `parents.last()` instead of via
+    // `node.parent()`.
+    let mut parents: Vec<Node> = vec![root];
     loop {
         if cursor.goto_first_child() {
             let parent_in_catch_body = *catch_flags.last().unwrap_or(&false);
-            let (node, in_catch_body) = open(cursor.node(), parent_in_catch_body, damage_out);
+            let parent = *parents.last().unwrap_or(&root);
+            let (node, in_catch_body) = open(
+                cursor.node(),
+                Some(parent),
+                parent_in_catch_body,
+                damage_out,
+            );
             stack.push(node);
             catch_flags.push(in_catch_body);
+            parents.push(cursor.node());
             continue;
         }
         loop {
@@ -250,15 +282,23 @@ fn build_ir(
                 return fallback_node(root);
             };
             catch_flags.pop();
+            parents.pop();
             let Some(parent) = stack.last_mut() else {
                 return finished;
             };
             parent.children.push(finished);
             if cursor.goto_next_sibling() {
                 let parent_in_catch_body = *catch_flags.last().unwrap_or(&false);
-                let (node, in_catch_body) = open(cursor.node(), parent_in_catch_body, damage_out);
+                let parent_node = *parents.last().unwrap_or(&root);
+                let (node, in_catch_body) = open(
+                    cursor.node(),
+                    Some(parent_node),
+                    parent_in_catch_body,
+                    damage_out,
+                );
                 stack.push(node);
                 catch_flags.push(in_catch_body);
+                parents.push(cursor.node());
                 break;
             }
             if !cursor.goto_parent() {

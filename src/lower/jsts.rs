@@ -28,8 +28,8 @@ fn is_block_kind(kind: &str) -> bool {
     kind == "statement_block"
 }
 
-fn decision_kind(node: Node) -> Option<DecisionKind> {
-    match node.kind() {
+fn decision_kind(node: Node, kind: &str) -> Option<DecisionKind> {
+    match kind {
         "if_statement" => Some(DecisionKind::Branch),
         "for_statement" | "for_in_statement" | "while_statement" | "do_statement" => {
             Some(DecisionKind::Loop)
@@ -56,28 +56,37 @@ fn operator_text<'tree>(node: Node<'tree>) -> Option<&'tree str> {
 /// Whether `node` itself is the block directly forming a `catch` clause's
 /// body -- an O(1) check; `src/lower/mod.rs`'s `build_ir` combines this with
 /// the parent's own already-computed flag to answer "or sits inside it"
-/// without walking back up the tree per node.
-fn is_catch_body_root(node: Node) -> bool {
-    is_block_kind(node.kind())
-        && node
-            .parent()
-            .is_some_and(|parent| parent.kind() == "catch_clause")
+/// without walking back up the tree per node. `parent_kind` is the caller's
+/// already-threaded parent (`build_ir` passes it down the traversal instead
+/// of calling `node.parent()`, which in tree-sitter 0.25.10 restarts at the
+/// tree root and descends, turning one linear tree build into `Θ(depth)`
+/// work per node).
+fn is_catch_body_root(kind: &str, parent_kind: Option<&str>) -> bool {
+    is_block_kind(kind) && parent_kind == Some("catch_clause")
 }
 
 /// D15's JS/TS clone-candidate containers (`clones::statement_children`'s
 /// JS/TS arms, re-derived here since that function is private): a direct
 /// named, non-comment child of a `statement_block` or the top-level
 /// `program`, or a `switch_case`/`switch_default`'s `body`-field child.
-pub(super) fn is_clone_statement(node: Node) -> bool {
-    if !node.is_named() || is_comment_kind(node.kind(), LanguageFamily::JsTs) {
+/// Takes the already-threaded `parent`/`parent_kind` rather than calling
+/// `node.parent()` -- see `is_catch_body_root`'s doc comment. The
+/// `switch_case`/`switch_default` arm is the one caller in either lowering
+/// that needs the parent `Node` itself, not just its kind, since
+/// `children_by_field_name` is a method on `Node`.
+pub(super) fn is_clone_statement(
+    node: Node,
+    kind: &str,
+    parent: Option<Node>,
+    parent_kind: Option<&str>,
+) -> bool {
+    if !node.is_named() || is_comment_kind(kind, LanguageFamily::JsTs) {
         return false;
     }
-    let Some(parent) = node.parent() else {
-        return false;
-    };
-    match parent.kind() {
-        "statement_block" | "program" => true,
-        "switch_case" | "switch_default" => {
+    match parent_kind {
+        Some("statement_block") | Some("program") => true,
+        Some("switch_case") | Some("switch_default") => {
+            let Some(parent) = parent else { return false };
             let mut cursor = parent.walk();
             let found = parent
                 .children_by_field_name("body", &mut cursor)
@@ -95,11 +104,11 @@ pub(super) fn is_clone_statement(node: Node) -> bool {
 /// unterminated `&` inside a JSX attribute string produces an `ERROR` node
 /// whose parent is a `string` and whose own first child's kind is literally
 /// `"&"`. Anything else `ERROR`/`MISSING` falls back to `Unclassified`
-/// rather than going untyped.
-fn classify_damage(node: Node) -> Option<DamageKind> {
+/// rather than going untyped. Takes the already-threaded `parent_kind` --
+/// see `is_catch_body_root`'s doc comment.
+fn classify_damage(node: Node, parent_kind: Option<&str>) -> Option<DamageKind> {
     if node.is_error() {
         let first_child_kind = node.child(0).map(|child| child.kind());
-        let parent_kind = node.parent().map(|parent| parent.kind());
         if parent_kind == Some("formal_parameters") && first_child_kind == Some("using") {
             return Some(DamageKind::TsUsingParameterName);
         }
@@ -113,15 +122,21 @@ fn classify_damage(node: Node) -> Option<DamageKind> {
     None
 }
 
-pub(super) fn classify(node: Node, _source: &str) -> Classification {
+/// `parent` is the tree-sitter `Node` `src/lower/mod.rs`'s `build_ir` already
+/// holds for this node's parent (threaded down the traversal in a stack
+/// mirroring its own node stack), so nothing below this point calls
+/// `node.parent()`. `kind`/`parent_kind` are each computed exactly once here
+/// and threaded into every helper, rather than every helper re-deriving
+/// `node.kind()` (a strlen + full-UTF8-validate call) independently.
+pub(super) fn classify(node: Node, _source: &str, parent: Option<Node>) -> Classification {
+    let kind = node.kind();
+    let parent_kind = parent.map(|parent| parent.kind());
     Classification {
-        decision: decision_kind(node),
-        is_terminator: TERMINATOR_KINDS.contains(&node.kind()),
-        in_block: node
-            .parent()
-            .is_some_and(|parent| is_block_kind(parent.kind())),
-        is_catch_body_root: is_catch_body_root(node),
-        is_clone_statement: is_clone_statement(node),
-        damage: classify_damage(node),
+        decision: decision_kind(node, kind),
+        is_terminator: TERMINATOR_KINDS.contains(&kind),
+        in_block: parent_kind.is_some_and(is_block_kind),
+        is_catch_body_root: is_catch_body_root(kind, parent_kind),
+        is_clone_statement: is_clone_statement(node, kind, parent, parent_kind),
+        damage: classify_damage(node, parent_kind),
     }
 }
