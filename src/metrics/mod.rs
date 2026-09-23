@@ -307,15 +307,7 @@ fn find_ir_subtree(root: &IrNode, target: Span) -> Option<&IrNode> {
 /// match. Kept only so a defect here degrades (D18) instead of panicking --
 /// same reasoning as `lower::fallback_node`'s own doc comment.
 fn fallback_ir_body(span: Span) -> IrNode {
-    IrNode {
-        span,
-        executable: false,
-        decision: None,
-        is_terminator: false,
-        in_block: false,
-        in_catch_body: false,
-        children: Vec::new(),
-    }
+    IrNode::empty(span)
 }
 
 /// `accumulate_line`'s own logic (see its doc comment), re-derived for a

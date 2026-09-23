@@ -14,7 +14,7 @@ use tree_sitter::Node;
 /// M0c's fingerprint keys on this alongside the two lowering versions below;
 /// bump it whenever `IrNode`'s shape changes in a way that would change what
 /// a downstream consumer reads off it.
-pub const IR_VERSION: u32 = 1;
+pub const IR_VERSION: u32 = 2;
 
 /// A byte-and-line span back into the original source text a `ParsedFile`
 /// holds (D11/SLOC's requirement on the IR): both a byte range, for exact
@@ -78,6 +78,45 @@ pub struct DamageSpan {
     pub span: Span,
 }
 
+/// The six rules' terminator-ness classification, narrowed from a single
+/// bool to the four kinds `nsd-plan-final.md`'s D22/D7 table names, so the
+/// two narrower subsets below (`is_unreachable_terminator`,
+/// `is_return_or_throw`) are expressible without a grammar string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminatorKind {
+    Return,
+    Throw,
+    Break,
+    Continue,
+}
+
+/// D8's callable table: one entry per callable-kind node that has a body,
+/// in document order, alongside `IrNode`'s per-node tree so per-node memory
+/// does not grow to carry it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IrCallable {
+    /// The callable declaration node's own span.
+    pub span: Span,
+    /// The callable's body node's span (the `body` field child, else -- for
+    /// Java's `static_initializer`, the one callable kind with no `body`
+    /// field -- its first `block` child).
+    pub body_span: Span,
+    /// D10's resolved name.
+    pub name: String,
+}
+
+/// The self-is-block predicate's table: one entry per block-kind node
+/// (`SyntaxBlock` classification), in document order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IrBlock {
+    pub span: Span,
+    /// The grammar `kind` string this block came from -- carried because
+    /// `model::SyntaxBlock::kind` is itself a `&'static str` whose value must
+    /// not move; produced only inside `src/lower/`, the one directory the
+    /// lowering-isolation freeze exempts.
+    pub kind: &'static str,
+}
+
 /// The normalized node every lowering produces: one node per original
 /// tree-sitter node, in the same shape, carrying only the normalized facts
 /// the *What the IR must carry* table names.
@@ -89,9 +128,11 @@ pub struct IrNode {
     pub executable: bool,
     /// `cc`'s uniform decision-node kind, when this node is one.
     pub decision: Option<DecisionKind>,
-    /// The six rules' terminator-ness predicate: `return`/`break`/
+    /// The six rules' terminator-ness classification: `return`/`break`/
     /// `continue`/`throw`, identical node-kind literals in both grammars.
-    pub is_terminator: bool,
+    /// `Some` at all is `is_terminator`; the two narrower subsets below key
+    /// on which variant.
+    pub terminator: Option<TerminatorKind>,
     /// The six rules' block-membership predicate: this node's own immediate
     /// parent is a `{ … }` block (not, e.g., an unbraced `if`'s single
     /// statement body).
@@ -99,7 +140,46 @@ pub struct IrNode {
     /// The six rules' catch-body predicate: this node is the block
     /// directly forming a `catch` clause's body, or sits inside it.
     pub in_catch_body: bool,
+    /// `exec_lines::is_comment_kind`, reused rather than restated: the
+    /// comment-vs-anonymous-leaf marker (with `is_named` below).
+    pub is_comment: bool,
+    /// Tree-sitter's own `node.is_named()`: with `is_comment`, separates a
+    /// comment from an anonymous punctuation leaf -- both otherwise read as
+    /// `executable == false`. Also what `statement_children` ("named,
+    /// non-comment direct children") becomes over `IrNode::children`, which
+    /// holds anonymous children too.
+    pub is_named: bool,
+    /// D15: this node is a direct statement child of one of the six
+    /// clone-candidate containers (`java::is_clone_statement` /
+    /// `jsts::is_clone_statement`).
+    pub is_clone_statement: bool,
+    /// JS/TS only, always `false` from the Java lowering: a hoisted
+    /// function declaration or a type-only declaration, exempt from the
+    /// unreachable-after-return rule even though it sits after an
+    /// unconditional terminator.
+    pub is_hoisted_or_type_only: bool,
     pub children: Vec<IrNode>,
+}
+
+impl IrNode {
+    /// A structurally-empty `IrNode` for the one degrade-don't-panic
+    /// fallback outside `src/lower/` (`metrics::fallback_ir_body`, D18):
+    /// all flags false, no decision, no terminator, no children.
+    pub fn empty(span: Span) -> IrNode {
+        IrNode {
+            span,
+            executable: false,
+            decision: None,
+            terminator: None,
+            in_block: false,
+            in_catch_body: false,
+            is_comment: false,
+            is_named: false,
+            is_clone_statement: false,
+            is_hoisted_or_type_only: false,
+            children: Vec::new(),
+        }
+    }
 }
 
 impl Drop for IrNode {
@@ -123,7 +203,25 @@ impl Drop for IrNode {
 /// The six rules' terminator-ness query: no grammar string, just the flag
 /// the lowering already computed.
 pub fn is_terminator(node: &IrNode) -> bool {
-    node.is_terminator
+    node.terminator.is_some()
+}
+
+/// The narrower terminator subset `rules::UNREACHABLE_TERMINATOR_KINDS`
+/// names: `return`/`throw`/`break`, not `continue`.
+pub fn is_unreachable_terminator(node: &IrNode) -> bool {
+    matches!(
+        node.terminator,
+        Some(TerminatorKind::Return) | Some(TerminatorKind::Throw) | Some(TerminatorKind::Break)
+    )
+}
+
+/// The narrower terminator subset `rules::always_returns` names:
+/// `return`/`throw` only.
+pub fn is_return_or_throw(node: &IrNode) -> bool {
+    matches!(
+        node.terminator,
+        Some(TerminatorKind::Return) | Some(TerminatorKind::Throw)
+    )
 }
 
 /// The six rules' block-membership query.

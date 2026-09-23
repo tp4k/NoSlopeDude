@@ -4,23 +4,95 @@
 
 use tree_sitter::Node;
 
-#[cfg(test)]
 use crate::exec_lines::is_comment_kind;
-use crate::ir::{DamageKind, DecisionKind};
-#[cfg(test)]
+use crate::ir::{DamageKind, DecisionKind, Span, TerminatorKind};
 use crate::model::LanguageFamily;
 
-use super::Classification;
+use super::{CallableInfo, Classification};
 
 /// D22/D7's terminator kinds: identical node-kind literals to Java's own
 /// table, kept as a separate copy since each lowering owns its table
 /// independently.
-const TERMINATOR_KINDS: &[&str] = &[
-    "return_statement",
-    "break_statement",
-    "continue_statement",
-    "throw_statement",
+fn terminator_kind(kind: &str) -> Option<TerminatorKind> {
+    match kind {
+        "return_statement" => Some(TerminatorKind::Return),
+        "break_statement" => Some(TerminatorKind::Break),
+        "continue_statement" => Some(TerminatorKind::Continue),
+        "throw_statement" => Some(TerminatorKind::Throw),
+        _ => None,
+    }
+}
+
+/// D8's JS/TS callable kinds (`metrics::JSTS_CALLABLE_KINDS`, private to a
+/// module this stream may not touch -- re-derived here rather than shared).
+const CALLABLE_KINDS: &[&str] = &[
+    "function_declaration",
+    "generator_function_declaration",
+    "function_expression",
+    "arrow_function",
+    "method_definition",
 ];
+
+/// D8's body-node finder: every JS/TS callable kind exposes its body through
+/// the `body` field (no Java-style fieldless fallback needed on this side).
+fn callable_body(node: Node) -> Option<Node> {
+    node.child_by_field_name("body")
+}
+
+/// D10: the node's own `name` field; else the name from an enclosing
+/// `variable_declarator`, `pair` or `assignment_expression`; else
+/// `<anonymous>@<line>`. The same table as Java's own copy -- see
+/// `IrCallable`'s doc comment on why both lowerings carry it.
+fn resolve_name(node: Node, parent: Option<Node>, source: &str) -> String {
+    if let Some(name_node) = node.child_by_field_name("name") {
+        return node_text(name_node, source);
+    }
+    if let Some(parent) = parent {
+        let field = match parent.kind() {
+            "variable_declarator" => Some("name"),
+            "pair" => Some("key"),
+            "assignment_expression" => Some("left"),
+            _ => None,
+        };
+        if let Some(name_node) = field.and_then(|field| parent.child_by_field_name(field)) {
+            return node_text(name_node, source);
+        }
+    }
+    format!("<anonymous>@{}", node.start_position().row + 1)
+}
+
+fn node_text(node: Node, source: &str) -> String {
+    node.utf8_text(source.as_bytes()).unwrap_or("").to_string()
+}
+
+fn callable_info(
+    node: Node,
+    kind: &str,
+    parent: Option<Node>,
+    source: &str,
+) -> Option<CallableInfo> {
+    if !CALLABLE_KINDS.contains(&kind) {
+        return None;
+    }
+    let body = callable_body(node)?;
+    Some(CallableInfo {
+        body_span: Span::from_node(body),
+        name: resolve_name(node, parent, source),
+    })
+}
+
+/// D22 exception, JS/TS only (`rules::is_hoisted_or_type_only`, re-derived
+/// here since that function is private): a hoisted function declaration or
+/// a type-only declaration, exempt from the unreachable-after-return rule.
+fn is_hoisted_or_type_only(kind: &str) -> bool {
+    matches!(
+        kind,
+        "function_declaration"
+            | "generator_function_declaration"
+            | "type_alias_declaration"
+            | "interface_declaration"
+    )
+}
 
 /// Mirrors `metrics::is_block_kind`'s JS/TS arm (private to `src/metrics/
 /// mod.rs`): a `{ … }` scope is a `statement_block` only -- deliberately not
@@ -79,12 +151,8 @@ fn is_catch_body_root(kind: &str, parent_kind: Option<&str>) -> bool {
 /// `node.parent()` -- see `is_catch_body_root`'s doc comment. The
 /// `switch_case`/`switch_default` arm is the one caller in either lowering
 /// that needs the parent `Node` itself, not just its kind, since
-/// `children_by_field_name` is a method on `Node`. Test-only: kept for WS-4's
-/// clone-floor work, called today only from `super::is_clone_statement`'s
-/// test dispatcher (`IrNode::token`, the one production reader of this
-/// classification, was removed as unread and unbounded -- see
-/// `ir::IrNode`'s doc comment).
-#[cfg(test)]
+/// `children_by_field_name` is a method on `Node`. Production: its result is
+/// `IrNode::is_clone_statement`.
 pub(super) fn is_clone_statement(
     node: Node,
     kind: &str,
@@ -139,14 +207,18 @@ fn classify_damage(node: Node, parent_kind: Option<&str>) -> Option<DamageKind> 
 /// `node.parent()`. `kind`/`parent_kind` are each computed exactly once here
 /// and threaded into every helper, rather than every helper re-deriving
 /// `node.kind()` (a strlen + full-UTF8-validate call) independently.
-pub(super) fn classify(node: Node, _source: &str, parent: Option<Node>) -> Classification {
+pub(super) fn classify(node: Node, source: &str, parent: Option<Node>) -> Classification {
     let kind = node.kind();
     let parent_kind = parent.map(|parent| parent.kind());
     Classification {
         decision: decision_kind(node, kind),
-        is_terminator: TERMINATOR_KINDS.contains(&kind),
+        terminator: terminator_kind(kind),
         in_block: parent_kind.is_some_and(is_block_kind),
         is_catch_body_root: is_catch_body_root(kind, parent_kind),
         damage: classify_damage(node, parent_kind),
+        is_clone_statement: is_clone_statement(node, kind, parent, parent_kind),
+        is_hoisted_or_type_only: is_hoisted_or_type_only(kind),
+        is_block: is_block_kind(kind),
+        callable: callable_info(node, kind, parent, source),
     }
 }

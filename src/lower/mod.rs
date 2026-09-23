@@ -16,20 +16,21 @@ use std::path::PathBuf;
 
 use tree_sitter::Node;
 
-#[cfg(test)]
 use crate::exec_lines::is_comment_kind;
 use crate::exec_lines::is_executable_leaf;
-use crate::ir::{DamageKind, DamageSpan, DecisionKind, IrNode, Span};
+use crate::ir::{
+    DamageKind, DamageSpan, DecisionKind, IrBlock, IrCallable, IrNode, Span, TerminatorKind,
+};
 use crate::model::LanguageFamily;
 use crate::parse::ParsedFile;
 
 /// M0c's fingerprint keys on this alongside `ir::IR_VERSION`; bump it
 /// whenever the Java lowering's classification changes what an `IrNode`
 /// carries for a Java file.
-pub const JAVA_LOWERING_VERSION: u32 = 1;
+pub const JAVA_LOWERING_VERSION: u32 = 2;
 
 /// The JS/TS counterpart of `JAVA_LOWERING_VERSION`.
-pub const JSTS_LOWERING_VERSION: u32 = 1;
+pub const JSTS_LOWERING_VERSION: u32 = 2;
 
 /// One D14 separator between adjacent leaf tokens in a statement's
 /// normalized stream -- the same control character
@@ -46,15 +47,17 @@ pub const JSTS_LOWERING_VERSION: u32 = 1;
 #[cfg(test)]
 const STATEMENT_TOKEN_SEPARATOR: char = '\u{1}';
 
-/// One lowered file: the IR tree, plus every typed damage span found while
-/// building it. Nothing in this stream reads `damage` or `root` yet -- the
-/// pipeline only builds this per file (M0b item 5's "wire the lowering in",
-/// not "retarget an analyzer").
+/// One lowered file: the IR tree, every typed damage span found while
+/// building it, and the two per-file side tables (D8's callables, the
+/// self-is-block predicate's blocks) -- accumulated the same way `damage`
+/// is, so per-node memory does not grow to carry them.
 pub struct IrFile {
     pub relative_path: PathBuf,
     pub language: LanguageFamily,
     pub root: IrNode,
     pub damage: Vec<DamageSpan>,
+    pub callables: Vec<IrCallable>,
+    pub blocks: Vec<IrBlock>,
 }
 
 /// Lowers every parsed file, one rayon task per file (D21), matching the
@@ -67,17 +70,23 @@ pub fn lower_all(parsed_files: &[ParsedFile]) -> Vec<IrFile> {
 /// Lowers one parsed file's whole tree into its `IrNode` root.
 pub fn lower_file(file: &ParsedFile) -> IrFile {
     let mut damage = Vec::new();
+    let mut callables = Vec::new();
+    let mut blocks = Vec::new();
     let root = build_ir(
         file.tree.root_node(),
         file.language,
         &file.source,
         &mut damage,
+        &mut callables,
+        &mut blocks,
     );
     IrFile {
         relative_path: file.relative_path.clone(),
         language: file.language,
         root,
         damage,
+        callables,
+        blocks,
     }
 }
 
@@ -86,7 +95,7 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
 /// a node without needing to know `IrNode`'s `children` field exists.
 struct Classification {
     decision: Option<DecisionKind>,
-    is_terminator: bool,
+    terminator: Option<TerminatorKind>,
     in_block: bool,
     /// Whether this exact node is the block directly forming a `catch`
     /// clause's body -- an O(1) check per node. `IrNode::in_catch_body`
@@ -99,6 +108,25 @@ struct Classification {
     /// `test_deeply_nested_file_does_not_abort_the_scan` exists to catch).
     is_catch_body_root: bool,
     damage: Option<DamageKind>,
+    /// D15: this node is a direct statement child of one of the six
+    /// clone-candidate containers.
+    is_clone_statement: bool,
+    /// JS/TS only; always `false` from the Java lowering.
+    is_hoisted_or_type_only: bool,
+    /// Whether this exact node is itself a block-kind node (the
+    /// self-is-block predicate for `SyntaxBlock` classification).
+    is_block: bool,
+    /// `Some` when this node is a callable-kind node that has a body (D8).
+    callable: Option<CallableInfo>,
+}
+
+/// D8's per-callable facts a lowering computes once it has already found a
+/// callable-kind node with a body: the body node's own span, and D10's
+/// resolved name. The declaration node's own span is `build_ir`'s `span`
+/// (already computed for every node), so it is not repeated here.
+struct CallableInfo {
+    body_span: Span,
+    name: String,
 }
 
 /// `parent` is `build_ir`'s already-threaded parent `Node` (see that
@@ -121,14 +149,13 @@ fn classify(
 /// the same granularity `clones::statement_children`'s containers enumerate,
 /// re-derived here (that function is private to `src/clones/mod.rs`, and
 /// this stream may not widen it). `java::is_clone_statement`/
-/// `jsts::is_clone_statement` are kept for WS-4's clone-floor work even
-/// though nothing in `src/` reads their result today (the `IrNode.token`
-/// field that once carried it was removed as unread/unbounded -- see
-/// `ir::IrNode`'s doc comment); this dispatcher exists only for tests below,
-/// which need to enumerate the tree-sitter nodes they compare the lowering's
-/// tokens against. Test-only, so deriving `node.parent()` directly (rather
-/// than threading it, as `build_ir` does for the production path) is fine:
-/// nothing here runs against the deep-nesting perf fixture.
+/// `jsts::is_clone_statement` are now production (their result is
+/// `IrNode::is_clone_statement`); this dispatcher itself stays test-only --
+/// it exists only for the tests below, which need to enumerate the
+/// tree-sitter nodes they compare the lowering's tokens against, and derives
+/// `node.parent()` directly (rather than threading it, as `build_ir` does
+/// for the production path) since nothing here runs against the
+/// deep-nesting perf fixture.
 #[cfg(test)]
 fn is_clone_statement(node: Node, language: LanguageFamily) -> bool {
     let kind = node.kind();
@@ -200,15 +227,7 @@ fn for_each_descendant<'tree>(root: Node<'tree>, mut visit: impl FnMut(Node<'tre
 /// span-only node rather than panicking keeps this scan-pipeline stage
 /// consistent with D18: a defect here degrades, it does not crash the run.
 fn fallback_node(root: Node) -> IrNode {
-    IrNode {
-        span: Span::from_node(root),
-        executable: false,
-        decision: None,
-        is_terminator: false,
-        in_block: false,
-        in_catch_body: false,
-        children: Vec::new(),
-    }
+    IrNode::empty(Span::from_node(root))
 }
 
 /// Builds `root`'s whole `IrNode` tree in one iterative pass: a single
@@ -225,6 +244,8 @@ fn build_ir(
     language: LanguageFamily,
     source: &str,
     damage_out: &mut Vec<DamageSpan>,
+    callables_out: &mut Vec<IrCallable>,
+    blocks_out: &mut Vec<IrBlock>,
 ) -> IrNode {
     // `parent_in_catch_body` is the already-computed `in_catch_body` flag of
     // this node's own parent (or `false` for `root`), inherited rather than
@@ -237,28 +258,48 @@ fn build_ir(
     let open = |node: Node,
                 parent: Option<Node>,
                 parent_in_catch_body: bool,
-                damage_out: &mut Vec<DamageSpan>|
+                damage_out: &mut Vec<DamageSpan>,
+                callables_out: &mut Vec<IrCallable>,
+                blocks_out: &mut Vec<IrBlock>|
      -> (IrNode, bool) {
         let span = Span::from_node(node);
         let classification = classify(node, language, source, parent);
         if let Some(kind) = classification.damage {
             damage_out.push(DamageSpan { kind, span });
         }
+        if classification.is_block {
+            blocks_out.push(IrBlock {
+                span,
+                kind: node.kind(),
+            });
+        }
+        if let Some(callable) = classification.callable {
+            callables_out.push(IrCallable {
+                span,
+                body_span: callable.body_span,
+                name: callable.name,
+            });
+        }
         let in_catch_body = classification.is_catch_body_root || parent_in_catch_body;
         let ir_node = IrNode {
             span,
             executable: is_executable_leaf(node, language),
             decision: classification.decision,
-            is_terminator: classification.is_terminator,
+            terminator: classification.terminator,
             in_block: classification.in_block,
             in_catch_body,
+            is_comment: is_comment_kind(node.kind(), language),
+            is_named: node.is_named(),
+            is_clone_statement: classification.is_clone_statement,
+            is_hoisted_or_type_only: classification.is_hoisted_or_type_only,
             children: Vec::with_capacity(node.child_count()),
         };
         (ir_node, in_catch_body)
     };
 
     let mut cursor = root.walk();
-    let (root_node, root_in_catch_body) = open(root, None, false, damage_out);
+    let (root_node, root_in_catch_body) =
+        open(root, None, false, damage_out, callables_out, blocks_out);
     let mut stack: Vec<IrNode> = vec![root_node];
     // Mirrors `stack`'s depth exactly: `catch_flags[i]` is `stack[i]`'s own
     // `in_catch_body` flag, so a child node reads its parent's flag in O(1)
@@ -278,6 +319,8 @@ fn build_ir(
                 Some(parent),
                 parent_in_catch_body,
                 damage_out,
+                callables_out,
+                blocks_out,
             );
             stack.push(node);
             catch_flags.push(in_catch_body);
@@ -302,6 +345,8 @@ fn build_ir(
                     Some(parent_node),
                     parent_in_catch_body,
                     damage_out,
+                    callables_out,
+                    blocks_out,
                 );
                 stack.push(node);
                 catch_flags.push(in_catch_body);
@@ -451,7 +496,16 @@ mod tests {
             }
 
             let mut damage = Vec::new();
-            let root = build_ir(tree.root_node(), language, &source, &mut damage);
+            let mut callables = Vec::new();
+            let mut blocks = Vec::new();
+            let root = build_ir(
+                tree.root_node(),
+                language,
+                &source,
+                &mut damage,
+                &mut callables,
+                &mut blocks,
+            );
 
             let mut ir_nodes = Vec::new();
             collect_ir_nodes(&root, &mut ir_nodes);
