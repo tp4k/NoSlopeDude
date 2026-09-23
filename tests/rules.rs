@@ -206,11 +206,19 @@ fn test_terminator_predicate_is_language_agnostic() {
 /// D22 IR retarget: `*-EMPTY-CATCH` reads `IrNode::in_catch_body` (the IR's
 /// own catch-body-membership flag), not a `catch_clause` grammar string —
 /// a genuinely empty catch still fires, and a catch holding only a comment
-/// still declines, exactly as it did pre-retarget.
+/// still declines, exactly as it did pre-retarget. A third case, in both
+/// families: a non-empty catch nested inside another catch's body.
+/// `IrNode::in_catch_body` is transitive (true for the body block itself
+/// *and* every node inside it), so a naive "first child with
+/// `in_catch_body`" search on the *inner* `catch` clause finds the
+/// anonymous `catch` keyword token (which inherits `in_catch_body` from the
+/// outer body it sits in, and has no children of its own) before it finds
+/// the inner clause's actual body block — misreporting a genuinely
+/// non-empty inner catch as empty.
 #[test]
 fn test_empty_catch_is_detected_through_ir_catch_body_membership() {
-    let source = "class C {\n    void m() {\n        try {\n            doThing();\n        }\n        catch (Exception e) {\n        }\n        try {\n            doThing();\n        }\n        catch (Exception e) {\n            // ignored\n        }\n    }\n}\n";
-    let files = vec![parse_inline_java(source)];
+    let java_source = "class C {\n    void m() {\n        try {\n            doThing();\n        }\n        catch (Exception e) {\n        }\n        try {\n            doThing();\n        }\n        catch (Exception e) {\n            // ignored\n        }\n        try {\n            doThing();\n        }\n        catch (Exception e) {\n            try {\n                doOther();\n            }\n            catch (Exception e2) {\n                doAnother();\n            }\n        }\n    }\n}\n";
+    let files = vec![parse_inline_java(java_source)];
     let findings = rules::find_findings(&files);
     assert_eq!(findings.len(), 1, "{findings:?}");
     let hit = &findings[0];
@@ -218,6 +226,24 @@ fn test_empty_catch_is_detected_through_ir_catch_body_membership() {
     assert_eq!(hit.start_line, 6, "{hit:?}");
     assert_eq!(hit.end_line, 7, "{hit:?}");
     assert_eq!(hit.flagged_lines, vec![6], "{hit:?}");
+    assert!(
+        !findings.iter().any(|f| f.start_line == 21),
+        "a non-empty catch nested inside another catch's body must not be misreported as empty: {findings:?}"
+    );
+
+    let js_source = "function m() {\n    try {\n        doThing();\n    }\n    catch (e) {\n    }\n    try {\n        doThing();\n    }\n    catch (e) {\n        // ignored\n    }\n    try {\n        doThing();\n    }\n    catch (e) {\n        try {\n            doOther();\n        }\n        catch (e2) {\n            doAnother();\n        }\n    }\n}\n";
+    let jsts_files = vec![parse_inline_jsts(js_source)];
+    let jsts_findings = rules::find_findings(&jsts_files);
+    assert_eq!(jsts_findings.len(), 1, "{jsts_findings:?}");
+    let jsts_hit = &jsts_findings[0];
+    assert_eq!(jsts_hit.rule_id, rules::JSTS_EMPTY_CATCH);
+    assert_eq!(jsts_hit.start_line, 5, "{jsts_hit:?}");
+    assert_eq!(jsts_hit.end_line, 6, "{jsts_hit:?}");
+    assert_eq!(jsts_hit.flagged_lines, vec![5], "{jsts_hit:?}");
+    assert!(
+        !jsts_findings.iter().any(|f| f.start_line == 20),
+        "a non-empty catch nested inside another catch's body must not be misreported as empty: {jsts_findings:?}"
+    );
 }
 
 /// D22 IR retarget: the documented JS/TS-only exemption
