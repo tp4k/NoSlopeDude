@@ -646,7 +646,15 @@ fn change_from_delta(
             let from = repo_path_from_file(&delta.old_file())?;
             let to = repo_path_from_file(&delta.new_file())?;
             let kind = new_side_kind(new_source, to.as_bytes())?;
-            let similarity = rename_similarity(diff, idx)?;
+            // An exact-OID rename scores 100 without libgit2 ever reading
+            // either blob's content (`similarity_measure`): skip the full
+            // per-delta patch build `rename_similarity` needs, which would
+            // inflate both blobs just to print back a value already known.
+            let similarity = if delta.old_file().id() == delta.new_file().id() {
+                EXACT_RENAME_SIMILARITY
+            } else {
+                rename_similarity(diff, idx)?
+            };
             Ok(Change::Renamed {
                 from,
                 to,
