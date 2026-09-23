@@ -66,6 +66,35 @@ than streaming file-by-file), so extrapolating to a much larger corpus
 should scale the RSS estimate by source-byte count, not by scanned-line
 count alone.
 
+## Provenance of the 2026-09-18 rows
+
+The two `2026-09-18` rows (below) entered this repository with `37829cb`,
+the commit that imported the `agent_slope` engine at upstream sha
+`912ec7a`: they are upstream's own pre-import numbers, measured before
+this crate was even named `nsd` and before any of the M0b IR-retargeting
+branch's commits existed. So the 2026-09-18 → 2026-09-23 delta in the
+table below spans the *entire* M0b IR branch — the IR's introduction, its
+corpus-wide retention in `PipelineOutput::ir`, every stage's retarget, and
+this stream's own two-lowering fusion (`e83228b`) among roughly forty
+other commits — and **is not attributable to any single one of them**,
+this stream's fusion included. The arithmetic confirms it independently:
+after the fusion the corpus is lowered 4 times per scan where it was
+lowered 5 times, so even if lowering were 100% of wall clock, the ceiling
+on the fusion's own possible saving is 20% (17.54s → at best ~14.0s) — the
+observed 76% drop (17.54s → 4.28s) is arithmetically unreachable from
+removing one of five redundant lowerings alone, and is therefore evidence
+about the branch, not about this fix.
+
+The fusion's own effect was, for that reason, unmeasured here for want of
+a control until the row appended below labeled `a370e3d`: the two
+existing unlabeled `2026-09-23` rows above it measure `e83228b` (the
+fusion commit) itself, and the `a370e3d` row measures the fusion's
+immediate parent commit, built in a detached worktree and run back to
+back on the same machine against the same already-fetched fixture root
+(the same pattern `scripts/neutrality_gate.sh` uses for its own pre-IR
+reference build) — this pair is the only one in this file that isolates
+the fusion's own effect from the rest of the M0b branch.
+
 ## Rows
 
 Each row: date (UTC) · machine · the two fixture repos and their scanned
@@ -82,3 +111,4 @@ exclusions combined).
 | 2026-09-18 | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 17.67s | 1248.16 MB | true | 7720 |
 | 2026-09-23 | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 4.28s | 1774.33 MB | true | 7720 |
 | 2026-09-23 | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 4.14s | 1775.42 MB | true | 7720 |
+| 2026-09-23 (a370e3d, fusion's parent commit — control) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 6.90s | 1779.59 MB | true | 7720 |
