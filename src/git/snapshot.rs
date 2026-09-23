@@ -102,8 +102,9 @@ impl CommitSnapshot {
         read_blob_source(repo, entry)
     }
 
-    /// A symlink entry's target bytes (D24: WS-2's diff seam); `Ok(None)`
-    /// for any other kind.
+    /// A symlink entry's target bytes (D24: WS-2's diff seam), bounded by
+    /// `SOURCE_CEILING_BYTES`; `Ok(None)` for any other kind or for an
+    /// entry whose blob exceeds the ceiling.
     pub fn link_target(
         &self,
         repo: &Repository,
@@ -153,8 +154,9 @@ impl IndexSnapshot {
         read_blob_source(repo, entry)
     }
 
-    /// A symlink entry's target bytes (D24: WS-2's diff seam); `Ok(None)`
-    /// for any other kind.
+    /// A symlink entry's target bytes (D24: WS-2's diff seam), bounded by
+    /// `SOURCE_CEILING_BYTES`; `Ok(None)` for any other kind or for an
+    /// entry whose blob exceeds the ceiling.
     pub fn link_target(
         &self,
         repo: &Repository,
@@ -360,8 +362,11 @@ fn read_blob_source(repo: &Repository, entry: &Entry) -> Result<Option<Vec<u8>>,
 }
 
 /// A `Symlink` entry's target bytes for `Commit`/`Index` (the blob content
-/// itself, since Git stores a symlink's target as its blob); `Ok(None)`
-/// for any other kind.
+/// itself, since Git stores a symlink's target as its blob), bounded by
+/// `SOURCE_CEILING_BYTES`; `Ok(None)` for any other kind. The size is read
+/// from the ODB header first (perf/security HIGH: an attacker-controlled
+/// blob must never be inflated above the ceiling), and `find_blob` is only
+/// called once that size is known to be within bounds.
 fn read_blob_link_target(repo: &Repository, entry: &Entry) -> Result<Option<Vec<u8>>, GitError> {
     if entry.kind != EntryKind::Symlink {
         return Ok(None);
@@ -369,6 +374,15 @@ fn read_blob_link_target(repo: &Repository, entry: &Entry) -> Result<Option<Vec<
     let Some(oid) = entry.oid else {
         return Ok(None);
     };
+    let odb = repo
+        .odb()
+        .map_err(|err| wrap_git_error("cannot open the object database", &err))?;
+    let (size, _object_type) = odb
+        .read_header(oid)
+        .map_err(|err| wrap_git_error("cannot read blob header", &err))?;
+    if size as u64 > SOURCE_CEILING_BYTES {
+        return Ok(None);
+    }
     let blob = repo
         .find_blob(oid)
         .map_err(|err| wrap_git_error("cannot read blob", &err))?;
