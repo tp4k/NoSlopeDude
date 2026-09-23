@@ -582,3 +582,25 @@ fn os_str_bytes(name: &std::ffi::OsStr) -> Vec<u8> {
 fn os_str_bytes(name: &std::ffi::OsStr) -> Vec<u8> {
     name.to_string_lossy().into_owned().into_bytes()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg(unix)]
+    fn repo_path_to_fs_preserves_non_utf8_bytes() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let mut invalid_name = b"a".to_vec();
+        invalid_name.push(0xFF);
+        invalid_name.extend_from_slice(b".ts");
+
+        let joined = repo_path_to_fs(Path::new("/w"), &invalid_name);
+
+        let mut expected = b"/w/a".to_vec();
+        expected.push(0xFF);
+        expected.extend_from_slice(b".ts");
+        assert_eq!(joined.as_os_str().as_bytes(), expected.as_slice());
+    }
+}

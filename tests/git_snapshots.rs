@@ -428,6 +428,38 @@ fn non_utf8_path_round_trips_and_escapes() {
 }
 
 #[test]
+fn worktree_non_utf8_path_does_not_read_decoy_file() {
+    let (dir, repo) = common::init_repo();
+    let mut invalid_path = b"src/a".to_vec();
+    invalid_path.push(0xFF);
+    invalid_path.extend_from_slice(b".ts");
+    let commit_oid = common::commit_entries(
+        &repo,
+        &[(invalid_path.clone(), MODE_REGULAR, b"content".to_vec())],
+    );
+    sync_index_to_commit(&repo, commit_oid);
+
+    std::fs::create_dir_all(dir.path().join("src")).expect("create src dir");
+    // The lossy-escaped stand-in for the invalid byte: U+FFFD.
+    std::fs::write(dir.path().join("src").join("a\u{FFFD}.ts"), b"DECOY")
+        .expect("write decoy file at the lossy-escaped name");
+
+    let snapshot = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let invalid_entry = snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.path.as_bytes() == invalid_path.as_slice());
+    let read_is_decoy = invalid_entry
+        .map(|entry| snapshot.read(&repo, entry).expect("read must not error"))
+        .map(|bytes| bytes == Some(b"DECOY".to_vec()))
+        .unwrap_or(false);
+    assert!(
+        !read_is_decoy,
+        "a decoy file at the lossy-escaped name must not be attributed to the non-UTF-8 path"
+    );
+}
+
+#[test]
 fn merge_base_full_clone_resolves() {
     let (_dir, repo) = common::init_repo();
     let base_oid =
