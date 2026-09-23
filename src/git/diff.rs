@@ -9,8 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use git2::{
-    Delta, Diff, DiffDelta, DiffFile, DiffFindOptions, DiffLineType, DiffOptions, ErrorCode,
-    Index, IndexEntry, IndexTime, ObjectType, Oid, Patch, Repository, Tree,
+    Delta, Diff, DiffDelta, DiffFile, DiffFindOptions, DiffLineType, DiffOptions, ErrorCode, Index,
+    IndexEntry, IndexTime, ObjectType, Oid, Patch, Repository, Tree,
 };
 
 use super::path::RepoPath;
@@ -60,6 +60,7 @@ pub enum Change {
         from: RepoPath,
         to: RepoPath,
         kind: EntryKind,
+        similarity: u16,
     },
     Typechange {
         path: RepoPath,
@@ -101,7 +102,11 @@ pub fn diff_commit_to_commit(
     let mut diff = repo
         .diff_tree_to_tree(base_tree.as_ref(), Some(&candidate_tree), Some(&mut opts))
         .map_err(|err| wrap_git_error("cannot diff commit to commit", &err))?;
-    changes_from_diff(&mut diff, base_tree.as_ref(), NewFileSource::Tree(&candidate_tree))
+    changes_from_diff(
+        &mut diff,
+        base_tree.as_ref(),
+        NewFileSource::Tree(&candidate_tree),
+    )
 }
 
 /// Diffs a base commit (`None` for an unborn `HEAD`'s empty tree, D2) to the
@@ -243,7 +248,8 @@ pub fn diff_commit_to_worktree(
         .diff_tree_to_index(base_tree.as_ref(), Some(&index), Some(&mut opts))
         .map_err(|err| wrap_git_error("cannot diff commit to worktree", &err))?;
 
-    let mut changes = changes_from_diff(&mut diff, base_tree.as_ref(), NewFileSource::Index(&index))?;
+    let mut changes =
+        changes_from_diff(&mut diff, base_tree.as_ref(), NewFileSource::Index(&index))?;
     changes.append(&mut nested_checkouts);
     changes.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
     Ok(changes)
@@ -411,14 +417,74 @@ fn changes_from_diff(
     }
 
     let mut changes = Vec::new();
-    for delta in diff.deltas() {
-        changes.push(change_from_delta(&delta, base_tree, &new_source)?);
+    for (idx, delta) in diff.deltas().enumerate() {
+        changes.push(change_from_delta(
+            diff,
+            idx,
+            &delta,
+            base_tree,
+            &new_source,
+        )?);
     }
     changes.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
     Ok(changes)
 }
 
+/// A `Delta::Renamed` delta's similarity score (D8's `RENAME_THRESHOLD`),
+/// read from libgit2's own `delta->similarity` (`diff_print.c:393`, the
+/// "similarity index NN%" patch header). git2 does not expose that field
+/// through any typed accessor: `DiffDelta::similarity()` exists in git2's
+/// own source but stays commented out, "expose when diffs are more
+/// exposed" (`diff.rs:520-523`).
+///
+/// This builds a `Patch` for just `idx`, never `Diff::print` or
+/// `Diff::foreach`: both call `git_diff_foreach`, which unconditionally
+/// runs full patch generation - and so a full blob read - for *every*
+/// delta in the diff (`diff.c:139-147`), not only the renamed one. On
+/// `diff_commit_to_worktree` that reintroduces exactly the crash rows 1-2
+/// remove: confirmed empirically (not assumed) by a NotFound while
+/// building the previous version's whole-diff `Diff::print(Raw, ..)` call,
+/// on an over-SOURCE_CEILING_BYTES entry that was never even part of any
+/// rename. A single delta's own patch needs only that delta's two blobs,
+/// which a `Renamed` status already proves are both readable: content-
+/// based `find_similar` had to read them to score the match in the first
+/// place, and an exact-match rename compares only OIDs, at 100% (D5/D2).
+fn rename_similarity(diff: &Diff<'_>, idx: usize) -> Result<u16, GitError> {
+    let mut patch = Patch::from_diff(diff, idx)
+        .map_err(|err| wrap_git_error("cannot build a patch for a renamed delta", &err))?
+        .ok_or_else(|| {
+            GitError::new(
+                CODE_SNAPSHOT_UNAVAILABLE,
+                "a Renamed delta produced no patch",
+            )
+        })?;
+    let text = patch
+        .to_buf()
+        .map_err(|err| wrap_git_error("cannot render a renamed delta's patch text", &err))?;
+    let text = std::str::from_utf8(&text).map_err(|_| {
+        GitError::new(
+            CODE_SNAPSHOT_UNAVAILABLE,
+            "a renamed delta's patch text is not valid UTF-8",
+        )
+    })?;
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("similarity index ") {
+            if let Some(digits) = rest.strip_suffix('%') {
+                if let Ok(similarity) = digits.parse::<u16>() {
+                    return Ok(similarity);
+                }
+            }
+        }
+    }
+    Err(GitError::new(
+        CODE_SNAPSHOT_UNAVAILABLE,
+        "a renamed delta's patch text has no similarity index header",
+    ))
+}
+
 fn change_from_delta(
+    diff: &Diff<'_>,
+    idx: usize,
     delta: &DiffDelta<'_>,
     base_tree: Option<&Tree<'_>>,
     new_source: &NewFileSource<'_, '_>,
@@ -443,7 +509,13 @@ fn change_from_delta(
             let from = repo_path_from_file(&delta.old_file())?;
             let to = repo_path_from_file(&delta.new_file())?;
             let kind = new_side_kind(new_source, to.as_bytes())?;
-            Ok(Change::Renamed { from, to, kind })
+            let similarity = rename_similarity(diff, idx)?;
+            Ok(Change::Renamed {
+                from,
+                to,
+                kind,
+                similarity,
+            })
         }
         Delta::Typechange => {
             let path = repo_path_from_file(&delta.new_file())?;
@@ -500,12 +572,14 @@ fn new_side_kind(
             entry_kind_from_raw_mode(entry.filemode())
         }
         NewFileSource::Index(index) => {
-            let entry = index.get_path(&bytes_to_path(path_bytes), 0).ok_or_else(|| {
-                GitError::new(
-                    CODE_SNAPSHOT_UNAVAILABLE,
-                    "diff delta references a new-side file missing from the index",
-                )
-            })?;
+            let entry = index
+                .get_path(&bytes_to_path(path_bytes), 0)
+                .ok_or_else(|| {
+                    GitError::new(
+                        CODE_SNAPSHOT_UNAVAILABLE,
+                        "diff delta references a new-side file missing from the index",
+                    )
+                })?;
             entry_kind_from_raw_mode(entry.mode as i32)
         }
     }

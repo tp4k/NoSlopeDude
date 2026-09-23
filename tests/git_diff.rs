@@ -249,7 +249,8 @@ fn worktree_over_ceiling_unchanged_file_is_not_reported() {
 #[test]
 fn worktree_over_ceiling_file_over_empty_base_is_modified() {
     let (dir, repo) = common::init_repo();
-    let base_oid = common::commit_entries(&repo, &[(b"src/x.ts".to_vec(), MODE_REGULAR, Vec::new())]);
+    let base_oid =
+        common::commit_entries(&repo, &[(b"src/x.ts".to_vec(), MODE_REGULAR, Vec::new())]);
     sync_index_to_commit(&repo, base_oid);
     std::fs::create_dir_all(dir.path().join("src")).expect("create src/ directory");
     let over_ceiling = vec![b'b'; SOURCE_CEILING_BYTES as usize + 1];
@@ -273,7 +274,8 @@ fn worktree_over_ceiling_file_over_empty_base_is_modified() {
 #[test]
 fn worktree_over_ceiling_add_is_not_a_rename_of_an_empty_file() {
     let (dir, repo) = common::init_repo();
-    let base_oid = common::commit_entries(&repo, &[(b"empty.ts".to_vec(), MODE_REGULAR, Vec::new())]);
+    let base_oid =
+        common::commit_entries(&repo, &[(b"empty.ts".to_vec(), MODE_REGULAR, Vec::new())]);
     sync_index_to_commit(&repo, base_oid);
     // `commit_entries` never writes to disk (D23), so `empty.ts` is already
     // absent from the worktree — an on-disk deletion, with nothing to
@@ -286,7 +288,11 @@ fn worktree_over_ceiling_add_is_not_a_rename_of_an_empty_file() {
     let changes = diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree)
         .expect("diff commit to worktree");
 
-    assert_eq!(changes.len(), 2, "expected a delete and an unrelated add, not a rename: {changes:?}");
+    assert_eq!(
+        changes.len(),
+        2,
+        "expected a delete and an unrelated add, not a rename: {changes:?}"
+    );
     assert!(changes
         .iter()
         .any(|c| matches!(c, Change::Deleted { path, .. } if path.as_bytes() == b"empty.ts")));
