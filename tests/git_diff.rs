@@ -72,6 +72,73 @@ fn clear_rename_detected() {
     }
 }
 
+/// A user's `diff.renames`/`diff.renamelimit` config must never change
+/// nsd's rename output (D8/D10: deterministic renames). `diff.renames` is
+/// already ignored by the pre-fix code (`.renames(true)` is explicit, so
+/// libgit2's own `normalize_find_opts` never even looks at the config: it
+/// only consults `diff.renames` when `given->flags & GIT_DIFF_FIND_ALL ==
+/// GIT_DIFF_FIND_BY_CONFIG`, `diff_tform.c:263-283`). `diff.renamelimit`
+/// is genuinely read pre-fix, because `rename_limit` is otherwise left at
+/// 0 ("unset"), `diff_tform.c:322-330`. Three unrelated deletions (not one,
+/// as in `clear_rename_detected`) are needed to observe that: libgit2's own
+/// rename-target loop only *breaks* once it has examined one more source
+/// than `rename_limit` (`diff_tform.c:950-958`), so a `rename_limit` of 1
+/// still fully examines 2 sources - only a 3rd source, alphabetically
+/// after two unrelated ones, is left out, sending the true match past the
+/// cap and turning the rename into a delete+add pre-fix.
+#[test]
+fn rename_detection_ignores_diff_renames_config() {
+    let (_dir, repo) = common::init_repo();
+    let base_oid = common::commit_entries(
+        &repo,
+        &[
+            (b"src/A.java".to_vec(), MODE_REGULAR, filler_lines(b'A', 40)),
+            (b"src/B.java".to_vec(), MODE_REGULAR, filler_lines(b'B', 40)),
+            (
+                b"src/Old.java".to_vec(),
+                MODE_REGULAR,
+                numbered_lines(40, None),
+            ),
+        ],
+    );
+    sync_index_to_commit(&repo, base_oid);
+
+    {
+        let mut config = repo.config().expect("open repo config");
+        config
+            .set_str("diff.renames", "false")
+            .expect("set diff.renames = false");
+        config
+            .set_str("diff.renamelimit", "1")
+            .expect("set diff.renamelimit = 1");
+    }
+
+    let mut index = repo.index().expect("open index");
+    for old_path in ["src/A.java", "src/B.java", "src/Old.java"] {
+        index
+            .remove_path(Path::new(old_path))
+            .unwrap_or_else(|err| panic!("remove {old_path} from the index: {err}"));
+    }
+    index.write().expect("write index after removal");
+    stage_bytes(
+        &repo,
+        b"src/New.java",
+        MODE_REGULAR,
+        &numbered_lines(40, Some((20, "line 20 EDITED"))),
+    );
+
+    let changes = diff::diff_commit_to_index(&repo, Some(base_oid)).expect("diff commit to index");
+
+    let renamed = changes.iter().find(
+        |c| matches!(c, Change::Renamed { from, to, .. } if from.as_bytes() == b"src/Old.java" && to.as_bytes() == b"src/New.java"),
+    );
+    assert!(
+        renamed.is_some(),
+        "expected src/Old.java -> src/New.java to still be detected as a rename regardless of \
+         user diff.renames/diff.renamelimit config: {changes:?}"
+    );
+}
+
 #[test]
 fn clear_non_rename_is_delete_plus_add() {
     let (_dir, repo) = common::init_repo();
