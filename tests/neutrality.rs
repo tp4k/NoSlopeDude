@@ -4,40 +4,43 @@
 //! pre-IR baseline, captured now while the tree is still pre-IR.
 //!
 //! This suite never shells out to git and needs no worktree, no network and
-//! no private archive: `scripts/neutrality_gate.sh` (the operator-run
-//! re-capture/comparison tool) is the mechanism that reaches into git
-//! history, kept deliberately separate from this always-runnable gate.
+//! no private archive for its always-on legs:
+//! `scripts/neutrality_gate.sh` (the operator-run re-capture/comparison
+//! tool) is the mechanism that reaches into git history, kept deliberately
+//! separate. The one leg that does need a private fixture --
+//! `test_java_fixture_01_strict_scan_is_byte_identical_to_the_archived_report`
+//! -- is env-var gated (`NSD_ARCHIVED_REPORT`) and reports pending, not
+//! passing, when that fixture is absent.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
-use nsd::model::{ScanSettings, DEFAULT_MIN_CLONE_LINES};
+use nsd::discover::DiscoverResult;
+use nsd::model::{LanguageFamily, ScanSettings, DEFAULT_MIN_CLONE_LINES};
 use nsd::pipeline;
 
-/// Corpus with zero parse failures: `rules/__tests__`'s own "Clean*"
-/// fixtures, already relied on by `tests/rules.rs` as clean inputs.
-const CLEAN_CORPUS_SOURCES: &[&str] = &[
-    "tests/fixtures/rules/__tests__/CleanJava.java",
-    "tests/fixtures/rules/__tests__/CleanJs.js",
-    "tests/fixtures/rules/__tests__/CleanTs.ts",
+/// Paths relative to `tests/fixtures/`. Decision 1: the malformed corpus is
+/// exactly these three in-repo damaged fixtures -- the local stand-ins for
+/// the private `js-ts-fixture-01/-02` deltas; every other file under
+/// `tests/fixtures/` is the clean corpus.
+const MALFORMED_CORPUS_SOURCES: &[&str] = &[
+    "metrics/broken/Broken.ts",
+    "rules/broken/Broken.java",
+    "report/src/Broken.java",
 ];
 
-/// Corpus with one parse failure (`Broken.java`) alongside one file that
-/// parses (`Good.java`), so metrics, clones and rules all still run.
-const MALFORMED_CORPUS_SOURCES: &[&str] = &[
-    "tests/fixtures/rules/broken/Broken.java",
-    "tests/fixtures/rules/broken/Good.java",
-];
+const FIXTURES_ROOT: &str = "tests/fixtures";
 
 const CLEAN_BASELINE_PATH: &str = "tests/golden/neutrality/clean.report.json";
 const MALFORMED_BASELINE_PATH: &str = "tests/golden/neutrality/malformed.report.json";
 
-/// The label `normalize` substitutes for the corpus's volatile tempdir
-/// path -- the one field that can never be made constant across
-/// invocations, because each invocation (including the one that captured
-/// the committed baseline) copies the corpus into a fresh tempdir.
+/// The label `normalize`/`normalize_raw_text` substitute for the corpus's
+/// volatile tempdir path -- the one field that can never be made constant
+/// across invocations, because each invocation (including the one that
+/// captured the committed baseline) copies the corpus into a fresh tempdir.
 const NORMALIZED_TARGET_LABEL: &str = "<neutrality-corpus>";
 
 /// Declared measurement deltas the malformed corpus is permitted to carry
@@ -48,38 +51,119 @@ const NORMALIZED_TARGET_LABEL: &str = "<neutrality-corpus>";
 /// M0b item 8 explicitly permits.
 const DECLARED_DELTAS: &[&str] = &[];
 
+/// Set (non-empty) to make the two corpus tests below overwrite their
+/// baseline files with a freshly captured, normalized report instead of
+/// comparing against them. This is the one code path that writes
+/// `tests/golden/neutrality/`; a plain `cargo test` never sets it.
+/// `scripts/neutrality_gate.sh --capture` is the operator entry point.
+const NEUTRALITY_CAPTURE_ENV_VAR: &str = "NSD_NEUTRALITY_CAPTURE";
+
+/// The env var carrying the private archived `java-fixture-01` report's
+/// path at invocation time only; it is never written into a repository
+/// file (`AGENTS.md`, *Fixture privacy*).
+const ARCHIVED_REPORT_ENV_VAR: &str = "NSD_ARCHIVED_REPORT";
+
+/// Opt-in env var that promotes the pending arm of the archive-backed leg
+/// from a silent `ok` to a panic, mirroring
+/// `tests/golden_digest.rs::REQUIRE_ARCHIVE_VERIFIED_ENV_VAR`.
+const REQUIRE_ARCHIVE_VERIFIED_ENV_VAR: &str = "NSD_REQUIRE_ARCHIVE_VERIFIED";
+
 fn manifest_path(relative: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative)
 }
 
-/// Copies `sources` (paths relative to `CARGO_MANIFEST_DIR`) flat into
-/// `dest_root/src/<file name>` -- flattened, rather than mirroring each
-/// source's own directory name, so a source segment such as `__tests__` or
-/// `broken` never lands somewhere the D16 default exclusions would treat
-/// as a test or generated-code directory and skip.
-fn copy_corpus(sources: &[&str], dest_root: &Path) {
-    let dest_src = dest_root.join("src");
-    fs::create_dir_all(&dest_src).expect("create corpus src dir");
-    for source in sources {
-        let from = manifest_path(source);
-        let file_name = from.file_name().expect("fixture source has a file name");
-        let contents = fs::read_to_string(&from)
-            .unwrap_or_else(|error| panic!("reading corpus source {from:?}: {error}"));
-        fs::write(dest_src.join(file_name), contents)
-            .unwrap_or_else(|error| panic!("writing copied corpus file {file_name:?}: {error}"));
+/// Every file under `tests/fixtures/` (paths relative to it), sorted for
+/// determinism -- decision 1's "copy of `tests/fixtures/`" corpus, before
+/// it is split into clean and malformed.
+fn all_fixture_relative_paths() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    walk_fixtures(&manifest_path(FIXTURES_ROOT), Path::new(""), &mut out);
+    out.sort();
+    out
+}
+
+fn walk_fixtures(dir: &Path, relative: &Path, out: &mut Vec<PathBuf>) {
+    let entries = fs::read_dir(dir)
+        .unwrap_or_else(|error| panic!("reading fixtures directory {dir:?}: {error}"));
+    for entry in entries {
+        let entry = entry.unwrap_or_else(|error| panic!("reading a fixtures dir entry: {error}"));
+        let file_type = entry
+            .file_type()
+            .unwrap_or_else(|error| panic!("reading a fixtures dir entry's file type: {error}"));
+        let child_relative = relative.join(entry.file_name());
+        if file_type.is_dir() {
+            walk_fixtures(&dir.join(entry.file_name()), &child_relative, out);
+        } else if file_type.is_file() {
+            out.push(child_relative);
+        }
     }
+}
+
+fn malformed_corpus_sources() -> Vec<PathBuf> {
+    MALFORMED_CORPUS_SOURCES.iter().map(PathBuf::from).collect()
+}
+
+/// All of `tests/fixtures/` minus the three malformed sources (decision 1).
+fn clean_corpus_sources() -> Vec<PathBuf> {
+    let malformed = malformed_corpus_sources();
+    all_fixture_relative_paths()
+        .into_iter()
+        .filter(|path| !malformed.contains(path))
+        .collect()
+}
+
+/// Copies `sources` (paths relative to `tests/fixtures/`) into `dest_root`,
+/// mirroring each source's own relative path rather than flattening it --
+/// preserving directory structure is what lets the D16 exclusion globs
+/// (`node_modules/`, `__tests__/`, ...) actually fire on the copy, and lets
+/// same-basename fixtures in different directories (`Sample.java`,
+/// `sample.js`, `mod.mjs`, `HighComplexity.java`, `Decisions.java`) coexist
+/// instead of silently overwriting one another.
+fn copy_corpus(sources: &[PathBuf], dest_root: &Path) {
+    let mut written: HashSet<PathBuf> = HashSet::new();
+    for relative in sources {
+        let dest = dest_root.join(relative);
+        if !written.insert(dest.clone()) {
+            panic!(
+                "corpus copy collision: {relative:?} would overwrite an earlier copy at {dest:?}"
+            );
+        }
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).expect("create corpus destination directory");
+        }
+        let from = manifest_path(FIXTURES_ROOT).join(relative);
+        fs::copy(&from, &dest)
+            .unwrap_or_else(|error| panic!("copying corpus source {from:?} to {dest:?}: {error}"));
+    }
+}
+
+/// Everything one scan of a freshly copied corpus produces that this suite
+/// needs: the rendered `report.json` text, the tempdir path substituted for
+/// `scan.target`, and the discovery result the pipeline itself computed (so
+/// the corpus-presence assertion below re-reads the pipeline's own
+/// discovery, rather than repeating a second, possibly-diverging walk).
+struct ScanCorpusOutput {
+    _fixture_dir: tempfile::TempDir,
+    _output_dir: tempfile::TempDir,
+    json_text: String,
+    target_input: String,
+    discover: DiscoverResult,
 }
 
 /// Copies `sources` into a fresh tempdir and scans it with fixed settings
 /// -- the same tempdir-fixture / tempdir-output / explicit-`ScanSettings`
-/// shape `tests/e2e_local.rs::run_scan` uses.
-fn scan_corpus(sources: &[&str]) -> (tempfile::TempDir, tempfile::TempDir, Value) {
+/// shape `tests/e2e_local.rs::run_scan` uses. `include_tests: true`
+/// (decision 3): `src/discover.rs`'s default test globs exclude
+/// `__tests__/`, where most of `tests/fixtures/clones` and
+/// `tests/fixtures/metrics` lives, so without it the corpus would cover
+/// almost nothing.
+fn scan_corpus(sources: &[PathBuf]) -> ScanCorpusOutput {
     let fixture_dir = tempfile::tempdir().expect("fixture tempdir");
     copy_corpus(sources, fixture_dir.path());
     let output_dir = tempfile::tempdir().expect("output tempdir");
     let settings = ScanSettings {
         output: output_dir.path().to_path_buf(),
-        include_tests: false,
+        include_tests: true,
         exclude: Vec::new(),
         min_clone_lines: DEFAULT_MIN_CLONE_LINES,
     };
@@ -88,14 +172,76 @@ fn scan_corpus(sources: &[&str]) -> (tempfile::TempDir, tempfile::TempDir, Value
         .to_str()
         .expect("fixture path is valid UTF-8")
         .to_string();
-    pipeline::run(&target_input, settings).expect("pipeline run should succeed");
+    let pipeline_output = pipeline::run(&target_input, settings)
+        .unwrap_or_else(|error| panic!("pipeline run should succeed: {error}"));
     let json_text =
         fs::read_to_string(output_dir.path().join("report.json")).expect("report.json exists");
-    let value: Value = serde_json::from_str(&json_text).expect("valid JSON");
-    (fixture_dir, output_dir, value)
+    ScanCorpusOutput {
+        _fixture_dir: fixture_dir,
+        _output_dir: output_dir,
+        json_text,
+        target_input,
+        discover: pipeline_output.discover,
+    }
 }
 
-/// Replaces `scan.target` with the fixed label and nothing else.
+fn parse_json(text: &str) -> Value {
+    serde_json::from_str(text).unwrap_or_else(|error| panic!("parsing report JSON: {error}"))
+}
+
+fn has_known_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| LanguageFamily::from_extension(extension).is_some())
+}
+
+/// Every corpus source with one of the seven scanned extensions must be
+/// either discovered or (explicitly) skipped -- proving the mirrored-path
+/// copy above lost nothing to a basename collision or a path error, and
+/// that the D16 exclusion paths (`node_modules/`, `.gitignore`, generated
+/// code) actually fire rather than being bypassed. A source with no known
+/// extension (e.g. a fixture's own `.gitignore`) is never classified by
+/// discovery at all, so it is not asserted on here.
+fn assert_every_source_is_discovered_or_skipped(sources: &[PathBuf], discover: &DiscoverResult) {
+    let mut accounted: HashSet<&PathBuf> = discover
+        .discovered
+        .iter()
+        .map(|file| &file.relative_path)
+        .collect();
+    accounted.extend(discover.skipped.iter().map(|file| &file.relative_path));
+    for source in sources {
+        if has_known_extension(source) {
+            assert!(
+                accounted.contains(source),
+                "corpus source {source:?} was neither discovered nor skipped -- \
+                 lost by the corpus copy"
+            );
+        }
+    }
+}
+
+fn capture_requested() -> bool {
+    std::env::var_os(NEUTRALITY_CAPTURE_ENV_VAR).is_some_and(|value| !value.is_empty())
+}
+
+/// Replaces exactly one occurrence of `target_input` (the corpus's own
+/// tempdir path) with the fixed label, in the raw text `render_json` wrote
+/// -- not a `serde_json::Value` re-serialization, which would reorder keys
+/// (`Value` is a `BTreeMap`) and hide a real serialization-shape change.
+fn normalize_raw_text(json_text: &str, target_input: &str) -> String {
+    let occurrences = json_text.matches(target_input).count();
+    assert_eq!(
+        occurrences, 1,
+        "expected exactly one occurrence of the corpus tempdir path {target_input:?} \
+         in the rendered report, found {occurrences}"
+    );
+    json_text.replacen(target_input, NORMALIZED_TARGET_LABEL, 1)
+}
+
+/// Replaces `scan.target` with the fixed label and nothing else, on the
+/// parsed `Value` -- used by the malformed-corpus JSON-pointer diff and by
+/// `test_normalization_replaces_only_the_scan_target`, which asserts this
+/// touches exactly one field.
 fn normalize(report: &Value) -> Value {
     let mut normalized = report.clone();
     let scan = normalized
@@ -107,10 +253,6 @@ fn normalize(report: &Value) -> Value {
         Value::String(NORMALIZED_TARGET_LABEL.to_string()),
     );
     normalized
-}
-
-fn normalized_text(report: &Value) -> String {
-    serde_json::to_string_pretty(&normalize(report)).expect("normalized report serializes")
 }
 
 /// Every JSON-pointer path (leaf, or the point of a structural mismatch)
@@ -148,6 +290,7 @@ fn walk_diff(
                 let child_path = format!("{path}/{key}");
                 match (b.get(key), a.get(key)) {
                     (Some(bv), Some(av)) => walk_diff(bv, av, child_path, declared_deltas, out),
+                    _ if is_declared(&child_path, declared_deltas) => {}
                     _ => out.push(child_path),
                 }
             }
@@ -172,16 +315,22 @@ fn walk_diff(
 fn read_baseline(relative: &str) -> Value {
     let text = fs::read_to_string(manifest_path(relative))
         .unwrap_or_else(|error| panic!("reading committed baseline {relative}: {error}"));
-    serde_json::from_str(&text)
-        .unwrap_or_else(|error| panic!("parsing committed baseline {relative}: {error}"))
+    parse_json(&text)
 }
 
 #[test]
 fn test_clean_corpus_report_is_byte_identical_to_the_pre_ir_baseline() {
-    let (_fixture_dir, _output_dir, report) = scan_corpus(CLEAN_CORPUS_SOURCES);
-    let actual_text = normalized_text(&report);
-    let baseline_text = fs::read_to_string(manifest_path(CLEAN_BASELINE_PATH))
-        .expect("committed clean baseline exists");
+    let scanned = scan_corpus(&clean_corpus_sources());
+    assert_every_source_is_discovered_or_skipped(&clean_corpus_sources(), &scanned.discover);
+    let actual_text = normalize_raw_text(&scanned.json_text, &scanned.target_input);
+
+    let baseline_path = manifest_path(CLEAN_BASELINE_PATH);
+    if capture_requested() {
+        fs::write(&baseline_path, &actual_text).expect("write clean neutrality baseline");
+        return;
+    }
+    let baseline_text =
+        fs::read_to_string(&baseline_path).expect("committed clean baseline exists");
     assert_eq!(
         actual_text, baseline_text,
         "clean corpus report.json diverged from the committed pre-IR baseline"
@@ -190,8 +339,16 @@ fn test_clean_corpus_report_is_byte_identical_to_the_pre_ir_baseline() {
 
 #[test]
 fn test_malformed_corpus_report_matches_its_baseline_with_declared_deltas_only() {
-    let (_fixture_dir, _output_dir, report) = scan_corpus(MALFORMED_CORPUS_SOURCES);
-    let actual = normalize(&report);
+    let scanned = scan_corpus(&malformed_corpus_sources());
+    assert_every_source_is_discovered_or_skipped(&malformed_corpus_sources(), &scanned.discover);
+    let actual_text = normalize_raw_text(&scanned.json_text, &scanned.target_input);
+
+    let baseline_path = manifest_path(MALFORMED_BASELINE_PATH);
+    if capture_requested() {
+        fs::write(&baseline_path, &actual_text).expect("write malformed neutrality baseline");
+        return;
+    }
+    let actual = normalize(&parse_json(&scanned.json_text));
     let baseline = read_baseline(MALFORMED_BASELINE_PATH);
     let diffs = diff_paths(&baseline, &actual, DECLARED_DELTAS);
     assert!(
@@ -228,9 +385,58 @@ fn test_comparator_detects_a_perturbed_baseline() {
     );
 }
 
+/// Direct unit test on `diff_paths`, independent of any scan or baseline
+/// file: covers the three shapes the malformed-corpus test alone cannot
+/// exercise (its own `DECLARED_DELTAS` is empty by design at this stream).
+#[test]
+fn test_diff_paths_suppresses_only_declared_deltas() {
+    const DECLARED: &[&str] = &["/scores/overall/erosion", "/skipped_files/0/detail"];
+
+    let baseline = json!({
+        "scores": {
+            "overall": {"erosion": 0.1},
+            "java": {"erosion": 0.2}
+        },
+        "skipped_files": [
+            {"relative_path": "a.java", "reason": "test"}
+        ]
+    });
+
+    // A changed leaf directly under a declared pointer is suppressed.
+    let mut changed_leaf = baseline.clone();
+    changed_leaf["scores"]["overall"]["erosion"] = json!(0.9);
+    assert_eq!(
+        diff_paths(&baseline, &changed_leaf, DECLARED),
+        Vec::<String>::new(),
+        "a changed leaf under a declared pointer must be suppressed"
+    );
+
+    // A key present on only one side (here: added), nested under a
+    // declared pointer, is suppressed -- this is the HIGH-severity fix:
+    // the object arm's one-sided fallthrough must consult declared_deltas,
+    // not only the leaf-compare path a recursive call's entry check covers.
+    let mut key_added = baseline.clone();
+    key_added["skipped_files"][0]["detail"] = json!("parse error");
+    assert_eq!(
+        diff_paths(&baseline, &key_added, DECLARED),
+        Vec::<String>::new(),
+        "a key added under a declared pointer must be suppressed"
+    );
+
+    // A changed leaf outside any declared pointer is still reported.
+    let mut changed_outside = baseline.clone();
+    changed_outside["scores"]["java"]["erosion"] = json!(0.9);
+    assert_eq!(
+        diff_paths(&baseline, &changed_outside, DECLARED),
+        vec!["/scores/java/erosion".to_string()],
+        "a changed leaf outside any declared pointer must still be reported"
+    );
+}
+
 #[test]
 fn test_normalization_replaces_only_the_scan_target() {
-    let (_fixture_dir, _output_dir, report) = scan_corpus(CLEAN_CORPUS_SOURCES);
+    let scanned = scan_corpus(&clean_corpus_sources());
+    let report = parse_json(&scanned.json_text);
     let normalized = normalize(&report);
     let diffs = diff_paths(&report, &normalized, &[]);
     assert_eq!(
@@ -246,11 +452,134 @@ fn test_normalization_replaces_only_the_scan_target() {
 
 #[test]
 fn test_corpus_copy_is_outside_any_git_work_tree() {
-    let (_fixture_dir, _output_dir, report) = scan_corpus(CLEAN_CORPUS_SOURCES);
+    let scanned = scan_corpus(&clean_corpus_sources());
+    let report = parse_json(&scanned.json_text);
     assert_eq!(report["scan"]["revision"]["sha"], Value::Null);
     assert_eq!(report["scan"]["revision"]["dirty"], Value::Null);
     assert_eq!(
         report["scan"]["revision"]["unavailable_reason"],
         Value::String("not_a_git_repository".to_string())
     );
+}
+
+/// Where the archive is, or an explicit statement that this leg is pending
+/// because the private fixture was not supplied -- mirroring
+/// `tests/golden_digest.rs::ArchiveGate` so a missing private fixture can
+/// never silently read as a validated pass (`AGENTS.md` -> *Verification*).
+enum ArchiveGate {
+    Resolved(PathBuf),
+    Pending,
+}
+
+fn archive_gate() -> ArchiveGate {
+    match std::env::var_os(ARCHIVED_REPORT_ENV_VAR) {
+        Some(path) if !path.is_empty() => ArchiveGate::Resolved(PathBuf::from(path)),
+        _ => ArchiveGate::Pending,
+    }
+}
+
+fn pending_notice() -> String {
+    format!(
+        "PENDING: {ARCHIVED_REPORT_ENV_VAR} is unset -- the java-fixture-01 strict \
+         neutrality leg is pending, not passing, this run"
+    )
+}
+
+fn verification_required() -> bool {
+    std::env::var_os(REQUIRE_ARCHIVE_VERIFIED_ENV_VAR).is_some_and(|value| !value.is_empty())
+}
+
+fn required_but_pending_message() -> String {
+    format!(
+        "{REQUIRE_ARCHIVE_VERIFIED_ENV_VAR} demands a verified run, but \
+         {ARCHIVED_REPORT_ENV_VAR} is unset -- supply the archive or unset \
+         {REQUIRE_ARCHIVE_VERIFIED_ENV_VAR}"
+    )
+}
+
+/// Item 8's strict leg: `java-fixture-01` has no parse failures, so neither
+/// salvage nor the `SkipReason` split can mask an IR defect there. Re-scans
+/// the archive's own recorded target with its own recorded settings and
+/// asserts the freshly rendered `report.json` is byte-identical to the
+/// archived one. The archive is resolved only from `NSD_ARCHIVED_REPORT` at
+/// invocation time and never committed (`AGENTS.md`, *Fixture privacy*).
+#[test]
+fn test_java_fixture_01_strict_scan_is_byte_identical_to_the_archived_report() {
+    let path = match archive_gate() {
+        ArchiveGate::Resolved(path) => path,
+        ArchiveGate::Pending => {
+            println!("{}", pending_notice());
+            if verification_required() {
+                panic!("{}", required_but_pending_message());
+            }
+            return;
+        }
+    };
+
+    let archived_text = fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("reading the archived report at {path:?}: {error}"));
+    let archived = parse_json(&archived_text);
+    let scan = archived
+        .get("scan")
+        .and_then(Value::as_object)
+        .expect("archived report has a scan object");
+    let target = scan
+        .get("target")
+        .and_then(Value::as_str)
+        .expect("scan.target is a string")
+        .to_string();
+    let include_tests = scan
+        .get("include_tests")
+        .and_then(Value::as_bool)
+        .expect("scan.include_tests is a bool");
+    let exclude: Vec<String> = scan
+        .get("exclude")
+        .and_then(Value::as_array)
+        .expect("scan.exclude is an array")
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .expect("scan.exclude entry is a string")
+                .to_string()
+        })
+        .collect();
+    let min_clone_lines = scan
+        .get("min_clone_lines")
+        .and_then(Value::as_u64)
+        .expect("scan.min_clone_lines is a number") as u32;
+
+    let output_dir = tempfile::tempdir().expect("output tempdir");
+    let settings = ScanSettings {
+        output: output_dir.path().to_path_buf(),
+        include_tests,
+        exclude,
+        min_clone_lines,
+    };
+    pipeline::run(&target, settings).unwrap_or_else(|error| {
+        panic!("scanning the archive's recorded target {target:?}: {error}")
+    });
+    let actual_text = fs::read_to_string(output_dir.path().join("report.json"))
+        .expect("freshly rendered report.json exists");
+
+    assert_eq!(
+        actual_text, archived_text,
+        "the IR build must render java-fixture-01 byte-identical to the archived report"
+    );
+}
+
+/// Proves the pending path is reachable and prints its notice rather than
+/// silently substituting a pass, independent of whether this invocation
+/// happens to carry the archive-backed leg too -- mirroring
+/// `tests/golden_digest.rs::test_gate_is_reported_pending_when_the_archive_is_absent`.
+#[test]
+fn test_java_fixture_01_strict_leg_is_reported_pending_when_the_archive_is_absent() {
+    match archive_gate() {
+        ArchiveGate::Pending => println!("{}", pending_notice()),
+        ArchiveGate::Resolved(_) => {
+            // The archive-backed leg is running in this invocation; the
+            // pending branch above is exercised by this same test in the
+            // ordinary (archive-absent) developer/CI run instead.
+        }
+    }
 }
