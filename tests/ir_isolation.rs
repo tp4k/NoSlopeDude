@@ -184,4 +184,29 @@ fn test_the_scan_catches_a_planted_grammar_string() {
             .any(|literal| vocabulary.contains(literal)),
         "a node-kind word inside a comment-only line must not be flagged: {comment_literals:?}"
     );
+
+    // Positive control on the real file walk itself: `rust_files_under`
+    // returning `Vec::new()` unconditionally (e.g. a broken directory-walk
+    // refactor) would leave `test_no_analyzer_names_a_grammar_node_kind`
+    // vacuously green, since `violations_in` would have nothing to scan.
+    // Pin that every one of the four analyzer-facing directories actually
+    // yields files, and that `src/lower/` -- the one directory these
+    // literals are allowed to live in -- actually contains at least one
+    // real grammar node-kind literal, so the walk is exercising real
+    // production code, not an empty directory.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for scanned in ["src/ir", "src/metrics", "src/clones", "src/rules"] {
+        let files = rust_files_under(&root.join(scanned));
+        assert!(
+            !files.is_empty(),
+            "rust_files_under({scanned:?}) found no files -- the walk itself is broken"
+        );
+    }
+    let lower_violations = violations_in(&root.join("src/lower"), &vocabulary);
+    assert!(
+        !lower_violations.is_empty(),
+        "src/lower/ is expected to contain at least one real grammar node-kind literal \
+         (it is the one exempt directory) -- finding none means violations_in itself is \
+         broken, not that src/lower/ became clean"
+    );
 }
