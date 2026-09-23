@@ -645,3 +645,37 @@ fn test_static_get_whitespace_does_not_break_the_group() {
     );
     assert_eq!(result.groups[0].locations.len(), 2, "{:?}", result.groups);
 }
+
+/// triage-ws4-r2.md row 2: deleting `|| node.is_comment` from
+/// `ir_statement_tokens` leaves the whole pre-existing suite green, because
+/// the only comment fixture (`CommentInStatementA/B.java`) is
+/// byte-identical including its comment. Two bodies identical except one
+/// carries a line comment and the other a block comment, inside one call's
+/// argument list, must still group. Written into a `tempfile::tempdir()`
+/// rather than under `tests/fixtures/clones/`, per row 1's note.
+#[test]
+fn test_differing_comments_do_not_break_a_group() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        dir.path().join("CommentDiffA.java"),
+        "public class CommentDiffA {\n    void run() {\n        combine(one,\n                two,\n                three,\n                four,\n                five,\n                // alpha\n                six,\n                seven);\n        combine(eight, nine, ten);\n    }\n}\n",
+    )
+    .expect("write CommentDiffA.java");
+    fs::write(
+        dir.path().join("CommentDiffB.java"),
+        "public class CommentDiffB {\n    void run() {\n        combine(one,\n                two,\n                three,\n                four,\n                five,\n                /* beta */\n                six,\n                seven);\n        combine(eight, nine, ten);\n    }\n}\n",
+    )
+    .expect("write CommentDiffB.java");
+    let files = parsed_files_under(
+        dir.path(),
+        &[("CommentDiffA.java", JAVA), ("CommentDiffB.java", JAVA)],
+    );
+    let result = clones::run(&files, 8);
+    assert_eq!(
+        result.groups.len(),
+        1,
+        "a differing comment must not change the normalized token stream: {:?}",
+        result.groups
+    );
+    assert_eq!(result.groups[0].locations.len(), 2, "{:?}", result.groups);
+}
