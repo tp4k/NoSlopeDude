@@ -3,9 +3,9 @@
 `nsd-plan-final.md`, M0b item 8, requires that retargeting the scanner onto
 the new IR produce a **byte-identical** `report.json` on every fixture the
 retarget does not deliberately change. This document covers the gate that
-proves it: what it compares, how it is run, and the (currently empty)
-declared-delta list WS-6 populates when it lands the salvage / `SkipReason`
-split item 8 explicitly permits.
+proves it: what it compares, how it is run, and the declared-delta list
+WS-6 populates for the salvage / `SkipReason` split item 8 explicitly
+permits (see *Declared deltas* below).
 
 Two mechanisms, kept deliberately separate:
 
@@ -28,8 +28,23 @@ Two mechanisms, kept deliberately separate:
 
 | file | corpus |
 |---|---|
-| `clean.report.json` | all of `tests/fixtures/` **minus** the three malformed sources below — zero parse failures, so any measurement delta here is an unambiguous IR fidelity bug |
+| `clean.report.json` | all of `tests/fixtures/` **minus** the three malformed sources below and **minus** `CLEAN_CORPUS_ONLY_EXCLUSIONS` — intended to be zero parse failures, so any measurement delta here is an unambiguous IR fidelity bug (see *Known gap* below: two pre-existing `tests/fixtures/ir/` fixtures currently break this invariant) |
 | `malformed.report.json` | exactly `tests/fixtures/metrics/broken/Broken.ts`, `tests/fixtures/rules/broken/Broken.java`, `tests/fixtures/report/src/Broken.java` — parse failures the fixture salvage/`SkipReason` work is expected to eventually touch |
+
+WS-6 also introduced `tests/fixtures/salvage/Mixed.java` and `Mixed.ts`
+(`tests/salvage.rs`'s own fixtures, one clean callable and one damaged
+callable each). They are excluded from `clean.report.json`'s walk via
+`tests/neutrality.rs::CLEAN_CORPUS_ONLY_EXCLUSIONS`, a list kept
+deliberately separate from `MALFORMED_CORPUS_SOURCES`: folding a new
+fixture into `MALFORMED_CORPUS_SOURCES` would also grow
+`malformed.report.json`'s own scanned corpus past what its baseline was
+captured from — a corpus-*size* change (a `/top25` length mismatch, a
+`scanned_lines` total moved by a file the baseline never saw at all), which
+`DECLARED_DELTAS` has no way to express as a per-field delta.
+`CLEAN_CORPUS_ONLY_EXCLUSIONS` only ever shrinks the clean-corpus walk;
+`Mixed.java`/`Mixed.ts` never enter either scanned corpus, and needed no
+baseline re-capture at all, since neither baseline was ever captured with
+them present.
 
 Both corpora are **copied** at test time (and at script run time) into a
 fresh temporary directory, mirroring each source's path relative to
@@ -78,8 +93,66 @@ over the failure, is:
    ratios/erosion derived from them) and, if the new file's callables rank
    into the top 25, the displaced `/top25` rows — nothing else.
 
-`tests/fixtures/salvage/` (WS-6) is the next fixture addition scheduled to
-trigger this procedure.
+`tests/fixtures/salvage/` (WS-6) was the fixture addition this note
+originally anticipated triggering this procedure. It ended up not needing
+it: `Mixed.java`/`Mixed.ts` are excluded from the clean-corpus walk via
+`CLEAN_CORPUS_ONLY_EXCLUSIONS` instead (see the table above) rather than
+folded into `MALFORMED_CORPUS_SOURCES`, so neither committed baseline ever
+needed to change on their account. WS-6's own brief separately forbids
+regenerating either baseline under `tests/golden/neutrality/` at all
+(`AGENTS.md`, *Verification*: "never substitute invented results or
+silently re-baseline an unexplained difference"), which this procedure
+remains available for a human operator to run deliberately, with the two
+proofs below, if a *genuine* corpus-composition change is ever needed.
+
+### Known gap: two pre-existing damaged fixtures under `tests/fixtures/ir/`
+
+WS-6 discovered, empirically (a diagnostic scan of the full `tests/fixtures/`
+tree lists every parse failure across the whole corpus), that
+`tests/fixtures/ir/JavaVarargsAnnotation.java` and
+`tests/fixtures/ir/JsxUnterminatedEntity.tsx` (WS-1-owned, read-only to this
+stream; both are hand-crafted fixtures for `tests/ir_lowering.rs`'s own
+direct damage-kind assertions) also carry a `SyntaxError`, and are walked
+into the clean corpus by `clean_corpus_sources()`'s membership rule.
+(A third, `tests/fixtures/ir/TsUsingParameter.ts`, also carries a
+`SyntaxError` but nets zero surviving scanned lines, so it does not itself
+move a number — see below.)
+
+Before salvage, a `SyntaxError` file was dropped wholesale regardless of
+which corpus scanned it, so these two contributed nothing to
+`clean.report.json`'s scores and the original decision-1 malformed list
+(predating WS-6) never needed to name them; the committed baseline itself,
+however, already carries their *skip bookkeeping* — three
+`skipped_files` entries (`parse_syntax_error`) and `incomplete: true` — since
+`build_skipped_files` rendered every parse failure unconditionally at
+capture time.
+
+Salvage means a `SyntaxError` file is lowered like any other file now, so
+leaving these fixtures on the clean corpus's walk moves two numbers on a
+target this gate has no mechanism to declare a delta on at all
+(`test_clean_corpus_report_is_byte_identical_to_the_pre_ir_baseline` is an
+unconditional `assert_eq!`, with no `DECLARED_DELTAS`-style escape hatch):
+confirmed by running the clean-corpus test with only this stream's `src/`
+production changes applied (no test or fixture edits) — `+2` scanned lines
+overall (`+1` java from `JavaVarargsAnnotation.java`'s surviving class
+wrapper, `+1` js_ts from `JsxUnterminatedEntity.tsx`'s), and all three
+fixtures' `skipped_files` entries disappear (`incomplete` itself stays
+`true` on both sides, since `metrics`/`rules` incomplete tracking still
+sees the residual `ParseFailure`s regardless).
+
+Excluding these two from the clean corpus (the same
+`CLEAN_CORPUS_ONLY_EXCLUSIONS` mechanism `Mixed.java`/`Mixed.ts` use) does
+not resolve this: the committed `clean.report.json` baseline was captured
+*with* them present, so removing them instead swaps which direction the
+byte-identity assertion fails in (the three `skipped_files` entries and the
+`+2` scanned lines both move, just the other way) rather than eliminating
+the divergence. The only way to make `test_clean_corpus_report_is_byte_
+identical_to_the_pre_ir_baseline` pass again, either way, is an authorized
+re-capture of `clean.report.json` under the corrected corpus composition
+via the Proof A/B procedure above — which is exactly the WS-2-owned
+baseline regeneration this stream's brief forbids without asking first.
+This is left as an open question for the coordinator; see the round's
+implementer report.
 
 ## Normalization
 
@@ -116,12 +189,34 @@ construction and needs no normalization there either.
 `tests/neutrality.rs`'s `DECLARED_DELTAS` constant is a list of JSON
 pointers (e.g. `/skipped_files/0/reason`) that the malformed-corpus
 comparison is permitted to differ on, applied by `diff_paths`/`walk_diff`
-against both a changed leaf and a key present on only one side. It is
-empty as of this stream: WS-2 captures the pre-IR baseline before any
-analyzer is retargeted, so there is nothing yet to declare. WS-6 populates
-it when the salvage and `SkipReason` split lands, and only for the
-specific fields item 8 names — every other measurement on the malformed
-corpus must stay identical.
+against both a changed leaf and a key present on only one side. WS-6
+populates it with exactly three pointers, one by one:
+
+- **`/skipped_files`** — a `SyntaxError` file is no longer a whole-file
+  skip (`src/report/mod.rs::build_skipped_files` now filters out
+  `ParseFailureReason::SyntaxError`), so all three of
+  `MALFORMED_CORPUS_SOURCES`'s fixtures' entries disappear from the
+  rendered array: it shrinks from 3 entries to 0. `walk_diff` reports an
+  array-length mismatch once, at the parent path, not per index, so a
+  single pointer covers all three removals.
+- **`/scores/overall/verbosity/scanned_lines`** and
+  **`/scores/java/verbosity/scanned_lines`** — `rules/broken/Broken.java`
+  and `report/src/Broken.java` each declare exactly one callable and it
+  intersects the damage, so it stays unmeasured (fail-closed, D9); but
+  D12's per-file scanned-line count is unconditioned on callable
+  boundaries (`metrics::scan_file`'s own doc comment) and still walks each
+  file's surviving class-wrapper lines around the pruned callable —
+  previously `0` (the whole file was dropped before reaching `metrics` at
+  all), now a small positive count per file.
+
+`js_ts`'s own malformed fixture, `metrics/broken/Broken.ts`, needs **no**
+declared delta: its damage happens to leave no surviving wrapper content
+outside the one damaged callable, so `/scores/js_ts/verbosity/scanned_lines`
+stays `0` on both sides. `flagged_lines` and every `ratio` field also stay
+identical on both sides too (`0`, since `0/0` and `0/scanned_lines` are both
+defined as `0.0` by `compute_verbosity`) and need no entry either — none of
+the three fixtures' surviving wrapper lines trip any of the six rules, so
+nothing moves the numerator.
 `tests/neutrality.rs::test_diff_paths_suppresses_only_declared_deltas`
 exercises the mechanism directly against hand-built JSON, with a non-empty
 declared-deltas list, covering a changed leaf under a declared pointer, a

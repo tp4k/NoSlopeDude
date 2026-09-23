@@ -24,14 +24,40 @@ use nsd::model::{LanguageFamily, ScanSettings, DEFAULT_MIN_CLONE_LINES};
 use nsd::pipeline;
 
 /// Paths relative to `tests/fixtures/`. Decision 1: the malformed corpus is
-/// exactly these three in-repo damaged fixtures -- the local stand-ins for
-/// the private `js-ts-fixture-01/-02` deltas; every other file under
-/// `tests/fixtures/` is the clean corpus.
+/// exactly these in-repo damaged fixtures -- the local stand-ins for the
+/// private `js-ts-fixture-01/-02` deltas; every other file under
+/// `tests/fixtures/` is the clean corpus. Unchanged from the pre-WS-6 list:
+/// this is also the exact corpus `test_malformed_corpus_report_matches_its_
+/// baseline_with_declared_deltas_only` scans as one unit against
+/// `malformed.report.json`, so growing it (even with another already-
+/// damaged fixture) grows that test's own scanned corpus past what its
+/// baseline was captured from -- a corpus-*size* change (a `/top25` length
+/// mismatch, `scores.*.verbosity.scanned_lines` moved by files the baseline
+/// never saw), which `DECLARED_DELTAS` has no way to express as a per-field
+/// delta. `tests/fixtures/salvage/`'s own two fixtures deliberately do NOT
+/// join this list; see `CLEAN_CORPUS_ONLY_EXCLUSIONS` below.
 const MALFORMED_CORPUS_SOURCES: &[&str] = &[
     "metrics/broken/Broken.ts",
     "rules/broken/Broken.java",
     "report/src/Broken.java",
 ];
+
+/// Paths relative to `tests/fixtures/`, excluded from the clean corpus's
+/// walk but deliberately kept OUT of `MALFORMED_CORPUS_SOURCES` (see that
+/// constant's own doc comment for why folding them in there would be
+/// wrong): `tests/salvage.rs`'s own `salvage/Mixed.java` and
+/// `salvage/Mixed.ts` fixtures. Both carry the exact same damage shape
+/// `rules/broken/Broken.java` already does (one clean callable, one
+/// intersecting a `MISSING`/`ERROR` node) and did not exist when
+/// `clean.report.json` was captured, so excluding them here keeps the rest
+/// of the clean-corpus comparison exactly as it was -- these two files
+/// simply never enter either scanned corpus.
+///
+/// `docs/ir-neutrality.md` originally anticipated a *clean*-corpus
+/// re-capture as the procedure for this addition; this list is the
+/// alternative that needs no re-capture at all, since a file this list
+/// excludes was never part of the corpus baseline had to account for.
+const CLEAN_CORPUS_ONLY_EXCLUSIONS: &[&str] = &["salvage/Mixed.java", "salvage/Mixed.ts"];
 
 const FIXTURES_ROOT: &str = "tests/fixtures";
 
@@ -46,11 +72,33 @@ const NORMALIZED_TARGET_LABEL: &str = "<neutrality-corpus>";
 
 /// Declared measurement deltas the malformed corpus is permitted to carry
 /// against its baseline -- JSON pointers such as `/skipped_files/0/reason`.
-/// Empty at this stream: WS-2 captures the pre-IR baseline with no
-/// analyzer retargeted yet, so there is nothing to declare. WS-6 (salvage,
-/// the `SkipReason` split) populates this list when it lands the deltas
-/// M0b item 8 explicitly permits.
-const DECLARED_DELTAS: &[&str] = &[];
+/// WS-6 (salvage, the `SkipReason` split) populates this list with exactly
+/// the fields item 8's declared exception authorizes moving on
+/// `MALFORMED_CORPUS_SOURCES`'s three fixtures:
+///
+/// - `/skipped_files` -- a `SyntaxError` file is no longer a whole-file
+///   skip (`src/report/mod.rs::build_skipped_files`), so all three
+///   fixtures' entries disappear; the array shrinks from 3 to 0 (a length
+///   mismatch, reported once at the parent path by `walk_diff`, not
+///   per-index).
+/// - `/scores/overall/verbosity/scanned_lines` and
+///   `/scores/java/verbosity/scanned_lines` -- `rules/broken/Broken.java`
+///   and `report/src/Broken.java` each have one callable and it intersects
+///   the damage, so it stays unmeasured (fail-closed), but D12's per-file
+///   scanned-line count is unconditioned on callable boundaries and still
+///   walks each file's surviving class-wrapper lines around the pruned
+///   callable -- previously 0 (the whole file was dropped), now a few per
+///   file. `js_ts`'s own `metrics/broken/Broken.ts` has no such surviving
+///   wrapper content, so `/scores/js_ts/verbosity/scanned_lines` needs no
+///   entry: it stays `0` on both sides. `flagged_lines` and every `ratio`
+///   also stay identical (`0`, since `0/0` and `0/scanned_lines` are both
+///   `0.0`) and need no entry either -- none of the three fixtures'
+///   surviving wrapper lines trip any of the six rules.
+const DECLARED_DELTAS: &[&str] = &[
+    "/skipped_files",
+    "/scores/overall/verbosity/scanned_lines",
+    "/scores/java/verbosity/scanned_lines",
+];
 
 /// Set (non-empty) to make the two corpus tests below overwrite their
 /// baseline files with a freshly captured, normalized report instead of
@@ -104,12 +152,19 @@ fn malformed_corpus_sources() -> Vec<PathBuf> {
     MALFORMED_CORPUS_SOURCES.iter().map(PathBuf::from).collect()
 }
 
-/// All of `tests/fixtures/` minus the three malformed sources (decision 1).
+/// All of `tests/fixtures/` minus the three malformed sources (decision 1)
+/// and minus `CLEAN_CORPUS_ONLY_EXCLUSIONS` (WS-6's own new fixtures, kept
+/// out of `malformed_corpus_sources()` deliberately -- see that list's own
+/// doc comment).
 fn clean_corpus_sources() -> Vec<PathBuf> {
     let malformed = malformed_corpus_sources();
+    let clean_only_exclusions: Vec<PathBuf> = CLEAN_CORPUS_ONLY_EXCLUSIONS
+        .iter()
+        .map(PathBuf::from)
+        .collect();
     all_fixture_relative_paths()
         .into_iter()
-        .filter(|path| !malformed.contains(path))
+        .filter(|path| !malformed.contains(path) && !clean_only_exclusions.contains(path))
         .collect()
 }
 
