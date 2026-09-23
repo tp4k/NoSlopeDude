@@ -106,6 +106,24 @@ pub struct IrNode {
     pub children: Vec<IrNode>,
 }
 
+impl Drop for IrNode {
+    /// A tree this deep (the metrics suite's 15,000-level nesting regression
+    /// fixture) overflows the stack under the compiler's default recursive
+    /// drop glue: a `Vec<IrNode>` drops each element in turn, and a long
+    /// single-child chain turns that into one recursive `drop` call per
+    /// level. Converts teardown into the same iterative, stack-safe shape
+    /// `build_ir` uses to construct the tree: pop a node, move its own
+    /// children onto the pending work-list (leaving its `children` field
+    /// empty so its *own* drop, once popped, has nothing left to recurse
+    /// into), repeat.
+    fn drop(&mut self) {
+        let mut pending: Vec<IrNode> = std::mem::take(&mut self.children);
+        while let Some(mut node) = pending.pop() {
+            pending.append(&mut node.children);
+        }
+    }
+}
+
 /// The six rules' terminator-ness query: no grammar string, just the flag
 /// the lowering already computed.
 pub fn is_terminator(node: &IrNode) -> bool {
