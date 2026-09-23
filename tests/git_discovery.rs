@@ -281,6 +281,21 @@ fn config_exclude_directory_pattern_covers_nested_files() {
                 MODE_REGULAR,
                 b"export {};\n".to_vec(),
             ),
+            (
+                b"src/zz.ts".to_vec(),
+                MODE_REGULAR,
+                b"export {};\n".to_vec(),
+            ),
+            (
+                b"pkg/node_modules/x/y.js".to_vec(),
+                MODE_REGULAR,
+                b"export {};\n".to_vec(),
+            ),
+            (
+                b"pkg/z.ts".to_vec(),
+                MODE_REGULAR,
+                b"export {};\n".to_vec(),
+            ),
         ],
     );
     let snapshot = CommitSnapshot::head_or_empty(&repo).expect("snapshot HEAD");
@@ -293,6 +308,20 @@ fn config_exclude_directory_pattern_covers_nested_files() {
         "a directory-anchored exclude pattern must cover files nested beneath it (D19)"
     );
     assert!(is_included(&result, "src/keep.ts"));
+    assert!(
+        is_included(&result, "src/zz.ts"),
+        "a sibling under the same parent as a matched exclude directory must not \
+         inherit that directory's memoized verdict"
+    );
+    assert_eq!(
+        skip_reason_for(&result, "pkg/node_modules/x/y.js"),
+        Some(SkipReason::BuiltinExclusion)
+    );
+    assert!(
+        is_included(&result, "pkg/z.ts"),
+        "a sibling under the same parent as a matched built-in-exclusion directory \
+         must not inherit that directory's memoized verdict"
+    );
 }
 
 #[test]
