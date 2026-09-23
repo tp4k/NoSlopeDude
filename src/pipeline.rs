@@ -2,6 +2,7 @@
 //! stages in order.
 
 use crate::discover::{self, DiscoverResult};
+use crate::lower::{self, IrFile};
 use crate::model::{ClonesResult, MetricsResult, ParseFailure, RulesResult, ScanSettings};
 use crate::report::{Report, ReportInput};
 use crate::target::{self, ResolvedTarget};
@@ -17,6 +18,11 @@ pub struct PipelineOutput {
     pub clones: ClonesResult,
     pub rules: RulesResult,
     pub report: Report,
+    /// M0b: the IR built per successfully parsed file (`nsd-plan-final.md`
+    /// M0b item 5). No stage reads this yet -- it is wired in so the build
+    /// is proven against real discovery output, not to retarget any
+    /// analyzer; `report` above is unaffected by its presence.
+    pub ir: Vec<IrFile>,
 }
 
 /// Resolves `target_input`, walks it, and runs the five scan stages.
@@ -27,6 +33,7 @@ pub fn run(target_input: &str, settings: ScanSettings) -> anyhow::Result<Pipelin
 
     let (parsed_files, parse_failures) =
         parse::parse_all(&resolved_target.root, &discover.discovered);
+    let ir = lower::lower_all(&parsed_files);
     let metrics = metrics::run(&parsed_files, !parse_failures.is_empty());
     let clones = clones::run(&parsed_files, settings.min_clone_lines);
     let rules = rules::run(&parsed_files, &metrics, &clones);
@@ -53,5 +60,6 @@ pub fn run(target_input: &str, settings: ScanSettings) -> anyhow::Result<Pipelin
         clones,
         rules,
         report,
+        ir,
     })
 }
