@@ -32,9 +32,13 @@ output:
 /// used only here.
 const MODE_REGULAR: i32 = 0o100644;
 
-fn assert_is_c102(result: Result<Config, ConfigError>) {
+fn assert_is_c102(result: Result<Config, ConfigError>, needle: &str) {
     let err = result.expect_err("expected an NSD-C102 error");
     assert_eq!(err.code(), CODE_INVALID_CONFIG);
+    assert!(
+        err.to_string().contains(needle),
+        "expected {needle:?} in the message, got: {err}"
+    );
 }
 
 #[test]
@@ -70,81 +74,135 @@ fn omitted_sections_take_defaults() {
 
 #[test]
 fn unknown_fields_are_c102() {
-    assert_is_c102(Config::parse(b"version: 1\nfoo: bar\n"));
-    assert_is_c102(Config::parse(b"version: 1\nmeasurement:\n  foo: 1\n"));
+    assert_is_c102(Config::parse(b"version: 1\nfoo: bar\n"), "foo");
+    assert_is_c102(
+        Config::parse(b"version: 1\nmeasurement:\n  foo: 1\n"),
+        "foo",
+    );
 }
 
 #[test]
 fn duplicate_fields_are_c102() {
-    assert_is_c102(Config::parse(b"version: 1\nversion: 1\n"));
-    assert_is_c102(Config::parse(
-        b"version: 1\nmeasurement:\n  min_clone_lines: 1\n  min_clone_lines: 2\n",
-    ));
-    assert_is_c102(Config::parse(
-        b"version: 1\npolicy:\n  NSD-E101: deny\n  NSD-E101: warn\n",
-    ));
+    assert_is_c102(Config::parse(b"version: 1\nversion: 1\n"), "version");
+    assert_is_c102(
+        Config::parse(b"version: 1\nmeasurement:\n  min_clone_lines: 1\n  min_clone_lines: 2\n"),
+        "min_clone_lines",
+    );
+    assert_is_c102(
+        Config::parse(b"version: 1\npolicy:\n  NSD-E101: deny\n  NSD-E101: warn\n"),
+        "NSD-E101",
+    );
 }
 
 #[test]
 fn bad_version_is_c102() {
-    assert_is_c102(Config::parse(b"version: 2\n"));
-    assert_is_c102(Config::parse(b"version: \"1\"\n"));
-    assert_is_c102(Config::parse(b"include: [src/**]\n"));
+    assert_is_c102(Config::parse(b"version: 2\n"), "2");
+    assert_is_c102(Config::parse(b"version: \"1\"\n"), "version");
+    assert_is_c102(Config::parse(b"include: [src/**]\n"), "version");
 }
 
 #[test]
 fn unsupported_codes_are_c102() {
-    assert_is_c102(Config::parse(b"version: 1\npolicy:\n  NSD-S101: deny\n"));
-    assert_is_c102(Config::parse(b"version: 1\npolicy:\n  NSD-A101: deny\n"));
-    assert_is_c102(Config::parse(b"version: 1\npolicy:\n  NSD-X999: deny\n"));
-    assert_is_c102(Config::parse(b"version: 1\npolicy:\n  E101: deny\n"));
+    assert_is_c102(
+        Config::parse(b"version: 1\npolicy:\n  NSD-S101: deny\n"),
+        "NSD-S101",
+    );
+    assert_is_c102(
+        Config::parse(b"version: 1\npolicy:\n  NSD-A101: deny\n"),
+        "NSD-A101",
+    );
+    assert_is_c102(
+        Config::parse(b"version: 1\npolicy:\n  NSD-X999: deny\n"),
+        "NSD-X999",
+    );
+    assert_is_c102(
+        Config::parse(b"version: 1\npolicy:\n  E101: deny\n"),
+        "E101",
+    );
 }
 
 #[test]
 fn bad_severity_is_c102() {
-    assert_is_c102(Config::parse(b"version: 1\npolicy:\n  NSD-E101: error\n"));
-    assert_is_c102(Config::parse(b"version: 1\npolicy:\n  NSD-E101: Deny\n"));
-    assert_is_c102(Config::parse(b"version: 1\npolicy:\n  NSD-E101: true\n"));
+    assert_is_c102(
+        Config::parse(b"version: 1\npolicy:\n  NSD-E101: error\n"),
+        "NSD-E101",
+    );
+    assert_is_c102(
+        Config::parse(b"version: 1\npolicy:\n  NSD-E101: Deny\n"),
+        "NSD-E101",
+    );
+    assert_is_c102(
+        Config::parse(b"version: 1\npolicy:\n  NSD-E101: true\n"),
+        "NSD-E101",
+    );
 }
 
 #[test]
 fn bad_globs_are_c102() {
-    assert_is_c102(Config::parse(b"version: 1\ninclude: [\"src/[\"]\n"));
-    assert_is_c102(Config::parse(b"version: 1\nexclude: [\"src/[\"]\n"));
-    assert_is_c102(Config::parse(b"version: 1\nexclude: [\"#vendor/**\"]\n"));
+    assert_is_c102(
+        Config::parse(b"version: 1\ninclude: [\"src/[\"]\n"),
+        "src/[",
+    );
+    assert_is_c102(
+        Config::parse(b"version: 1\nexclude: [\"src/[\"]\n"),
+        "src/[",
+    );
+    assert_is_c102(
+        Config::parse(b"version: 1\nexclude: [\"#vendor/**\"]\n"),
+        "#vendor/**",
+    );
 }
 
 #[test]
 fn negated_patterns_are_c102() {
-    assert_is_c102(Config::parse(b"version: 1\ninclude: [\"!vendor/**\"]\n"));
-    assert_is_c102(Config::parse(b"version: 1\nexclude: [\"!vendor/**\"]\n"));
+    assert_is_c102(
+        Config::parse(b"version: 1\ninclude: [\"!vendor/**\"]\n"),
+        "!vendor/**",
+    );
+    assert_is_c102(
+        Config::parse(b"version: 1\nexclude: [\"!vendor/**\"]\n"),
+        "!vendor/**",
+    );
 }
 
 #[test]
 fn non_positive_min_clone_lines_is_c102() {
-    assert_is_c102(Config::parse(
-        b"version: 1\nmeasurement:\n  min_clone_lines: 0\n",
-    ));
-    assert_is_c102(Config::parse(
-        b"version: 1\nmeasurement:\n  min_clone_lines: -3\n",
-    ));
-    assert_is_c102(Config::parse(
-        b"version: 1\nmeasurement:\n  min_clone_lines: \"10\"\n",
-    ));
-    assert_is_c102(Config::parse(
-        b"version: 1\nmeasurement:\n  min_clone_lines: 1.5\n",
-    ));
+    assert_is_c102(
+        Config::parse(b"version: 1\nmeasurement:\n  min_clone_lines: 0\n"),
+        "min_clone_lines",
+    );
+    assert_is_c102(
+        Config::parse(b"version: 1\nmeasurement:\n  min_clone_lines: -3\n"),
+        "min_clone_lines",
+    );
+    assert_is_c102(
+        Config::parse(b"version: 1\nmeasurement:\n  min_clone_lines: \"10\"\n"),
+        "min_clone_lines",
+    );
+    assert_is_c102(
+        Config::parse(b"version: 1\nmeasurement:\n  min_clone_lines: 1.5\n"),
+        "min_clone_lines",
+    );
 }
 
 #[test]
 fn empty_include_is_c102() {
-    assert_is_c102(Config::parse(b"version: 1\ninclude: []\n"));
-    assert_is_c102(Config::parse(b"version: 1\ninclude: [\"\"]\n"));
-    assert_is_c102(Config::parse(b"version: 1\ninclude: [\"   \"]\n"));
-    assert_is_c102(Config::parse(b"version: 1\ninclude: [\"#src/**\"]\n"));
-    assert_is_c102(Config::parse(b"version: 1\ninclude:\n"));
-    assert_is_c102(Config::parse(b"version: 1\ninclude: ~\n"));
-    assert_is_c102(Config::parse(b"version: 1\ninclude: null\n"));
+    assert_is_c102(Config::parse(b"version: 1\ninclude: []\n"), "include");
+    assert_is_c102(
+        Config::parse(b"version: 1\ninclude: [\"\"]\n"),
+        "empty or comment-only",
+    );
+    assert_is_c102(
+        Config::parse(b"version: 1\ninclude: [\"   \"]\n"),
+        "empty or comment-only",
+    );
+    assert_is_c102(
+        Config::parse(b"version: 1\ninclude: [\"#src/**\"]\n"),
+        "#src/**",
+    );
+    assert_is_c102(Config::parse(b"version: 1\ninclude:\n"), "include");
+    assert_is_c102(Config::parse(b"version: 1\ninclude: ~\n"), "include");
+    assert_is_c102(Config::parse(b"version: 1\ninclude: null\n"), "include");
 }
 
 #[test]
@@ -152,9 +210,12 @@ fn non_utf8_and_multi_document_are_c102() {
     let mut non_utf8 = b"version: 1\n# ".to_vec();
     non_utf8.push(0xFF);
     non_utf8.push(b'\n');
-    assert_is_c102(Config::parse(&non_utf8));
+    assert_is_c102(Config::parse(&non_utf8), "UTF-8");
 
-    assert_is_c102(Config::parse(b"version: 1\n---\nversion: 1\n"));
+    assert_is_c102(
+        Config::parse(b"version: 1\n---\nversion: 1\n"),
+        "more than one document",
+    );
 }
 
 #[test]
@@ -162,21 +223,32 @@ fn root_nsd_yml_only() {
     let (_dir, repo) = common::init_repo();
 
     // `sub/nsd.yml` and `NSD.yml` are not the repository-root `nsd.yml`:
-    // built-in defaults apply.
+    // built-in defaults apply. Each decoy carries its own distinct
+    // `min_clone_lines` value, so a loader that picked either one instead
+    // of finding nothing would produce a value other than the default.
     common::commit_entries(
         &repo,
         &[
             (
                 b"sub/nsd.yml".to_vec(),
                 MODE_REGULAR,
-                b"version: 1\n".to_vec(),
+                b"version: 1\nmeasurement:\n  min_clone_lines: 77\n".to_vec(),
             ),
-            (b"NSD.yml".to_vec(), MODE_REGULAR, b"version: 1\n".to_vec()),
+            (
+                b"NSD.yml".to_vec(),
+                MODE_REGULAR,
+                b"version: 1\nmeasurement:\n  min_clone_lines: 88\n".to_vec(),
+            ),
         ],
     );
     let snapshot = CommitSnapshot::head_or_empty(&repo).expect("snapshot HEAD");
     let config = nsd::config::load_from_commit(&repo, &snapshot).expect("defaults expected");
     assert_eq!(config.measurement.min_clone_lines, DEFAULT_MIN_CLONE_LINES);
+    assert_eq!(
+        config,
+        Config::parse(b"version: 1\n").expect("defaults"),
+        "a decoy at sub/nsd.yml or NSD.yml must not change any part of the default config"
+    );
 
     // A root `nsd.yml` is discovered and parsed.
     common::commit_entries(
@@ -185,9 +257,13 @@ fn root_nsd_yml_only() {
             (
                 b"sub/nsd.yml".to_vec(),
                 MODE_REGULAR,
-                b"version: 1\n".to_vec(),
+                b"version: 1\nmeasurement:\n  min_clone_lines: 77\n".to_vec(),
             ),
-            (b"NSD.yml".to_vec(), MODE_REGULAR, b"version: 1\n".to_vec()),
+            (
+                b"NSD.yml".to_vec(),
+                MODE_REGULAR,
+                b"version: 1\nmeasurement:\n  min_clone_lines: 88\n".to_vec(),
+            ),
             (
                 b"nsd.yml".to_vec(),
                 MODE_REGULAR,
