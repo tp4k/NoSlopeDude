@@ -247,6 +247,8 @@ the one test). The resulting diff matched the prediction exactly:
 `erosion`/`ratio` moving arithmetically, nothing else. See the round 3
 implementer report for the full committed diff.
 
+## Normalization
+
 Two normalization mechanisms exist, at two different levels:
 
 - **Raw-text normalization** (`normalize_raw_text`), used for the
