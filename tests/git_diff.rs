@@ -155,6 +155,37 @@ fn unborn_empty_tree_to_index_all_added() {
 }
 
 #[test]
+fn commit_to_commit_reports_changes() {
+    let (_dir, repo) = common::init_repo();
+    let base_oid =
+        common::commit_entries(&repo, &[(b"a.ts".to_vec(), MODE_REGULAR, b"a\n".to_vec())]);
+    let candidate_oid = common::commit_entries(
+        &repo,
+        &[
+            (b"a.ts".to_vec(), MODE_REGULAR, b"a2\n".to_vec()),
+            (b"b.ts".to_vec(), MODE_REGULAR, b"b\n".to_vec()),
+        ],
+    );
+
+    let changes = diff::diff_commit_to_commit(&repo, Some(base_oid), candidate_oid)
+        .expect("diff commit to commit");
+
+    assert_eq!(
+        changes,
+        vec![
+            Change::Modified {
+                path: RepoPath::from_bytes(b"a.ts".to_vec()),
+                kind: EntryKind::Regular,
+            },
+            Change::Added {
+                path: RepoPath::from_bytes(b"b.ts".to_vec()),
+                kind: EntryKind::Regular,
+            },
+        ]
+    );
+}
+
+#[test]
 fn worktree_diff_includes_untracked_and_isolates_dirty_state() {
     let (dir, repo) = common::init_repo();
     let base_oid = common::commit_entries(
@@ -222,6 +253,47 @@ fn symlink_and_submodule_changes_are_typed() {
             kind: EntryKind::Symlink
         } if path.as_bytes() == b"link.ts"
     )));
+}
+
+#[test]
+fn worktree_diff_keeps_symlink_and_gitlink_modes() {
+    let (dir, repo) = common::init_repo();
+    let gitlink = [0xAAu8; 20];
+    let base_oid = common::commit_entries(
+        &repo,
+        &[
+            (b"link".to_vec(), MODE_SYMLINK, b"target.ts".to_vec()),
+            (b"vendor/lib".to_vec(), MODE_SUBMODULE, gitlink.to_vec()),
+        ],
+    );
+    sync_index_to_commit(&repo, base_oid);
+    std::os::unix::fs::symlink("target.ts", dir.path().join("link"))
+        .expect("create a real symlink matching the committed target");
+    std::fs::create_dir_all(dir.path().join("vendor/lib"))
+        .expect("create the tracked submodule's directory");
+
+    let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let changes = diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree)
+        .expect("diff commit to worktree");
+    assert_eq!(
+        changes,
+        Vec::new(),
+        "an unchanged tracked symlink/gitlink must not appear: {changes:?}"
+    );
+
+    std::fs::remove_file(dir.path().join("link")).expect("remove the old symlink");
+    std::os::unix::fs::symlink("other.ts", dir.path().join("link")).expect("re-point the symlink");
+
+    let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let changes = diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree)
+        .expect("diff commit to worktree");
+    assert_eq!(
+        changes,
+        vec![Change::Modified {
+            path: RepoPath::from_bytes(b"link".to_vec()),
+            kind: EntryKind::Symlink,
+        }]
+    );
 }
 
 #[test]
@@ -391,6 +463,25 @@ fn line_map_pure_shift() {
     );
     assert_eq!(map.added_candidate_lines, BTreeSet::from([1, 2, 3]));
     assert_eq!(map.deleted_base_lines, BTreeSet::new());
+}
+
+#[test]
+fn line_map_maps_lines_far_from_change() {
+    let mut base = String::new();
+    for i in 1..=20 {
+        base.push_str(&format!("l{i}\n"));
+    }
+    let mut candidate = base.clone();
+    candidate.push_str("tail\n");
+
+    let map = diff::map_lines(base.as_bytes(), candidate.as_bytes()).expect("map lines");
+
+    assert_eq!(
+        map.base_to_candidate,
+        (1..=20).map(|i| (i, i)).collect::<BTreeMap<_, _>>()
+    );
+    assert_eq!(map.added_candidate_lines, BTreeSet::from([21]));
+    assert!(map.deleted_base_lines.is_empty());
 }
 
 #[test]
