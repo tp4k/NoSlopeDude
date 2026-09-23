@@ -36,24 +36,10 @@ impl RepoPath {
             return valid.to_string();
         }
         let mut out = String::with_capacity(self.0.len());
-        let mut rest = self.0.as_slice();
-        while !rest.is_empty() {
-            match std::str::from_utf8(rest) {
-                Ok(valid) => {
-                    push_escaping_percent(valid, &mut out);
-                    break;
-                }
-                Err(err) => {
-                    let valid_len = err.valid_up_to();
-                    if valid_len > 0 {
-                        push_valid_prefix(&rest[..valid_len], &mut out);
-                    }
-                    let invalid_len = err.error_len().unwrap_or(rest.len() - valid_len);
-                    for &byte in &rest[valid_len..valid_len + invalid_len] {
-                        push_percent_byte(byte, &mut out);
-                    }
-                    rest = &rest[valid_len + invalid_len..];
-                }
+        for chunk in self.0.utf8_chunks() {
+            push_escaping_percent(chunk.valid(), &mut out);
+            for &byte in chunk.invalid() {
+                push_percent_byte(byte, &mut out);
             }
         }
         out
@@ -75,20 +61,6 @@ impl Ord for RepoPath {
 impl fmt::Display for RepoPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.render())
-    }
-}
-
-/// `bytes` is exactly the prefix a `Utf8Error` already proved valid; the
-/// `Err` arm below is unreachable in practice and exists only so a broken
-/// invariant degrades to per-byte escaping rather than a panic.
-fn push_valid_prefix(bytes: &[u8], out: &mut String) {
-    match std::str::from_utf8(bytes) {
-        Ok(valid) => push_escaping_percent(valid, out),
-        Err(_) => {
-            for &byte in bytes {
-                push_percent_byte(byte, out);
-            }
-        }
     }
 }
 
