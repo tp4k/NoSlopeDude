@@ -315,6 +315,18 @@ pub fn load_from_commit(
     Config::parse(&bytes)
 }
 
+/// Deserializes a *present* `include` key as `Vec<String>` (D14: only an
+/// *omitted* key means every supported path). `#[serde(default)]` on the
+/// field already covers the omitted case without calling this; a present
+/// but blank/`~`/`null` value fails here instead of silently becoming
+/// `None`.
+fn deserialize_present_include<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Vec::<String>::deserialize(deserializer).map(Some)
+}
+
 /// The raw, unvalidated shape `serde_yaml_ng` deserializes `nsd.yml`
 /// into: strict at every level (`deny_unknown_fields`), so an unknown or
 /// duplicate field at any depth fails before semantic validation runs.
@@ -322,7 +334,7 @@ pub fn load_from_commit(
 #[serde(deny_unknown_fields)]
 struct RawConfig {
     version: u32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_present_include")]
     include: Option<Vec<String>>,
     #[serde(default)]
     exclude: Vec<String>,
