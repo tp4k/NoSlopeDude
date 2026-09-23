@@ -1,0 +1,71 @@
+{
+  "adaptation": {
+    "cc_rules_doc": "docs/cc-rules.md",
+    "summary": "CC, SLOC, mass, erosion and verbosity are computed from this scanner's own Java/JS-TS AST rules, adapted from scb-check's Python-only formulas. No numerical equivalence to scb-check's own scores is claimed.",
+    "wasteful_rules_doc": "docs/wasteful-rules.md"
+  },
+  "duplicates": [],
+  "findings": [],
+  "incomplete": true,
+  "scan": {
+    "exclude": [],
+    "include_tests": false,
+    "min_clone_lines": 10,
+    "revision": {
+      "dirty": null,
+      "sha": null,
+      "unavailable_reason": "not_a_git_repository"
+    },
+    "target": "<neutrality-corpus>"
+  },
+  "scores": {
+    "java": {
+      "erosion": 0.0,
+      "verbosity": {
+        "flagged_lines": 0,
+        "ratio": 0.0,
+        "scanned_lines": 6
+      }
+    },
+    "js_ts": {
+      "erosion": 0.0,
+      "verbosity": {
+        "flagged_lines": 0,
+        "ratio": 0.0,
+        "scanned_lines": 0
+      }
+    },
+    "overall": {
+      "erosion": 0.0,
+      "verbosity": {
+        "flagged_lines": 0,
+        "ratio": 0.0,
+        "scanned_lines": 6
+      }
+    }
+  },
+  "skipped_files": [
+    {
+      "detail": null,
+      "reason": "parse_syntax_error",
+      "relative_path": "src/Broken.java"
+    }
+  ],
+  "top25": [
+    {
+      "cc": 2,
+      "language": "java",
+      "location": {
+        "end_line": 5,
+        "excerpt": "    int classify(int x) {",
+        "is_remote_link": false,
+        "link": "src/Good.java#L5-L5",
+        "relative_path": "src/Good.java",
+        "start_line": 5
+      },
+      "mass": 3.4641016151377544,
+      "name": "classify",
+      "sloc": 3
+    }
+  ]
+}

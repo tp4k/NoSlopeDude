@@ -1,0 +1,290 @@
+{
+  "adaptation": {
+    "cc_rules_doc": "docs/cc-rules.md",
+    "summary": "CC, SLOC, mass, erosion and verbosity are computed from this scanner's own Java/JS-TS AST rules, adapted from scb-check's Python-only formulas. No numerical equivalence to scb-check's own scores is claimed.",
+    "wasteful_rules_doc": "docs/wasteful-rules.md"
+  },
+  "duplicates": [],
+  "findings": [],
+  "incomplete": false,
+  "scan": {
+    "exclude": [],
+    "include_tests": false,
+    "min_clone_lines": 10,
+    "revision": {
+      "dirty": null,
+      "sha": null,
+      "unavailable_reason": "not_a_git_repository"
+    },
+    "target": "<neutrality-corpus>"
+  },
+  "scores": {
+    "java": {
+      "erosion": 0.0,
+      "verbosity": {
+        "flagged_lines": 0,
+        "ratio": 0.0,
+        "scanned_lines": 21
+      }
+    },
+    "js_ts": {
+      "erosion": 0.0,
+      "verbosity": {
+        "flagged_lines": 0,
+        "ratio": 0.0,
+        "scanned_lines": 32
+      }
+    },
+    "overall": {
+      "erosion": 0.0,
+      "verbosity": {
+        "flagged_lines": 0,
+        "ratio": 0.0,
+        "scanned_lines": 53
+      }
+    }
+  },
+  "skipped_files": [],
+  "top25": [
+    {
+      "cc": 2,
+      "language": "java",
+      "location": {
+        "end_line": 9,
+        "excerpt": "    int classify(int x) {",
+        "is_remote_link": false,
+        "link": "src/CleanJava.java#L9-L9",
+        "relative_path": "src/CleanJava.java",
+        "start_line": 9
+      },
+      "mass": 3.4641016151377544,
+      "name": "classify",
+      "sloc": 3
+    },
+    {
+      "cc": 2,
+      "language": "java",
+      "location": {
+        "end_line": 16,
+        "excerpt": "    void safeCatch() {",
+        "is_remote_link": false,
+        "link": "src/CleanJava.java#L16-L16",
+        "relative_path": "src/CleanJava.java",
+        "start_line": 16
+      },
+      "mass": 3.4641016151377544,
+      "name": "safeCatch",
+      "sloc": 3
+    },
+    {
+      "cc": 2,
+      "language": "java",
+      "location": {
+        "end_line": 24,
+        "excerpt": "    void ignoredCatch() {",
+        "is_remote_link": false,
+        "link": "src/CleanJava.java#L24-L24",
+        "relative_path": "src/CleanJava.java",
+        "start_line": 24
+      },
+      "mass": 2.8284271247461903,
+      "name": "ignoredCatch",
+      "sloc": 2
+    },
+    {
+      "cc": 2,
+      "language": "java",
+      "location": {
+        "end_line": 32,
+        "excerpt": "    int compute(int x) {",
+        "is_remote_link": false,
+        "link": "src/CleanJava.java#L32-L32",
+        "relative_path": "src/CleanJava.java",
+        "start_line": 32
+      },
+      "mass": 4.0,
+      "name": "compute",
+      "sloc": 4
+    },
+    {
+      "cc": 2,
+      "language": "js_ts",
+      "location": {
+        "end_line": 1,
+        "excerpt": "function classify(x) {",
+        "is_remote_link": false,
+        "link": "src/CleanJs.js#L1-L1",
+        "relative_path": "src/CleanJs.js",
+        "start_line": 1
+      },
+      "mass": 3.4641016151377544,
+      "name": "classify",
+      "sloc": 3
+    },
+    {
+      "cc": 2,
+      "language": "js_ts",
+      "location": {
+        "end_line": 8,
+        "excerpt": "function safeCatch() {",
+        "is_remote_link": false,
+        "link": "src/CleanJs.js#L8-L8",
+        "relative_path": "src/CleanJs.js",
+        "start_line": 8
+      },
+      "mass": 3.4641016151377544,
+      "name": "safeCatch",
+      "sloc": 3
+    },
+    {
+      "cc": 2,
+      "language": "js_ts",
+      "location": {
+        "end_line": 16,
+        "excerpt": "function ignoredCatch() {",
+        "is_remote_link": false,
+        "link": "src/CleanJs.js#L16-L16",
+        "relative_path": "src/CleanJs.js",
+        "start_line": 16
+      },
+      "mass": 2.8284271247461903,
+      "name": "ignoredCatch",
+      "sloc": 2
+    },
+    {
+      "cc": 2,
+      "language": "js_ts",
+      "location": {
+        "end_line": 24,
+        "excerpt": "function compute(x) {",
+        "is_remote_link": false,
+        "link": "src/CleanJs.js#L24-L24",
+        "relative_path": "src/CleanJs.js",
+        "start_line": 24
+      },
+      "mass": 4.0,
+      "name": "compute",
+      "sloc": 4
+    },
+    {
+      "cc": 1,
+      "language": "java",
+      "location": {
+        "end_line": 41,
+        "excerpt": "    void risky() {",
+        "is_remote_link": false,
+        "link": "src/CleanJava.java#L41-L41",
+        "relative_path": "src/CleanJava.java",
+        "start_line": 41
+      },
+      "mass": 0.0,
+      "name": "risky",
+      "sloc": 0
+    },
+    {
+      "cc": 1,
+      "language": "js_ts",
+      "location": {
+        "end_line": 33,
+        "excerpt": "function risky() {}",
+        "is_remote_link": false,
+        "link": "src/CleanJs.js#L33-L33",
+        "relative_path": "src/CleanJs.js",
+        "start_line": 33
+      },
+      "mass": 0.0,
+      "name": "risky",
+      "sloc": 0
+    },
+    {
+      "cc": 1,
+      "language": "js_ts",
+      "location": {
+        "end_line": 35,
+        "excerpt": "function withHoistedFunction() {",
+        "is_remote_link": false,
+        "link": "src/CleanJs.js#L35-L35",
+        "relative_path": "src/CleanJs.js",
+        "start_line": 35
+      },
+      "mass": 1.0,
+      "name": "withHoistedFunction",
+      "sloc": 1
+    },
+    {
+      "cc": 1,
+      "language": "js_ts",
+      "location": {
+        "end_line": 38,
+        "excerpt": "    function helper() {",
+        "is_remote_link": false,
+        "link": "src/CleanJs.js#L38-L38",
+        "relative_path": "src/CleanJs.js",
+        "start_line": 38
+      },
+      "mass": 1.0,
+      "name": "helper",
+      "sloc": 1
+    },
+    {
+      "cc": 1,
+      "language": "js_ts",
+      "location": {
+        "end_line": 43,
+        "excerpt": "function withHoistedGenerator() {",
+        "is_remote_link": false,
+        "link": "src/CleanJs.js#L43-L43",
+        "relative_path": "src/CleanJs.js",
+        "start_line": 43
+      },
+      "mass": 1.0,
+      "name": "withHoistedGenerator",
+      "sloc": 1
+    },
+    {
+      "cc": 1,
+      "language": "js_ts",
+      "location": {
+        "end_line": 46,
+        "excerpt": "    function* helperGenerator() {",
+        "is_remote_link": false,
+        "link": "src/CleanJs.js#L46-L46",
+        "relative_path": "src/CleanJs.js",
+        "start_line": 46
+      },
+      "mass": 1.0,
+      "name": "helperGenerator",
+      "sloc": 1
+    },
+    {
+      "cc": 1,
+      "language": "js_ts",
+      "location": {
+        "end_line": 1,
+        "excerpt": "function withInterfaceAfterReturn(): number {",
+        "is_remote_link": false,
+        "link": "src/CleanTs.ts#L1-L1",
+        "relative_path": "src/CleanTs.ts",
+        "start_line": 1
+      },
+      "mass": 1.7320508075688772,
+      "name": "withInterfaceAfterReturn",
+      "sloc": 3
+    },
+    {
+      "cc": 1,
+      "language": "js_ts",
+      "location": {
+        "end_line": 9,
+        "excerpt": "function withTypeAliasAfterReturn(): number {",
+        "is_remote_link": false,
+        "link": "src/CleanTs.ts#L9-L9",
+        "relative_path": "src/CleanTs.ts",
+        "start_line": 9
+      },
+      "mass": 1.4142135623730951,
+      "name": "withTypeAliasAfterReturn",
+      "sloc": 2
+    }
+  ]
+}
