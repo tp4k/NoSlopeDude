@@ -4,6 +4,7 @@
 //! `pub mod` lines here for `diff` and `discovery`.
 
 pub mod diff;
+pub mod discovery;
 pub mod mergebase;
 pub mod path;
 pub mod snapshot;
