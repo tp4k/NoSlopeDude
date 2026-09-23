@@ -5,7 +5,7 @@
 //! *What the IR must carry*: spans, decision kinds, the three structural
 //! predicates, typed damage, and the version constants.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use nsd::ir::{self, DamageKind, DecisionKind, IrNode};
 use nsd::lower;
@@ -27,7 +27,15 @@ fn fixture_root() -> PathBuf {
 /// rather than a `ParsedFile` (the same filter that keeps a damaged file
 /// out of the real pipeline's clones/metrics/rules stages).
 fn parsed_files(paths: &[(&str, LanguageFamily)]) -> Vec<ParsedFile> {
-    let root = fixture_root();
+    parsed_files_under(&fixture_root(), paths)
+}
+
+/// `parsed_files`, generalized to a caller-chosen fixture root: this round's
+/// new tests cross-reference fixtures that already exist under
+/// `tests/fixtures/metrics/`, `clones/` and `rules/` (see `## Reuse and
+/// scope`'s "no new/edited fixture" constraint) rather than `tests/fixtures/
+/// ir/`, so the root can no longer be a hardcoded constant.
+fn parsed_files_under(root: &Path, paths: &[(&str, LanguageFamily)]) -> Vec<ParsedFile> {
     let files: Vec<DiscoveredFile> = paths
         .iter()
         .map(|(path, language)| DiscoveredFile {
@@ -35,12 +43,19 @@ fn parsed_files(paths: &[(&str, LanguageFamily)]) -> Vec<ParsedFile> {
             language: *language,
         })
         .collect();
-    let (parsed, failures) = parse::parse_all(&root, &files);
+    let (parsed, failures) = parse::parse_all(root, &files);
     assert!(
         failures.is_empty(),
         "unexpected parse failures: {failures:?}"
     );
     parsed
+}
+
+/// `metrics::run`'s own fixture root (`tests/fixtures/metrics/`), reused here
+/// rather than duplicated as a fixture -- `test_nullish_coalescing_is_a_
+/// decision_point` and later tests in this file read fixtures under it.
+fn metrics_fixture_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/metrics")
 }
 
 /// Parses one fixture file directly with tree-sitter, bypassing
@@ -302,3 +317,34 @@ fn test_clean_source_lowers_with_no_damage_spans() {
 // src/lower/mod.rs::tests (Decision 11): it now calls
 // `statement_token_stream` directly rather than reading `IrNode::token`,
 // which carried no reader in `src/` and was removed.
+
+/// WS-3's blocker (`implementer-ws3-r1.md`): the pre-IR `&&`/`||`/`??` weight
+/// table had one shared arm; the lowering's own `binary_expression` match
+/// dropped the `??` arm. `??` now lowers to `DecisionKind::Or`, not a new
+/// variant (`metrics::decision_weight`'s exhaustive match has no wildcard
+/// arm), and `?.` (optional chaining) still lowers to no decision at all.
+#[test]
+fn test_nullish_coalescing_is_a_decision_point() {
+    let files = parsed_files_under(
+        &metrics_fixture_root(),
+        &[("__tests__/ForOfOptional.js", JS_TS)],
+    );
+    let ir_file = lower::lower_file(&files[0]);
+
+    let mut nodes = Vec::new();
+    collect(&ir_file.root, &mut nodes);
+
+    // Line 7: `const fallback = maybe ?? 0;`
+    let line7_or: Vec<_> = nodes
+        .iter()
+        .filter(|node| node.span.start_line == 7 && node.decision == Some(DecisionKind::Or))
+        .collect();
+    assert_eq!(line7_or.len(), 1, "{line7_or:#?}");
+
+    // Line 6: `const value = maybe?.value;` -- `?.` is not a decision point.
+    let line6_decisions: Vec<_> = nodes
+        .iter()
+        .filter(|node| node.span.start_line == 6 && node.decision.is_some())
+        .collect();
+    assert!(line6_decisions.is_empty(), "{line6_decisions:#?}");
+}
