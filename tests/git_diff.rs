@@ -579,6 +579,41 @@ fn worktree_over_ceiling_add_does_not_disable_renames_elsewhere() {
 }
 
 #[test]
+fn worktree_over_ceiling_exact_rename_is_renamed() {
+    let (dir, repo) = common::init_repo();
+    let over_ceiling = vec![b'd'; SOURCE_CEILING_BYTES as usize + 1];
+    let base_oid = common::commit_entries(
+        &repo,
+        &[(b"big.js".to_vec(), MODE_REGULAR, over_ceiling.clone())],
+    );
+    sync_index_to_commit(&repo, base_oid);
+    // `commit_entries` never writes to disk (D23): `big.js` is already an
+    // on-disk deletion; write only the renamed replacement, byte-identical.
+    std::fs::write(dir.path().join("big2.js"), &over_ceiling)
+        .expect("write the exact-OID renamed replacement");
+
+    let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let changes = diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree)
+        .expect("diff commit to worktree");
+
+    assert_eq!(changes.len(), 1, "expected exactly one change: {changes:?}");
+    match &changes[0] {
+        Change::Renamed {
+            from,
+            to,
+            kind,
+            similarity,
+        } => {
+            assert_eq!(from.as_bytes(), b"big.js");
+            assert_eq!(to.as_bytes(), b"big2.js");
+            assert_eq!(*kind, EntryKind::Regular);
+            assert_eq!(*similarity, 100, "identical bytes are an exact match");
+        }
+        other => panic!("expected a Renamed change, got {other:?}"),
+    }
+}
+
+#[test]
 fn worktree_content_rename_detected() {
     let (dir, repo) = common::init_repo();
     let base_oid = common::commit_entries(
