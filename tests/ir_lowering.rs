@@ -598,6 +598,27 @@ fn test_hoisted_and_type_only_flag_is_jsts_only() {
         "{js_flagged_lines:?}"
     );
 
+    let cj_files = parsed_files_under(&root, &[("__tests__/CleanJs.js", JS_TS)]);
+    let cj_ir = lower::lower_file(&cj_files[0]);
+    let mut cj_nodes = Vec::new();
+    collect(&cj_ir.root, &mut cj_nodes);
+    let cj_lines: Vec<u32> = cj_nodes
+        .iter()
+        .filter(|node| node.is_hoisted_or_type_only)
+        .map(|node| node.span.start_line)
+        .collect();
+    // Exact set: the eight `function` declarations at 1/8/16/24/33/35/38/43
+    // plus the `function*` at 46 (38 nests in 35, 46 nests in 43) -- this is
+    // the only fixture in this test with a `generator_function_declaration`,
+    // so it is the only block that would catch a dropped
+    // `"generator_function_declaration"` arm in
+    // `is_hoisted_or_type_only` (src/lower/jsts.rs).
+    assert_eq!(
+        cj_lines,
+        vec![1, 8, 16, 24, 33, 35, 38, 43, 46],
+        "{cj_lines:?}"
+    );
+
     for (path, language) in [
         ("__tests__/JavaRulesFixture.java", JAVA),
         ("__tests__/CleanJava.java", JAVA),
