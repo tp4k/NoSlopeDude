@@ -142,6 +142,9 @@ fn empty_include_is_c102() {
     assert_is_c102(Config::parse(b"version: 1\ninclude: [\"\"]\n"));
     assert_is_c102(Config::parse(b"version: 1\ninclude: [\"   \"]\n"));
     assert_is_c102(Config::parse(b"version: 1\ninclude: [\"#src/**\"]\n"));
+    assert_is_c102(Config::parse(b"version: 1\ninclude:\n"));
+    assert_is_c102(Config::parse(b"version: 1\ninclude: ~\n"));
+    assert_is_c102(Config::parse(b"version: 1\ninclude: null\n"));
 }
 
 #[test]
