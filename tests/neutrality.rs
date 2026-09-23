@@ -536,7 +536,7 @@ fn test_java_fixture_01_strict_scan_is_byte_identical_to_the_archived_report() {
     };
 
     let archived_text = fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("reading the archived report at {path:?}: {error}"));
+        .unwrap_or_else(|error| panic!("reading the archived report: {error}"));
     let archived = parse_json(&archived_text);
     let scan = archived
         .get("scan")
@@ -575,15 +575,22 @@ fn test_java_fixture_01_strict_scan_is_byte_identical_to_the_archived_report() {
         exclude,
         min_clone_lines,
     };
-    pipeline::run(&target, settings).unwrap_or_else(|error| {
-        panic!("scanning the archive's recorded target {target:?}: {error}")
-    });
+    pipeline::run(&target, settings)
+        .unwrap_or_else(|error| panic!("scanning the archive's recorded target: {error}"));
     let actual_text = fs::read_to_string(output_dir.path().join("report.json"))
         .expect("freshly rendered report.json exists");
 
-    assert_eq!(
-        actual_text, archived_text,
-        "the IR build must render java-fixture-01 byte-identical to the archived report"
+    assert!(
+        actual_text == archived_text,
+        "the IR build must render java-fixture-01 byte-identical to the archived report; \
+         lengths {} vs {}, first differing byte at {:?}; contents withheld \
+         (AGENTS.md, Fixture privacy)",
+        actual_text.len(),
+        archived_text.len(),
+        actual_text
+            .bytes()
+            .zip(archived_text.bytes())
+            .position(|(a, b)| a != b)
     );
 }
 
