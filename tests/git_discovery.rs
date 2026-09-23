@@ -104,10 +104,27 @@ fn builtin_exclusions_cannot_be_reincluded() {
                 MODE_REGULAR,
                 b"module.exports = {};\n".to_vec(),
             ),
+            (
+                b"lib/app.min.js".to_vec(),
+                MODE_REGULAR,
+                b"(function(){})();\n".to_vec(),
+            ),
+            (
+                b"src/generated/G.java".to_vec(),
+                MODE_REGULAR,
+                b"class G {}\n".to_vec(),
+            ),
+            (
+                b"web/META-INF/resources/webjars/jq.js".to_vec(),
+                MODE_REGULAR,
+                b"// jq\n".to_vec(),
+            ),
         ],
     );
     let snapshot = CommitSnapshot::head_or_empty(&repo).expect("snapshot HEAD");
-    let scope = scope_from_yaml(b"version: 1\ninclude: [\"node_modules/**\", \"dist/**\"]\n");
+    let scope = scope_from_yaml(
+        b"version: 1\ninclude: [\"node_modules/**\", \"dist/**\", \"lib/**\", \"src/**\", \"web/**\"]\n",
+    );
     let result = discover(&snapshot.entries, &scope);
 
     assert_eq!(
@@ -116,6 +133,18 @@ fn builtin_exclusions_cannot_be_reincluded() {
     );
     assert_eq!(
         skip_reason_for(&result, "dist/y.js"),
+        Some(SkipReason::BuiltinExclusion)
+    );
+    assert_eq!(
+        skip_reason_for(&result, "lib/app.min.js"),
+        Some(SkipReason::BuiltinExclusion)
+    );
+    assert_eq!(
+        skip_reason_for(&result, "src/generated/G.java"),
+        Some(SkipReason::BuiltinExclusion)
+    );
+    assert_eq!(
+        skip_reason_for(&result, "web/META-INF/resources/webjars/jq.js"),
         Some(SkipReason::BuiltinExclusion)
     );
     assert!(result.included.is_empty());
@@ -197,11 +226,22 @@ fn include_narrows_then_exclude_subtracts() {
                 MODE_REGULAR,
                 b"export {};\n".to_vec(),
             ),
+            (
+                b"lib/old/c.ts".to_vec(),
+                MODE_REGULAR,
+                b"export {};\n".to_vec(),
+            ),
+            (
+                b"node_modules/z.js".to_vec(),
+                MODE_REGULAR,
+                b"module.exports = {};\n".to_vec(),
+            ),
         ],
     );
     let snapshot = CommitSnapshot::head_or_empty(&repo).expect("snapshot HEAD");
-    let scope =
-        scope_from_yaml(b"version: 1\ninclude: [\"src/**\"]\nexclude: [\"src/legacy/**\"]\n");
+    let scope = scope_from_yaml(
+        b"version: 1\ninclude: [\"src/**\"]\nexclude: [\"src/legacy/**\", \"lib/old/**\", \"node_modules/**\"]\n",
+    );
     let result = discover(&snapshot.entries, &scope);
 
     assert_eq!(
@@ -211,6 +251,46 @@ fn include_narrows_then_exclude_subtracts() {
     assert_eq!(
         skip_reason_for(&result, "src/legacy/b.ts"),
         Some(SkipReason::ConfigExclude)
+    );
+    assert!(is_included(&result, "src/keep.ts"));
+    assert_eq!(
+        skip_reason_for(&result, "lib/old/c.ts"),
+        Some(SkipReason::OutsideInclude),
+        "outside_include must win over config_exclude when a path matches both (D20)"
+    );
+    assert_eq!(
+        skip_reason_for(&result, "node_modules/z.js"),
+        Some(SkipReason::BuiltinExclusion),
+        "builtin_exclusion must win over both outside_include and config_exclude (D20)"
+    );
+}
+
+#[test]
+fn config_exclude_directory_pattern_covers_nested_files() {
+    let (_dir, repo) = common::init_repo();
+    common::commit_entries(
+        &repo,
+        &[
+            (
+                b"src/legacy/deep/b.ts".to_vec(),
+                MODE_REGULAR,
+                b"export {};\n".to_vec(),
+            ),
+            (
+                b"src/keep.ts".to_vec(),
+                MODE_REGULAR,
+                b"export {};\n".to_vec(),
+            ),
+        ],
+    );
+    let snapshot = CommitSnapshot::head_or_empty(&repo).expect("snapshot HEAD");
+    let scope = scope_from_yaml(b"version: 1\nexclude: [\"src/legacy/\"]\n");
+    let result = discover(&snapshot.entries, &scope);
+
+    assert_eq!(
+        skip_reason_for(&result, "src/legacy/deep/b.ts"),
+        Some(SkipReason::ConfigExclude),
+        "a directory-anchored exclude pattern must cover files nested beneath it (D19)"
     );
     assert!(is_included(&result, "src/keep.ts"));
 }
@@ -264,6 +344,11 @@ fn symlink_and_submodule_skip_reasons() {
                 b"./other.ts".to_vec(),
             ),
             (b"third_party/lib".to_vec(), MODE_SUBMODULE, gitlink_target),
+            (
+                b"node_modules/l.ts".to_vec(),
+                MODE_SYMLINK,
+                b"./other.ts".to_vec(),
+            ),
         ],
     );
     let snapshot = CommitSnapshot::head_or_empty(&repo).expect("snapshot HEAD");
@@ -276,6 +361,11 @@ fn symlink_and_submodule_skip_reasons() {
     assert_eq!(
         skip_reason_for(&result, "third_party/lib"),
         Some(SkipReason::Submodule)
+    );
+    assert_eq!(
+        skip_reason_for(&result, "node_modules/l.ts"),
+        Some(SkipReason::Symlink),
+        "entry-kind symlink must win over builtin_exclusion (D20)"
     );
 }
 
@@ -347,6 +437,41 @@ fn unsupported_extensions_not_listed() {
     assert_eq!(skip_reason_for(&result, "README.md"), None);
     assert!(!is_included(&result, "README.md"));
     assert!(is_included(&result, "src/a.ts"));
+}
+
+#[test]
+fn git_path_component_is_builtin_exclusion() {
+    let make = |path: &[u8]| Entry {
+        path: RepoPath::from_bytes(path.to_vec()),
+        kind: EntryKind::Regular,
+        oid: None,
+        size: 0,
+    };
+    let entries = vec![
+        make(b"pkg/.git/hooks/pre.ts"),
+        make(b".git/x.ts"),
+        make(b"pkg/.github/a.ts"),
+        make(b"src/.gitkeep.ts"),
+    ];
+    let scope = scope_from_yaml(b"version: 1\ninclude: [\"**\"]\n");
+    let result = discover(&entries, &scope);
+
+    assert_eq!(
+        skip_reason_for(&result, "pkg/.git/hooks/pre.ts"),
+        Some(SkipReason::BuiltinExclusion)
+    );
+    assert_eq!(
+        skip_reason_for(&result, ".git/x.ts"),
+        Some(SkipReason::BuiltinExclusion)
+    );
+    assert!(
+        is_included(&result, "pkg/.github/a.ts"),
+        "a `.github` component must not be caught by a `.git`-component substring match"
+    );
+    assert!(
+        is_included(&result, "src/.gitkeep.ts"),
+        "a `.gitkeep.ts` file name must not be caught by a `.git`-component substring match"
+    );
 }
 
 fn fixture_root() -> std::path::PathBuf {
@@ -421,6 +546,95 @@ fn builtin_list_covers_scan_dependency_and_generated_globs() {
     assert!(
         checked > 0,
         "the mirrored fixture must exercise at least one dependency/build or generated skip"
+    );
+
+    // Second pass (triage row 2): the sample fixture above only happens to
+    // reach 8 of the 18 D19 built-in globs. Write one file per glob into a
+    // fresh temp directory so a future drift in any of the other 10 (or a
+    // regression in these 8) cannot pass unnoticed.
+    let one_file_per_glob: Vec<(Vec<u8>, i32, Vec<u8>)> = vec![
+        (
+            b"node_modules/a.js".to_vec(),
+            MODE_REGULAR,
+            b"//\n".to_vec(),
+        ),
+        (b"target/a.js".to_vec(), MODE_REGULAR, b"//\n".to_vec()),
+        (b"build/a.js".to_vec(), MODE_REGULAR, b"//\n".to_vec()),
+        (b"dist/a.js".to_vec(), MODE_REGULAR, b"//\n".to_vec()),
+        (b"out/a.js".to_vec(), MODE_REGULAR, b"//\n".to_vec()),
+        (b"bin/a.js".to_vec(), MODE_REGULAR, b"//\n".to_vec()),
+        (
+            b".gradle/A.java".to_vec(),
+            MODE_REGULAR,
+            b"class A {}\n".to_vec(),
+        ),
+        (
+            b".mvn/A.java".to_vec(),
+            MODE_REGULAR,
+            b"class A {}\n".to_vec(),
+        ),
+        (b"vendor/a.js".to_vec(), MODE_REGULAR, b"//\n".to_vec()),
+        (b"coverage/a.js".to_vec(), MODE_REGULAR, b"//\n".to_vec()),
+        (b".next/a.js".to_vec(), MODE_REGULAR, b"//\n".to_vec()),
+        (b".nuxt/a.js".to_vec(), MODE_REGULAR, b"//\n".to_vec()),
+        (
+            b"src/generated/G.java".to_vec(),
+            MODE_REGULAR,
+            b"class G {}\n".to_vec(),
+        ),
+        (
+            b"src/gen/a.ts".to_vec(),
+            MODE_REGULAR,
+            b"export {};\n".to_vec(),
+        ),
+        (b"src/app.min.js".to_vec(), MODE_REGULAR, b"//\n".to_vec()),
+        (b"src/a.bundle.js".to_vec(), MODE_REGULAR, b"//\n".to_vec()),
+        (b"src/proto_pb.js".to_vec(), MODE_REGULAR, b"//\n".to_vec()),
+        (
+            b"src/types.d.ts".to_vec(),
+            MODE_REGULAR,
+            b"export {};\n".to_vec(),
+        ),
+    ];
+    let all_dir = tempfile::TempDir::new().expect("create a temp dir for the glob fixture");
+    for (path, _mode, content) in &one_file_per_glob {
+        let fs_path = all_dir
+            .path()
+            .join(std::str::from_utf8(path).expect("fixture path is UTF-8"));
+        std::fs::create_dir_all(fs_path.parent().expect("fixture path has a parent"))
+            .expect("create fixture parent dirs");
+        std::fs::write(&fs_path, content).expect("write glob fixture file");
+    }
+    let (_glob_repo_dir, glob_repo) = common::init_repo();
+    common::commit_entries(&glob_repo, &one_file_per_glob);
+    let glob_snapshot = CommitSnapshot::head_or_empty(&glob_repo).expect("snapshot HEAD");
+    let glob_result = discover(&glob_snapshot.entries, &default_scope());
+
+    let glob_scan_result =
+        nsd::discover::discover(all_dir.path(), &scan_settings).expect("scan discovery");
+
+    let mut all_checked = 0;
+    for skipped in &glob_scan_result.skipped {
+        let reason = skipped.reason;
+        if !matches!(
+            reason,
+            nsd::model::SkipReason::DependencyOrBuildOutput | nsd::model::SkipReason::GeneratedCode
+        ) {
+            continue;
+        }
+        let path_str = skipped.relative_path.to_string_lossy().replace('\\', "/");
+        assert_eq!(
+            skip_reason_for(&glob_result, &path_str),
+            Some(SkipReason::BuiltinExclusion),
+            "{path_str} is a dependency/build or generated skip in scan discovery, so it must \
+             also be a built-in exclusion in Git-backed discovery"
+        );
+        all_checked += 1;
+    }
+    assert_eq!(
+        all_checked,
+        one_file_per_glob.len(),
+        "every one-file-per-glob fixture entry must be a scan dependency/build or generated skip"
     );
 }
 
