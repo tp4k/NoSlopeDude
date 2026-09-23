@@ -27,6 +27,14 @@ const MODE_SUBMODULE: u32 = 0o160000;
 /// A6 and `nsd-plan-implementation.md` *Policy and analysis behavior*.
 pub const RENAME_THRESHOLD: u16 = 50;
 
+/// libgit2's own built-in rename-candidate cap (`DEFAULT_RENAME_LIMIT`,
+/// vendored `diff_tform.c:244`), set explicitly so a user's
+/// `diff.renamelimit` config can never change nsd's rename output (D8/D10:
+/// deterministic renames, independent of the caller's Git config). Left
+/// unset, `git_diff_find_similar` reads that config value itself whenever
+/// `rename_limit` is `0` (`diff_tform.c:322-330`).
+const DEFAULT_RENAME_LIMIT: usize = 1000;
+
 /// D24: highest priority so every `Repository::blob` write on the reopened
 /// handle lands in memory only (git2-0.21.0 `odb.rs:272`
 /// `add_new_mempack_backend` and its test `write_with_mempack`, `odb.rs:710`,
@@ -452,7 +460,10 @@ fn changes_from_diff(
     new_source: NewFileSource<'_, '_>,
 ) -> Result<Vec<Change>, GitError> {
     let mut find_opts = DiffFindOptions::new();
-    find_opts.renames(true).rename_threshold(RENAME_THRESHOLD);
+    find_opts
+        .renames(true)
+        .rename_threshold(RENAME_THRESHOLD)
+        .rename_limit(DEFAULT_RENAME_LIMIT);
     if let Err(err) = diff.find_similar(Some(&mut find_opts)) {
         // A rename candidate whose content was never written to any ODB
         // (row 1: an over-SOURCE_CEILING_BYTES worktree entry) cannot be
@@ -476,6 +487,7 @@ fn changes_from_diff(
         exact_only_opts
             .renames(true)
             .rename_threshold(RENAME_THRESHOLD)
+            .rename_limit(DEFAULT_RENAME_LIMIT)
             .exact_match_only(true);
         diff.find_similar(Some(&mut exact_only_opts))
             .map_err(|err| wrap_git_error("cannot detect renamed files", &err))?;
