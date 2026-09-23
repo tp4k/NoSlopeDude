@@ -639,6 +639,16 @@ fn builtin_list_covers_scan_dependency_and_generated_globs() {
 }
 
 #[test]
+fn skip_reason_label_spells_all_six() {
+    assert_eq!(SkipReason::Symlink.label(), "symlink");
+    assert_eq!(SkipReason::Submodule.label(), "submodule");
+    assert_eq!(SkipReason::NestedCheckout.label(), "nested_checkout");
+    assert_eq!(SkipReason::BuiltinExclusion.label(), "builtin_exclusion");
+    assert_eq!(SkipReason::OutsideInclude.label(), "outside_include");
+    assert_eq!(SkipReason::ConfigExclude.label(), "config_exclude");
+}
+
+#[test]
 fn output_sorted_by_raw_path_bytes() {
     let make = |path: &[u8]| Entry {
         path: RepoPath::from_bytes(path.to_vec()),
