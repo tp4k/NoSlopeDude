@@ -329,8 +329,24 @@ fn find_unreachable_after_return(node: &IrNode) -> Option<(usize, usize, Vec<usi
 /// `statement_children` member elsewhere) — counting any named child, not
 /// just non-comment ones, is what makes the documented-empty (comment-only)
 /// case decline.
+///
+/// `in_catch_body` is transitive (true for the body block itself and every
+/// node inside it, `src/lower/mod.rs:304`), so for a `catch` nested inside
+/// another catch's body, every one of `node`'s own children (the anonymous
+/// `catch` keyword, the formal parameter, the body block) inherits
+/// `in_catch_body == true` from the outer body it sits in. Requiring the
+/// match to *also* be block-kind (its own first child has `in_block` set,
+/// the same structural test `is_unreachable_container` uses) picks the body
+/// block specifically — the anonymous keyword has no children at all, so
+/// `children.first()` is `None` and it is excluded.
 fn find_empty_catch(node: &IrNode) -> Option<(usize, usize, Vec<usize>)> {
-    let body = node.children.iter().find(|child| child.in_catch_body)?;
+    let body = node.children.iter().find(|child| {
+        child.in_catch_body
+            && child
+                .children
+                .first()
+                .is_some_and(|grandchild| grandchild.in_block)
+    })?;
     if body.children.iter().any(|child| child.is_named) {
         return None;
     }
