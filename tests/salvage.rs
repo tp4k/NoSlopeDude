@@ -362,12 +362,19 @@ fn test_a_clean_callable_nested_inside_a_damaged_outer_callable_is_not_measured(
     }
 }
 
-/// WS-6 round 3 (security HIGH: `Span::intersects`'s old strict two-sided
-/// `<` test never registered a zero-width `MISSING` span sitting exactly at
-/// an entity's own `end_byte` as intersecting it): a truncated file (its
-/// last `}` is simply absent) has its one callable's own span end exactly
-/// where the `MISSING` token is inserted, so this fixture is only salvaged
-/// correctly once that boundary case is fixed.
+/// WS-6 round 4 (code MEDIUM): a truncated file (its last `}` is simply
+/// absent) has its one callable's own span end exactly where the `MISSING`
+/// token is inserted -- but the mechanism that excludes it is `build_ir`'s
+/// bottom-up `dirty` fold plus `cascade_exclusions` (`src/lower/mod.rs:104-
+/// 160`, `:192-`), not `Span::intersects`'s zero-width boundary handling:
+/// the `MISSING "}"` is itself a descendant of the callable's own subtree,
+/// so the callable's `dirty` bit is already set before any span-vs-span
+/// comparison happens. `Span::intersects`'s two zero-width branches
+/// (`src/ir/mod.rs:61-66`) sit on no production path at all any more
+/// (`is_clear_of_damage`'s only caller left is `#[cfg(test)]`,
+/// `src/lower/mod.rs:24`) and are pinned solely by `src/ir/mod.rs::ir::
+/// tests::*`; deleting both branches leaves every salvage integration test
+/// in this file green.
 #[test]
 fn test_a_callable_truncated_at_its_own_end_byte_is_not_measured() {
     let dir = tempfile::tempdir().expect("tempdir");
