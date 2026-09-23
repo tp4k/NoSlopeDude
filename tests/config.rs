@@ -210,6 +210,29 @@ fn root_nsd_yml_only() {
 }
 
 #[test]
+fn unreadable_root_nsd_yml_keeps_g101() {
+    let (_dir, repo) = common::init_repo();
+    common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_REGULAR, b"version: 1\n".to_vec())],
+    );
+    let snapshot = CommitSnapshot::head_or_empty(&repo).expect("snapshot HEAD");
+    let entry = snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.path.as_bytes() == b"nsd.yml")
+        .expect("nsd.yml entry present in the snapshot");
+    let blob_oid = entry.oid.expect("a regular file entry carries a blob oid");
+    let hex = blob_oid.to_string();
+    let object_path = repo.path().join("objects").join(&hex[..2]).join(&hex[2..]);
+    std::fs::remove_file(&object_path).expect("remove the loose blob object from the ODB");
+
+    let err =
+        nsd::config::load_from_commit(&repo, &snapshot).expect_err("blob is gone from the ODB");
+    assert_eq!(err.code(), nsd::git::CODE_SNAPSHOT_UNAVAILABLE);
+}
+
+#[test]
 fn min_clone_lines_positive_value_exposed() {
     let config = Config::parse(b"version: 1\nmeasurement:\n  min_clone_lines: 25\n")
         .expect("a valid config");
