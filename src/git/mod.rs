@@ -3,6 +3,7 @@
 //! merge-base resolution (`mergebase`). WS-2 and WS-4 add their own
 //! `pub mod` lines here for `diff` and `discovery`.
 
+pub mod diff;
 pub mod mergebase;
 pub mod path;
 pub mod snapshot;
