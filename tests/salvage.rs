@@ -508,18 +508,74 @@ fn test_stray_damage_outside_any_callable_or_block_does_not_reach_metrics() {
 /// file must still salvage in bounded wall-clock time, not the quadratic
 /// blowup either bound would produce -- the same shape and assertion style
 /// as `tests/metrics.rs::test_deeply_nested_file_does_not_abort_the_scan`.
+///
+/// WS-6 round 4 (code + security MEDIUM, merged): the N=1,200/20s bound
+/// alone does not discriminate the regression it claims to guard -- under
+/// the quadratic model the *old*, unfixed code at N=1,200 costs only
+/// ≈220s × (1200/20000)² ≈ 0.8s, comfortably under 20s, so reintroducing the
+/// linear membership scan in `prune_damage` leaves this test green.
+///
+/// A second scan at 4× the callable count keeps its own absolute ceiling
+/// (60s) and "every callable stays unmeasured" check through the same
+/// `run_scan` full pipeline the N=1,200 half above uses, per this file's own
+/// module doc comment (the salvage guarantee is about what every analyzer
+/// stage ends up publishing). But the *scaling* assertion this row exists to
+/// add cannot be timed through `run_scan`: `clones::run`'s own inherent,
+/// documented `Θ(n)`-per-container cost
+/// (`src/clones/mod.rs::enumerate_container_candidates`) dominates
+/// full-pipeline wall time at this exact fixture shape regardless of which
+/// form `prune_damage`'s membership test takes, because each malformed
+/// one-line function body leaks its own clean, undamaged `return` statement
+/// as a sibling into one shared top-level clone-candidate container that
+/// grows with N -- measured directly: full-pipeline `elapsed_4n/elapsed_n`
+/// is ≈14.6x with the O(1) fix in place and ≈15.2x with it reverted to the
+/// linear form, both over any usable threshold, so a full-pipeline scaling
+/// assert can never discriminate this regression and must not gate on it.
+/// `discover` + `parse` + `lower::lower_all`, timed in isolation on a fresh
+/// pair of fixtures of the same generated shape and scale, isolates exactly
+/// the WS-6-owned code path instead: Θ(n²) predicts `elapsed_4n` ≈16×
+/// `elapsed_n`; the O(1)-membership fixed form predicts ≈4× (measured: ≈4.0x
+/// fixed, ≈14.3x reverted-to-linear). `SCALING_ASSERT_MULTIPLIER` (8) splits
+/// the two with margin.
 #[test]
 fn test_many_damaged_callables_do_not_cause_a_quadratic_blowup() {
     const DAMAGED_CALLABLE_COUNT: usize = 1_200;
+    const SCALED_CALLABLE_COUNT: usize = DAMAGED_CALLABLE_COUNT * 4;
+    const SCALING_ASSERT_MULTIPLIER: u32 = 8;
+    const SCALED_ABSOLUTE_CEILING_SECS: u64 = 60;
+
+    fn write_fixture(dir: &Path, count: usize) {
+        let mut source = String::new();
+        for index in 0..count {
+            source.push_str(&format!(
+                "export function broken{index}(a: number {{\n  return a;\n}}\n"
+            ));
+        }
+        fs::write(dir.join("ManyBroken.ts"), source).expect("write ManyBroken.ts");
+    }
+
+    // Isolates exactly the `discover` + `parse` + `lower::lower_all` cost
+    // the WS-6 round 4 doc comment above explains the full pipeline below
+    // cannot discriminate.
+    fn lower_only_elapsed(count: usize) -> std::time::Duration {
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_fixture(dir.path(), count);
+        let settings = ScanSettings {
+            output: tempfile::tempdir().expect("tempdir").path().to_path_buf(),
+            include_tests: true,
+            exclude: Vec::new(),
+            min_clone_lines: DEFAULT_MIN_CLONE_LINES,
+        };
+        let started = std::time::Instant::now();
+        let discovered = nsd::discover::discover(dir.path(), &settings).expect("discover");
+        let (parsed_files, _parse_failures) =
+            nsd::parse::parse_all(dir.path(), &discovered.discovered);
+        let _lowered = nsd::lower::lower_all(&parsed_files);
+        started.elapsed()
+    }
 
     let dir = tempfile::tempdir().expect("tempdir");
-    let mut source = String::new();
-    for index in 0..DAMAGED_CALLABLE_COUNT {
-        source.push_str(&format!(
-            "export function broken{index}(a: number {{\n  return a;\n}}\n"
-        ));
-    }
-    fs::write(dir.path().join("ManyBroken.ts"), source).expect("write ManyBroken.ts");
+    write_fixture(dir.path(), DAMAGED_CALLABLE_COUNT);
 
     let started = std::time::Instant::now();
     let (_output_dir, output) = run_scan(dir.path(), |_| {});
@@ -537,6 +593,37 @@ fn test_many_damaged_callables_do_not_cause_a_quadratic_blowup() {
             .any(|callable| callable.relative_path == Path::new("ManyBroken.ts")),
         "every one of the {DAMAGED_CALLABLE_COUNT} callables is damaged and must stay unmeasured: {:?}",
         output.metrics.callables
+    );
+
+    let scaled_dir = tempfile::tempdir().expect("tempdir");
+    write_fixture(scaled_dir.path(), SCALED_CALLABLE_COUNT);
+
+    let scaled_started = std::time::Instant::now();
+    let (_scaled_output_dir, scaled_output) = run_scan(scaled_dir.path(), |_| {});
+    let scaled_elapsed = scaled_started.elapsed();
+
+    assert!(
+        scaled_elapsed < std::time::Duration::from_secs(SCALED_ABSOLUTE_CEILING_SECS),
+        "salvage over {SCALED_CALLABLE_COUNT} damaged callables took {scaled_elapsed:?}, expected a bounded run even at 4x scale"
+    );
+    assert!(
+        !scaled_output
+            .metrics
+            .callables
+            .iter()
+            .any(|callable| callable.relative_path == Path::new("ManyBroken.ts")),
+        "every one of the {SCALED_CALLABLE_COUNT} callables is damaged and must stay unmeasured: {:?}",
+        scaled_output.metrics.callables
+    );
+
+    let lower_elapsed = lower_only_elapsed(DAMAGED_CALLABLE_COUNT);
+    let lower_scaled_elapsed = lower_only_elapsed(SCALED_CALLABLE_COUNT);
+    assert!(
+        lower_scaled_elapsed < lower_elapsed * SCALING_ASSERT_MULTIPLIER,
+        "quadratic cost would scale ~16x from N to 4N; linear/O(1)-membership cost should scale \
+         ~4x. discover+parse+lower_all at N={DAMAGED_CALLABLE_COUNT} took {lower_elapsed:?}, at \
+         4N={SCALED_CALLABLE_COUNT} took {lower_scaled_elapsed:?}, expected 4N < \
+         {SCALING_ASSERT_MULTIPLIER}x N"
     );
 }
 
