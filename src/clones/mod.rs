@@ -361,16 +361,22 @@ fn enumerate_container_candidates(
 /// D14: one statement's own contribution to the normalized token stream,
 /// derived from its `IrNode` subtree rather than a tree-sitter walk: every
 /// leaf descendant (`node.children.is_empty()`), in order, with a comment
-/// leaf (`ir::IrNode::is_comment`) dropped and every other leaf's own
-/// source text (`node.span`) preserved verbatim. `ir::IrNode::is_named`
-/// needs no separate branch here: once comments are excluded, a named
-/// leaf's text and an anonymous leaf's own literal (its `node.kind()`
-/// string, which for every anonymous grammar token *is* that token's exact
-/// source text) read the same way — "the source text at this leaf's own
-/// span" — so both collapse to the one `leaf_text` call below. Cached once
-/// per container, per perf row 1, so a multi-statement run's fingerprint
-/// is built by feeding these in sequence, never by re-walking the
-/// statements it already covers.
+/// leaf (`ir::IrNode::is_comment`) dropped. A named leaf's own source text
+/// (`node.span`) is preserved verbatim. `ir::IrNode::is_named` still needs
+/// its own branch for the remaining (anonymous) leaves: an anonymous
+/// grammar token's own source text is usually its exact `kind()` string,
+/// but not always — `tree-sitter-javascript` 0.25.0 aliases
+/// `seq('static', /\s+/, 'get', /\s*\n/)` to the single anonymous kind
+/// `"static get"` (`grammar.js:1252`), whose own source text carries
+/// whatever internal whitespace and trailing newline the author wrote.
+/// Whitespace-collapsing an anonymous leaf's own text reproduces its
+/// `kind()` exactly for that token while staying the identity transform
+/// for the (overwhelmingly more common) whitespace-free anonymous tokens,
+/// so two copy-pasted blocks that differ only in that token's internal
+/// formatting still fingerprint identically. Cached once per container,
+/// per perf row 1, so a multi-statement run's fingerprint is built by
+/// feeding these in sequence, never by re-walking the statements it
+/// already covers.
 fn ir_statement_tokens(statement: &IrNode, source: &str) -> String {
     let mut tokens = String::new();
     for_each_ir_node(statement, &mut |node| {
@@ -378,7 +384,12 @@ fn ir_statement_tokens(statement: &IrNode, source: &str) -> String {
             return;
         }
         tokens.push(TOKEN_SEPARATOR);
-        tokens.push_str(leaf_text(node, source));
+        let text = leaf_text(node, source);
+        if node.is_named {
+            tokens.push_str(text);
+        } else {
+            tokens.push_str(&text.split_whitespace().collect::<Vec<_>>().join(" "));
+        }
     });
     tokens
 }
