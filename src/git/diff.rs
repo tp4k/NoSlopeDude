@@ -8,12 +8,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use git2::{
-    Delta, Diff, DiffDelta, DiffFile, DiffFindOptions, DiffLineType, DiffOptions, FileMode, Index,
-    IndexEntry, IndexTime, Oid, Patch, Repository, Tree,
+    Delta, Diff, DiffDelta, DiffFile, DiffFindOptions, DiffLineType, DiffOptions, ErrorCode,
+    FileMode, Index, IndexEntry, IndexTime, ObjectType, Oid, Patch, Repository, Tree,
 };
 
 use super::path::RepoPath;
-use super::snapshot::{EntryKind, WorktreeSnapshot};
+use super::snapshot::{repo_path_to_fs, EntryKind, WorktreeSnapshot};
 use super::{wrap_git_error, GitError, CODE_SNAPSHOT_UNAVAILABLE};
 
 const MODE_REGULAR: u32 = 0o100644;
@@ -130,7 +130,10 @@ pub fn diff_commit_to_index(repo: &Repository, base: Option<Oid>) -> Result<Vec<
 /// `Index` holding one entry per snapshot entry, and diffs the base tree
 /// against that index. Nothing reaches the repository's on-disk ODB, index
 /// or refs (D2); the mempack dies with the second handle when this
-/// function returns.
+/// function returns. A regular/executable entry over `SOURCE_CEILING_BYTES`
+/// is never read into memory or written to the mempack; it is represented
+/// by a raw fd hash of its real on-disk bytes instead (D2/D5), so it still
+/// diffs correctly against its real content.
 pub fn diff_commit_to_worktree(
     repo: &Repository,
     base: Option<Oid>,
@@ -144,6 +147,13 @@ pub fn diff_commit_to_worktree(
         .map_err(|err| wrap_git_error("cannot open the object database", &err))?
         .add_new_mempack_backend(MEMPACK_BACKEND_PRIORITY)
         .map_err(|err| wrap_git_error("cannot attach an in-memory object backend", &err))?;
+
+    let workdir = repo.workdir().ok_or_else(|| {
+        GitError::new(
+            CODE_SNAPSHOT_UNAVAILABLE,
+            "repository has no worktree (bare repository)",
+        )
+    })?;
 
     let mut index =
         Index::new().map_err(|err| wrap_git_error("cannot create an in-memory index", &err))?;
@@ -171,10 +181,20 @@ pub fn diff_commit_to_worktree(
                 insert_index_entry(&mut index, &entry.path, MODE_SUBMODULE, entry.size, oid)?;
             }
             EntryKind::Symlink => {
-                // Over SOURCE_CEILING_BYTES: an empty blob, so the diff still
-                // reports a change (never a silent pass-through) without ever
-                // reading the target (perf/security HIGH).
-                let target = worktree.link_target(repo, entry)?.unwrap_or_default();
+                // `link_target` only reports `None` for a non-symlink kind
+                // (`WorktreeSnapshot::link_target`), never for this arm, so
+                // an over-ceiling symlink target is unreachable: a symlink's
+                // target is its own on-disk read, bounded by the OS, not by
+                // SOURCE_CEILING_BYTES.
+                let target = worktree.link_target(repo, entry)?.ok_or_else(|| {
+                    GitError::new(
+                        CODE_SNAPSHOT_UNAVAILABLE,
+                        format!(
+                            "worktree symlink entry {} unexpectedly has no target bytes",
+                            entry.path.render()
+                        ),
+                    )
+                })?;
                 let oid = candidate_repo.blob(&target).map_err(|err| {
                     wrap_git_error(
                         "cannot write a symlink target to the in-memory object store",
@@ -184,14 +204,28 @@ pub fn diff_commit_to_worktree(
                 insert_index_entry(&mut index, &entry.path, MODE_SYMLINK, entry.size, oid)?;
             }
             EntryKind::Regular | EntryKind::Executable => {
-                // Same fallback and reason as the symlink arm above.
-                let content = worktree.read(repo, entry)?.unwrap_or_default();
-                let oid = candidate_repo.blob(&content).map_err(|err| {
-                    wrap_git_error(
-                        "cannot write worktree file content to the in-memory object store",
-                        &err,
-                    )
-                })?;
+                let oid = match worktree.read(repo, entry)? {
+                    Some(content) => candidate_repo.blob(&content).map_err(|err| {
+                        wrap_git_error(
+                            "cannot write worktree file content to the in-memory object store",
+                            &err,
+                        )
+                    })?,
+                    // Over SOURCE_CEILING_BYTES: hash the real on-disk bytes
+                    // with a raw fd hash (no filters, D5; no ODB write, D2),
+                    // so the diff reports a genuine change against the real
+                    // content instead of colliding with every other
+                    // over-ceiling or empty file on the shared empty-blob
+                    // OID. libgit2 skips a blob it cannot look up during
+                    // similarity scoring (`diff_tform.c:507`), so this entry
+                    // is simply never a rename source or target by content.
+                    None => {
+                        let fs_path = repo_path_to_fs(workdir, entry.path.as_bytes());
+                        Oid::hash_file(ObjectType::Blob, &fs_path).map_err(|err| {
+                            wrap_git_error("cannot hash an over-ceiling worktree file", &err)
+                        })?
+                    }
+                };
                 let mode = if entry.kind == EntryKind::Executable {
                     MODE_EXECUTABLE
                 } else {
@@ -334,8 +368,33 @@ fn resolve_tree<'repo>(
 fn changes_from_diff(diff: &mut Diff<'_>) -> Result<Vec<Change>, GitError> {
     let mut find_opts = DiffFindOptions::new();
     find_opts.renames(true).rename_threshold(RENAME_THRESHOLD);
-    diff.find_similar(Some(&mut find_opts))
-        .map_err(|err| wrap_git_error("cannot detect renamed files", &err))?;
+    if let Err(err) = diff.find_similar(Some(&mut find_opts)) {
+        // A rename candidate whose content was never written to any ODB
+        // (row 1: an over-SOURCE_CEILING_BYTES worktree entry) cannot be
+        // looked up when libgit2 scores similarity. Contrary to the
+        // comment at libgit2's `diff_tform.c:506-508` ("if lookup fails,
+        // just skip this item"), the lookup's error code is only cleared
+        // from the thread-local error message there, not reset to success,
+        // so it still propagates out of `find_similar` as `NotFound`
+        // (confirmed empirically, not merely by reading the comment).
+        // Retry once, comparing only exact OIDs: an over-ceiling entry's
+        // real content is never written anywhere for libgit2 to compare
+        // byte-for-byte, so it can only ever exact-match itself unchanged,
+        // never a near-duplicate. That degrades the crash into the
+        // conservative Deleted+Added the ceiling exists to guarantee,
+        // without weakening non-exact rename detection for any entry that
+        // does not hit this path.
+        if err.code() != ErrorCode::NotFound {
+            return Err(wrap_git_error("cannot detect renamed files", &err));
+        }
+        let mut exact_only_opts = DiffFindOptions::new();
+        exact_only_opts
+            .renames(true)
+            .rename_threshold(RENAME_THRESHOLD)
+            .exact_match_only(true);
+        diff.find_similar(Some(&mut exact_only_opts))
+            .map_err(|err| wrap_git_error("cannot detect renamed files", &err))?;
+    }
 
     let mut changes = Vec::new();
     for delta in diff.deltas() {

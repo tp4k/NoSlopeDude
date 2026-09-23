@@ -438,13 +438,13 @@ fn walk_tree(
 /// ever substituted. Only on a platform without a byte-oriented `OsStr`
 /// does this fall back to a lossy conversion.
 #[cfg(unix)]
-fn repo_path_to_fs(workdir: &Path, path: &[u8]) -> PathBuf {
+pub(super) fn repo_path_to_fs(workdir: &Path, path: &[u8]) -> PathBuf {
     use std::os::unix::ffi::OsStrExt;
     workdir.join(std::ffi::OsStr::from_bytes(path))
 }
 
 #[cfg(not(unix))]
-fn repo_path_to_fs(workdir: &Path, path: &[u8]) -> PathBuf {
+pub(super) fn repo_path_to_fs(workdir: &Path, path: &[u8]) -> PathBuf {
     workdir.join(String::from_utf8_lossy(path).as_ref())
 }
 
