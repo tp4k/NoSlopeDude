@@ -49,6 +49,38 @@ copy (e.g. by a silent overwrite, or a directory the D16 exclusions
 swallow whole) fails the test directly rather than merely producing a
 smaller-than-expected diff.
 
+### Re-capturing after the corpus changes
+
+The clean corpus is defined by **membership** of `tests/fixtures/**` minus
+the three malformed sources, not by an explicit file list, so adding or
+deleting any fixture obsoletes the committed `clean.report.json` — the
+comparison in `test_clean_corpus_report_is_byte_identical_to_the_pre_ir_baseline`
+will fail on the new file's presence alone, with no measurement bug
+involved. The procedure to move the baseline honestly, rather than paper
+over the failure, is:
+
+1. **Proof A**, ground truth: `bash scripts/neutrality_gate.sh` with no
+   arguments. It builds the pinned pre-IR commit in a detached worktree and
+   the current `HEAD`, and diffs their `report.json` directly against each
+   other on the same copied corpus, so it is immune to corpus drift by
+   construction. It must print `NEUTRALITY: identical on 2 corpora`; if it
+   reports a divergence, stop — a capture on a diverged tree is a silent
+   re-baseline, not an explained one.
+2. **Proof B**, a drift bound: a control scan of the clean corpus minus the
+   changed/added fixtures, compared byte-for-byte against the *currently
+   committed* `clean.report.json`. This proves no pre-existing fixture's
+   numbers moved, so the only thing the re-capture can introduce is the
+   new file(s)' presence.
+3. Run `bash scripts/neutrality_gate.sh --capture` to rewrite the golden
+   files from `HEAD`'s own render — never hand-edit or reconstruct the JSON.
+4. Check the resulting diff is bounded to exactly what corpus growth
+   predicts: the affected `/scores/*` aggregates (denominators and any
+   ratios/erosion derived from them) and, if the new file's callables rank
+   into the top 25, the displaced `/top25` rows — nothing else.
+
+`tests/fixtures/salvage/` (WS-6) is the next fixture addition scheduled to
+trigger this procedure.
+
 ## Normalization
 
 Two normalization mechanisms exist, at two different levels:

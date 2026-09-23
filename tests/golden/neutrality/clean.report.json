@@ -12,27 +12,27 @@
   },
   "scores": {
     "overall": {
-      "erosion": 0.3427654415332238,
+      "erosion": 0.3204595479773351,
       "verbosity": {
         "flagged_lines": 227,
-        "scanned_lines": 953,
-        "ratio": 0.23819517313746066
+        "scanned_lines": 1006,
+        "ratio": 0.22564612326043737
       }
     },
     "java": {
-      "erosion": 0.41990321942895514,
+      "erosion": 0.39608172508205486,
       "verbosity": {
         "flagged_lines": 154,
-        "scanned_lines": 602,
-        "ratio": 0.2558139534883721
+        "scanned_lines": 629,
+        "ratio": 0.24483306836248012
       }
     },
     "js_ts": {
-      "erosion": 0.23682087862577172,
+      "erosion": 0.21875136287677102,
       "verbosity": {
         "flagged_lines": 73,
-        "scanned_lines": 351,
-        "ratio": 0.20797720797720798
+        "scanned_lines": 377,
+        "ratio": 0.19363395225464192
       }
     }
   },
@@ -953,32 +953,32 @@
       }
     },
     {
-      "name": "classify",
+      "name": "ifConstruct",
       "language": "java",
       "cc": 2,
       "sloc": 3,
       "mass": 3.4641016151377544,
       "location": {
-        "relative_path": "report/src/Sample.java",
+        "relative_path": "parity/Constructs.java",
         "start_line": 2,
         "end_line": 2,
-        "excerpt": "    public int classify(int value) {",
-        "link": "report/src/Sample.java#L2-L2",
+        "excerpt": "    void ifConstruct(int a) {",
+        "link": "parity/Constructs.java#L2-L2",
         "is_remote_link": false
       }
     },
     {
-      "name": "risky",
+      "name": "forConstruct",
       "language": "java",
       "cc": 2,
       "sloc": 2,
       "mass": 2.8284271247461903,
       "location": {
-        "relative_path": "report/src/Sample.java",
+        "relative_path": "parity/Constructs.java",
         "start_line": 10,
         "end_line": 10,
-        "excerpt": "    public void risky() {",
-        "link": "report/src/Sample.java#L10-L10",
+        "excerpt": "    void forConstruct(int a) {",
+        "link": "parity/Constructs.java#L10-L10",
         "is_remote_link": false
       }
     }
