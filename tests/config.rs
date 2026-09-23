@@ -96,7 +96,7 @@ fn duplicate_fields_are_c102() {
 
 #[test]
 fn bad_version_is_c102() {
-    assert_is_c102(Config::parse(b"version: 2\n"), "2");
+    assert_is_c102(Config::parse(b"version: 2\n"), "version 2");
     assert_is_c102(Config::parse(b"version: \"1\"\n"), "version");
     assert_is_c102(Config::parse(b"include: [src/**]\n"), "version");
 }
@@ -306,6 +306,7 @@ fn unreadable_root_nsd_yml_keeps_g101() {
     let err =
         nsd::config::load_from_commit(&repo, &snapshot).expect_err("blob is gone from the ODB");
     assert_eq!(err.code(), nsd::git::CODE_SNAPSHOT_UNAVAILABLE);
+    assert!(err.to_string().starts_with("[NSD-G101]"), "{err}");
 }
 
 #[test]
