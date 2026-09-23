@@ -679,3 +679,36 @@ fn test_differing_comments_do_not_break_a_group() {
     );
     assert_eq!(result.groups[0].locations.len(), 2, "{:?}", result.groups);
 }
+
+/// triage-ws4-r2.md row 3: anonymous-leaf/operator sensitivity was
+/// unasserted -- guarding `ir_statement_tokens`'s push with `if
+/// node.is_named` (dropping every anonymous leaf: operators, punctuation,
+/// keywords) left the whole suite green. Two bodies identical except one
+/// statement uses `-` where the other uses `+` must never group. `-` and
+/// `+` remain distinct after row 1's whitespace-collapse fix (neither
+/// carries internal whitespace), so this test is run against the fixed
+/// code, per the brief's ordering.
+#[test]
+fn test_operator_change_breaks_the_group() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        dir.path().join("OperatorDiffA.java"),
+        "public class OperatorDiffA {\n    void run() {\n        combine(one,\n                two,\n                three,\n                four,\n                five,\n                six,\n                seven + eight);\n        combine(nine, ten, eleven);\n    }\n}\n",
+    )
+    .expect("write OperatorDiffA.java");
+    fs::write(
+        dir.path().join("OperatorDiffB.java"),
+        "public class OperatorDiffB {\n    void run() {\n        combine(one,\n                two,\n                three,\n                four,\n                five,\n                six,\n                seven - eight);\n        combine(nine, ten, eleven);\n    }\n}\n",
+    )
+    .expect("write OperatorDiffB.java");
+    let files = parsed_files_under(
+        dir.path(),
+        &[("OperatorDiffA.java", JAVA), ("OperatorDiffB.java", JAVA)],
+    );
+    let result = clones::run(&files, 8);
+    assert!(
+        result.groups.is_empty(),
+        "an operator change must break the group: {:?}",
+        result.groups
+    );
+}
