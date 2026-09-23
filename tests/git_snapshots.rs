@@ -231,6 +231,58 @@ fn worktree_reports_nested_checkout_entry() {
 }
 
 #[test]
+#[cfg(unix)]
+fn worktree_symlink_and_submodule_keep_diff_inputs() {
+    let (dir, repo) = common::init_repo();
+    let gitlink_target = [0xEFu8; 20];
+    let commit_oid = common::commit_entries(
+        &repo,
+        &[
+            (b"link.ts".to_vec(), MODE_SYMLINK, b"target.ts".to_vec()),
+            (
+                b"vendor/lib".to_vec(),
+                MODE_SUBMODULE,
+                gitlink_target.to_vec(),
+            ),
+        ],
+    );
+    sync_index_to_commit(&repo, commit_oid);
+
+    std::os::unix::fs::symlink("target.ts", dir.path().join("link.ts"))
+        .expect("create the on-disk symlink");
+    std::fs::create_dir_all(dir.path().join("vendor").join("lib"))
+        .expect("create the submodule directory");
+
+    let snapshot = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+
+    let link = snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.path.as_bytes() == b"link.ts")
+        .expect("symlink entry present");
+    assert_eq!(link.kind, EntryKind::Symlink);
+    assert_eq!(
+        snapshot
+            .link_target(&repo, link)
+            .expect("read the symlink target"),
+        Some(b"target.ts".to_vec()),
+        "the diff seam needs a worktree symlink's target bytes"
+    );
+
+    let submodule = snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.path.as_bytes() == b"vendor/lib")
+        .expect("submodule entry present");
+    assert_eq!(submodule.kind, EntryKind::Submodule);
+    assert_eq!(
+        submodule.oid,
+        Some(Oid::from_bytes(&gitlink_target).expect("build the gitlink oid")),
+        "the diff seam needs the index gitlink's committed OID, not None"
+    );
+}
+
+#[test]
 fn entry_kinds_symlink_and_submodule() {
     let (_dir, repo) = common::init_repo();
     let gitlink_target = [0xABu8; 20];
