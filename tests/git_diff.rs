@@ -53,10 +53,20 @@ fn clear_rename_detected() {
 
     assert_eq!(changes.len(), 1, "expected exactly one change: {changes:?}");
     match &changes[0] {
-        Change::Renamed { from, to, kind } => {
+        Change::Renamed {
+            from,
+            to,
+            kind,
+            similarity,
+        } => {
             assert_eq!(from.as_bytes(), b"src/Old.java");
             assert_eq!(to.as_bytes(), b"src/New.java");
             assert_eq!(*kind, EntryKind::Regular);
+            assert!(
+                *similarity >= diff::RENAME_THRESHOLD,
+                "expected similarity >= {}, got {similarity}",
+                diff::RENAME_THRESHOLD
+            );
         }
         other => panic!("expected a Renamed change, got {other:?}"),
     }
