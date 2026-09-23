@@ -13,6 +13,8 @@ use rayon::prelude::*;
 use tree_sitter::{Node, TreeCursor};
 
 use crate::exec_lines::is_executable_leaf;
+use crate::ir::{DecisionKind, IrNode, Span};
+use crate::lower;
 use crate::model::{
     Callable, FileScanSummary, LanguageFamily, MetricsResult, SyntaxBlock, CC_EROSION_THRESHOLD,
 };
@@ -148,6 +150,10 @@ fn callable_body<'tree>(node: Node<'tree>, _language: LanguageFamily) -> Option<
 /// dropped — and accumulates the file's D12 scanned-line count, all from
 /// the same `TreeCursor`.
 fn scan_file(file: &ParsedFile) -> (Vec<Callable>, Vec<SyntaxBlock>, FileScanSummary) {
+    // Lowered once per file: every callable's own cc/SLOC walk below reads
+    // its subtree off this same tree instead of tree-sitter nodes.
+    let ir_file = lower::lower_file(file);
+
     let mut callables = Vec::new();
     let mut syntax_blocks = Vec::new();
     let mut scanned_lines = 0usize;
@@ -173,7 +179,7 @@ fn scan_file(file: &ParsedFile) -> (Vec<Callable>, Vec<SyntaxBlock>, FileScanSum
                 // `is_callable_node` already confirmed a body is present.
                 if let Some(body) = callable_body(node, file.language) {
                     let CallableMetrics { cc, sloc } =
-                        scan_callable_body(body, file.language, &file.source);
+                        scan_callable_body(body, file.language, &ir_file.root);
                     callables.push(Callable {
                         relative_path: file.relative_path.clone(),
                         language: file.language,
@@ -200,26 +206,130 @@ struct CallableMetrics {
     sloc: usize,
 }
 
-/// One pass over a callable's `body` (D9: `walk_excluding` skips a nested
-/// callable's subtree entirely) accumulating cc and SLOC together, instead
-/// of two separate full walks.
-fn scan_callable_body(body: Node, language: LanguageFamily, source: &str) -> CallableMetrics {
+/// One callable body's cc/SLOC, walking `body`'s own `IrNode` subtree
+/// (found in `ir_root`, the whole file's lowered tree) rather than
+/// tree-sitter nodes directly -- `is_callable_node`/`callable_body` stay the
+/// tree-sitter-based D8 boundary finders they always were; only the
+/// decision/executable accumulation they hand off to is retargeted.
+fn scan_callable_body(body: Node, language: LanguageFamily, ir_root: &IrNode) -> CallableMetrics {
+    if is_callable_node(body, language) {
+        // The callable's own body is itself a callable (e.g. a curried
+        // `(a) => (b) => …`): D9 excludes it entirely, matching
+        // `walk_excluding`'s own `exclude(root)` check.
+        return CallableMetrics { cc: 1, sloc: 0 };
+    }
+
+    let body_span = Span::from_node(body);
+    let fallback = fallback_ir_body(body_span);
+    let body_ir = find_ir_subtree(ir_root, body_span).unwrap_or(&fallback);
+    let excluded = collect_nested_callable_spans(body, language);
+
     let mut cc = 1u32;
     let mut sloc = 0usize;
     let mut last_counted_line = 0usize;
 
-    walk_excluding(
-        body,
-        |node| is_callable_node(node, language),
-        |node| {
-            cc += decision_weight(node, language, source);
-            if is_executable_leaf(node, language) {
-                accumulate_line(node, &mut sloc, &mut last_counted_line);
-            }
-        },
-    );
+    walk_ir_excluding(body_ir, &excluded, |node| {
+        if let Some(kind) = node.decision {
+            cc += decision_weight(kind);
+        }
+        if node.executable {
+            accumulate_ir_line(node.span, &mut sloc, &mut last_counted_line);
+        }
+    });
 
     CallableMetrics { cc, sloc }
+}
+
+/// The byte spans of every top-level nested callable inside `body` (D9):
+/// found via `is_callable_node`, the same tree-sitter predicate `scan_file`
+/// itself uses -- the descent stops the moment one is found, since anything
+/// further inside it is already covered by its own span. Iterative (an
+/// explicit work-list, no recursion), so a body nested deep inside a
+/// pathological source tree cannot overflow the stack.
+fn collect_nested_callable_spans(body: Node, language: LanguageFamily) -> Vec<Span> {
+    let mut spans = Vec::new();
+    let mut pending = vec![body];
+    while let Some(node) = pending.pop() {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if is_callable_node(child, language) {
+                spans.push(Span::from_node(child));
+            } else {
+                pending.push(child);
+            }
+        }
+    }
+    spans
+}
+
+/// D9's own exclusion, over the IR: visits every `IrNode` under `root` in
+/// document order, skipping any subtree whose span falls inside one of
+/// `excluded` (a nested callable's own span). Iterative -- see
+/// `collect_nested_callable_spans`'s own doc comment for why.
+fn walk_ir_excluding<'a>(root: &'a IrNode, excluded: &[Span], mut visit: impl FnMut(&'a IrNode)) {
+    let mut pending = vec![root];
+    while let Some(node) = pending.pop() {
+        if is_span_excluded(node.span, excluded) {
+            continue;
+        }
+        visit(node);
+        for child in node.children.iter().rev() {
+            pending.push(child);
+        }
+    }
+}
+
+fn is_span_excluded(span: Span, excluded: &[Span]) -> bool {
+    excluded
+        .iter()
+        .any(|excl| excl.start_byte <= span.start_byte && span.end_byte <= excl.end_byte)
+}
+
+/// Locates the `IrNode` produced for the tree-sitter node whose span is
+/// `target`, by descending from `root` through whichever child's span
+/// contains it -- valid since `build_ir` (`src/lower/mod.rs`) produces one
+/// `IrNode` per tree-sitter node in the same nested-span shape. A `while`
+/// loop, not recursion, so a deeply nested callable body cannot overflow the
+/// stack.
+fn find_ir_subtree(root: &IrNode, target: Span) -> Option<&IrNode> {
+    let mut current = root;
+    while current.span != target {
+        current = current.children.iter().find(|child| {
+            child.span.start_byte <= target.start_byte && target.end_byte <= child.span.end_byte
+        })?;
+    }
+    Some(current)
+}
+
+/// A structurally-unreachable fallback for `find_ir_subtree` returning
+/// `None`: `build_ir` produces exactly one `IrNode` per tree-sitter node, in
+/// the same nested-span shape, so a callable body's own span always has a
+/// match. Kept only so a defect here degrades (D18) instead of panicking --
+/// same reasoning as `lower::fallback_node`'s own doc comment.
+fn fallback_ir_body(span: Span) -> IrNode {
+    IrNode {
+        span,
+        executable: false,
+        decision: None,
+        is_terminator: false,
+        in_block: false,
+        in_catch_body: false,
+        children: Vec::new(),
+    }
+}
+
+/// `accumulate_line`'s own logic (see its doc comment), re-derived for a
+/// `Span` (the IR) instead of a tree-sitter `Node` -- `accumulate_line`
+/// itself is unchanged, still used by `scan_file`'s own tree-sitter-only D12
+/// count.
+fn accumulate_ir_line(span: Span, count: &mut usize, last_counted_line: &mut usize) {
+    let start = span.start_line as usize;
+    let end = span.end_line as usize;
+    let from = start.max(*last_counted_line + 1);
+    if from <= end {
+        *count += end - from + 1;
+        *last_counted_line = end;
+    }
 }
 
 /// Iterative pre-order traversal via a single reused `TreeCursor` (no
@@ -326,66 +436,21 @@ fn node_text(node: Node, source: &str) -> String {
     node.utf8_text(source.as_bytes()).unwrap_or("").to_string()
 }
 
-fn decision_weight(node: Node, language: LanguageFamily, source: &str) -> u32 {
-    match language {
-        LanguageFamily::Java => java_decision_weight(node, source),
-        LanguageFamily::JsTs => jsts_decision_weight(node, source),
+/// `cc`'s weight table (*What the IR must carry*), keyed on the IR's
+/// uniform `DecisionKind` rather than per-grammar strings: every counted
+/// decision point adds 1, matching the pre-IR match arms' own weights
+/// exactly (`decision` is `None` for `else`/`finally`/a default `switch`
+/// label, so those already contribute 0 without an arm here).
+fn decision_weight(kind: DecisionKind) -> u32 {
+    match kind {
+        DecisionKind::Branch
+        | DecisionKind::Loop
+        | DecisionKind::Case
+        | DecisionKind::Catch
+        | DecisionKind::Ternary
+        | DecisionKind::And
+        | DecisionKind::Or => 1,
     }
-}
-
-/// D7, Java: `if`/`for`/enhanced-`for`/`while`/`do`/`catch`/ternary each add
-/// 1; a non-default `switch_label` (colon form) or `switch_rule` (arrow
-/// form) adds 1; `&&`/`||` add 1. `else`, `finally` and `default` add 0.
-fn java_decision_weight(node: Node, source: &str) -> u32 {
-    match node.kind() {
-        "if_statement"
-        | "for_statement"
-        | "enhanced_for_statement"
-        | "while_statement"
-        | "do_statement"
-        | "catch_clause"
-        | "ternary_expression" => 1,
-        "switch_label" => {
-            let is_arrow_form = node
-                .parent()
-                .map(|parent| parent.kind() == "switch_rule")
-                .unwrap_or(false);
-            u32::from(!is_arrow_form && !is_default_label(node))
-        }
-        "switch_rule" => {
-            let label_is_default = first_child_of_kind(node, "switch_label")
-                .map(is_default_label)
-                .unwrap_or(false);
-            u32::from(!label_is_default)
-        }
-        "binary_expression" => match operator_text(node, source) {
-            "&&" | "||" => 1,
-            _ => 0,
-        },
-        _ => 0,
-    }
-}
-
-/// D7, JS/TS: `if`/`for`/`for_in_statement` (covers both `for…in` and
-/// `for…of`)/`while`/`do`/`catch`/ternary each add 1; `switch_case` (never
-/// `switch_default`) adds 1; `&&`/`||`/`??` add 1. `?.` adds 0.
-fn jsts_decision_weight(node: Node, source: &str) -> u32 {
-    match node.kind() {
-        "if_statement" | "for_statement" | "for_in_statement" | "while_statement"
-        | "do_statement" | "catch_clause" | "ternary_expression" | "switch_case" => 1,
-        "binary_expression" => match operator_text(node, source) {
-            "&&" | "||" | "??" => 1,
-            _ => 0,
-        },
-        _ => 0,
-    }
-}
-
-fn is_default_label(label: Node) -> bool {
-    label
-        .child(0)
-        .map(|child| child.kind() == "default")
-        .unwrap_or(false)
 }
 
 fn first_child_of_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
@@ -394,12 +459,6 @@ fn first_child_of_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tre
         .children(&mut cursor)
         .find(|child| child.kind() == kind);
     found
-}
-
-fn operator_text<'a>(node: Node, source: &'a str) -> &'a str {
-    node.child_by_field_name("operator")
-        .and_then(|operator| operator.utf8_text(source.as_bytes()).ok())
-        .unwrap_or("")
 }
 
 /// Every `{ … }` scope block in a file — module level and inside a
