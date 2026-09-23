@@ -124,16 +124,7 @@ impl IndexSnapshot {
     /// Fails with `NSD-G101` (D4) when the index holds unresolved merge
     /// conflicts (stage 1-3 entries).
     pub fn open(repo: &Repository) -> Result<IndexSnapshot, GitError> {
-        let index = repo
-            .index()
-            .map_err(|err| wrap_git_error("cannot read the Git index", &err))?;
-        if index.has_conflicts() {
-            return Err(GitError::new(
-                CODE_SNAPSHOT_UNAVAILABLE,
-                "the Git index has unresolved merge conflicts (stage 1-3 entries); resolve them \
-                 before a snapshot can be taken",
-            ));
-        }
+        let bare_entries = read_index_entries(repo)?;
 
         // Opened once per snapshot (not per entry): `size` comes from the
         // ODB header, never a full blob inflate (perf HIGH). Never
@@ -141,17 +132,11 @@ impl IndexSnapshot {
         let odb = repo
             .odb()
             .map_err(|err| wrap_git_error("cannot open the object database", &err))?;
-        let mut entries = Vec::with_capacity(index.len());
-        for index_entry in index.iter() {
-            let kind = match entry_kind(index_entry.mode as i32) {
-                Some(kind) => kind,
-                // Index entries are never directories: trees are flattened
-                // to blob/gitlink rows. An unrecognised mode is skipped.
-                None => continue,
-            };
-            let (oid, size) = entry_fields(&odb, kind, index_entry.id)?;
+        let mut entries = Vec::with_capacity(bare_entries.len());
+        for (path, kind, id) in bare_entries {
+            let (oid, size) = entry_fields(&odb, kind, id)?;
             entries.push(Entry {
-                path: RepoPath::from_bytes(index_entry.path),
+                path,
                 kind,
                 oid,
                 size,
@@ -195,22 +180,22 @@ impl WorktreeSnapshot {
     pub fn open(repo: &Repository) -> Result<WorktreeSnapshot, GitError> {
         let workdir = worktree_dir(repo)?;
 
-        let index_snapshot = IndexSnapshot::open(repo)?;
-        let tracked: BTreeSet<RepoPath> = index_snapshot
-            .entries
+        // No ODB pass here (perf MEDIUM): every size is re-derived from disk
+        // below, so an index blob header would be read only to be thrown
+        // away.
+        let bare_entries = read_index_entries(repo)?;
+        let tracked: BTreeSet<RepoPath> = bare_entries
             .iter()
-            .map(|entry| entry.path.clone())
+            .map(|(path, _kind, _oid)| path.clone())
             .collect();
 
         let mut by_path: BTreeMap<RepoPath, Entry> = BTreeMap::new();
-        for entry in index_snapshot.entries {
-            let full_path = repo_path_to_fs(&workdir, entry.path.as_bytes());
+        for (path, kind, oid) in bare_entries {
+            let full_path = repo_path_to_fs(&workdir, path.as_bytes());
             match fs::symlink_metadata(&full_path) {
                 Ok(metadata) => {
-                    if let Some(refreshed) =
-                        refresh_from_disk(&entry.path, &metadata, entry.kind, entry.oid)?
-                    {
-                        by_path.insert(entry.path.clone(), refreshed);
+                    if let Some(refreshed) = refresh_from_disk(&path, &metadata, kind, Some(oid))? {
+                        by_path.insert(path.clone(), refreshed);
                     }
                 }
                 Err(_) => {
@@ -297,6 +282,36 @@ fn worktree_dir(repo: &Repository) -> Result<PathBuf, GitError> {
             )
         })?
         .to_path_buf())
+}
+
+/// The index's bare rows (path, kind, gitlink/blob oid), with no ODB read:
+/// no blob header and no inflate (perf MEDIUM: `WorktreeSnapshot::open`
+/// re-derives every size from disk, so reading a header for it here would
+/// be wasted work). Fails with `NSD-G101` (D4) when the index holds
+/// unresolved merge conflicts (stage 1-3 entries).
+fn read_index_entries(repo: &Repository) -> Result<Vec<(RepoPath, EntryKind, Oid)>, GitError> {
+    let index = repo
+        .index()
+        .map_err(|err| wrap_git_error("cannot read the Git index", &err))?;
+    if index.has_conflicts() {
+        return Err(GitError::new(
+            CODE_SNAPSHOT_UNAVAILABLE,
+            "the Git index has unresolved merge conflicts (stage 1-3 entries); resolve them \
+             before a snapshot can be taken",
+        ));
+    }
+
+    let mut entries = Vec::with_capacity(index.len());
+    for index_entry in index.iter() {
+        let kind = match entry_kind(index_entry.mode as i32) {
+            Some(kind) => kind,
+            // Index entries are never directories: trees are flattened to
+            // blob/gitlink rows. An unrecognised mode is skipped.
+            None => continue,
+        };
+        entries.push((RepoPath::from_bytes(index_entry.path), kind, index_entry.id));
+    }
+    Ok(entries)
 }
 
 fn entry_kind(mode: i32) -> Option<EntryKind> {
