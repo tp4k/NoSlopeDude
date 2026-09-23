@@ -310,6 +310,13 @@ fn entry_kinds_symlink_and_submodule() {
         snapshot.read(&repo, link).expect("read link.ts").is_none(),
         "a symlink is not readable as source bytes"
     );
+    assert_eq!(
+        snapshot
+            .link_target(&repo, link)
+            .expect("read link.ts target"),
+        Some(b"target.ts".to_vec()),
+        "the diff seam needs a commit symlink's target bytes"
+    );
 
     let submodule = snapshot
         .entries
@@ -331,6 +338,11 @@ fn entry_kinds_symlink_and_submodule() {
         .find(|entry| entry.path.as_bytes() == b"run.sh")
         .expect("executable entry present");
     assert_eq!(script.kind, EntryKind::Executable);
+    assert_eq!(
+        snapshot.link_target(&repo, script).expect("read run.sh"),
+        None,
+        "an executable entry has no symlink target"
+    );
 
     sync_index_to_commit(&repo, commit_oid);
     let index_snapshot = IndexSnapshot::open(&repo).expect("open index snapshot");
@@ -340,6 +352,13 @@ fn entry_kinds_symlink_and_submodule() {
         .find(|entry| entry.path.as_bytes() == b"link.ts")
         .expect("symlink entry present in the index");
     assert_eq!(index_link.kind, EntryKind::Symlink);
+    assert_eq!(
+        index_snapshot
+            .link_target(&repo, index_link)
+            .expect("read link.ts target from the index"),
+        Some(b"target.ts".to_vec()),
+        "the diff seam needs an index symlink's target bytes"
+    );
     let index_submodule = index_snapshot
         .entries
         .iter()
@@ -668,7 +687,31 @@ fn source_ceiling_bytes_bounds_the_read() {
             .read(&repo, wt_over)
             .expect("read wt-over.ts"),
         None,
-        "an on-disk file over the ceiling is not read into memory, even if it grew after enumeration"
+        "an on-disk file over the ceiling is not read into memory"
+    );
+}
+
+#[test]
+fn worktree_read_is_bounded_when_file_grows_after_open() {
+    let (dir, repo) = common::init_repo();
+    std::fs::write(dir.path().join("grow.ts"), b"x").expect("write grow.ts");
+
+    let snapshot = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let entry = snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.path.as_bytes() == b"grow.ts")
+        .expect("grow.ts entry present");
+    assert_eq!(entry.size, 1, "size is captured at enumeration time");
+
+    let over_ceiling = vec![b'c'; SOURCE_CEILING_BYTES as usize + 1];
+    std::fs::write(dir.path().join("grow.ts"), &over_ceiling)
+        .expect("grow grow.ts past the ceiling after enumeration");
+
+    assert_eq!(
+        snapshot.read(&repo, entry).expect("read grow.ts"),
+        None,
+        "a file that grew past the ceiling after enumeration is still not read into memory"
     );
 }
 
