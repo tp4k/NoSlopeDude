@@ -9,9 +9,12 @@ use std::process::Command;
 use git2::{IndexEntry, IndexTime, Oid, Repository, Signature};
 
 use nsd::git::mergebase;
-use nsd::git::snapshot::{CommitSnapshot, EntryKind, IndexSnapshot, WorktreeSnapshot};
+use nsd::git::snapshot::{
+    CommitSnapshot, EntryKind, IndexSnapshot, SOURCE_CEILING_BYTES, WorktreeSnapshot,
+};
 
 const MODE_REGULAR: i32 = 0o100644;
+const MODE_EXECUTABLE: i32 = 0o100755;
 const MODE_SYMLINK: i32 = 0o120000;
 const MODE_SUBMODULE: i32 = 0o160000;
 
@@ -27,15 +30,18 @@ fn staged_reads_index_not_worktree() {
     let worktree_snapshot = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
 
     assert_eq!(
-        find_content(&commit_snapshot.entries, b"a.ts"),
+        find_content(&commit_snapshot.entries, b"a.ts", |entry| commit_snapshot
+            .read(&repo, entry)),
         Some(b"base".to_vec())
     );
     assert_eq!(
-        find_content(&index_snapshot.entries, b"a.ts"),
+        find_content(&index_snapshot.entries, b"a.ts", |entry| index_snapshot
+            .read(&repo, entry)),
         Some(b"A".to_vec())
     );
     assert_eq!(
-        find_content(&worktree_snapshot.entries, b"a.ts"),
+        find_content(&worktree_snapshot.entries, b"a.ts", |entry| worktree_snapshot
+            .read(&repo, entry)),
         Some(b"B".to_vec())
     );
 }
@@ -79,12 +85,18 @@ fn staged_delete_absent_from_index_snapshot() {
 #[test]
 fn commit_snapshot_lists_tree_entries_sorted() {
     let (_dir, repo) = common::init_repo();
+    let gitlink_target = [0xCDu8; 20];
     common::commit_entries(
         &repo,
         &[
             (b"b.ts".to_vec(), MODE_REGULAR, b"bbb".to_vec()),
             (b"a.ts".to_vec(), MODE_REGULAR, b"aaaa".to_vec()),
             (b"link.ts".to_vec(), MODE_SYMLINK, b"target.ts".to_vec()),
+            (
+                b"vendor/lib".to_vec(),
+                MODE_SUBMODULE,
+                gitlink_target.to_vec(),
+            ),
         ],
     );
 
@@ -95,9 +107,10 @@ fn commit_snapshot_lists_tree_entries_sorted() {
         vec![
             b"a.ts".as_slice(),
             b"b.ts".as_slice(),
-            b"link.ts".as_slice()
+            b"link.ts".as_slice(),
+            b"vendor/lib".as_slice(),
         ],
-        "entries are sorted by raw path bytes (D10)"
+        "entries are sorted by raw path bytes (D10), including the gitlink entry"
     );
 
     let a_entry = snapshot
@@ -107,7 +120,11 @@ fn commit_snapshot_lists_tree_entries_sorted() {
         .expect("a.ts entry present");
     assert_eq!(a_entry.kind, EntryKind::Regular);
     assert_eq!(a_entry.size, 4);
-    assert!(a_entry.oid.is_some(), "a blob entry carries its OID");
+    assert_eq!(
+        a_entry.oid,
+        Some(Oid::hash_object(git2::ObjectType::Blob, b"aaaa").expect("hash the blob's bytes")),
+        "a blob entry's OID is exactly its blob hash"
+    );
 }
 
 #[test]
@@ -154,11 +171,11 @@ fn worktree_overlays_modified_deleted_and_untracked() {
     let snapshot = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
 
     assert_eq!(
-        find_content(&snapshot.entries, b"kept.ts"),
+        find_content(&snapshot.entries, b"kept.ts", |entry| snapshot.read(&repo, entry)),
         Some(b"kept".to_vec())
     );
     assert_eq!(
-        find_content(&snapshot.entries, b"modified.ts"),
+        find_content(&snapshot.entries, b"modified.ts", |entry| snapshot.read(&repo, entry)),
         Some(b"after".to_vec()),
         "worktree bytes come from disk (D5), overlaying the index"
     );
@@ -170,7 +187,7 @@ fn worktree_overlays_modified_deleted_and_untracked() {
         "an on-disk deletion is removed from the overlay"
     );
     assert_eq!(
-        find_content(&snapshot.entries, b"untracked.ts"),
+        find_content(&snapshot.entries, b"untracked.ts", |entry| snapshot.read(&repo, entry)),
         Some(b"new".to_vec()),
         "an untracked file is added even when the candidate .gitignore matches it (D6)"
     );
@@ -213,7 +230,7 @@ fn worktree_reports_nested_checkout_entry() {
 fn entry_kinds_symlink_and_submodule() {
     let (_dir, repo) = common::init_repo();
     let gitlink_target = [0xABu8; 20];
-    common::commit_entries(
+    let commit_oid = common::commit_entries(
         &repo,
         &[
             (b"link.ts".to_vec(), MODE_SYMLINK, b"target.ts".to_vec()),
@@ -222,6 +239,7 @@ fn entry_kinds_symlink_and_submodule() {
                 MODE_SUBMODULE,
                 gitlink_target.to_vec(),
             ),
+            (b"run.sh".to_vec(), MODE_EXECUTABLE, b"#!/bin/sh\n".to_vec()),
         ],
     );
 
@@ -233,7 +251,7 @@ fn entry_kinds_symlink_and_submodule() {
         .expect("symlink entry present");
     assert_eq!(link.kind, EntryKind::Symlink);
     assert!(
-        link.content.is_none(),
+        snapshot.read(&repo, link).expect("read link.ts").is_none(),
         "a symlink is not readable as source bytes"
     );
 
@@ -244,9 +262,40 @@ fn entry_kinds_symlink_and_submodule() {
         .expect("submodule entry present");
     assert_eq!(submodule.kind, EntryKind::Submodule);
     assert!(
-        submodule.content.is_none(),
+        snapshot
+            .read(&repo, submodule)
+            .expect("read vendor/lib")
+            .is_none(),
         "a submodule gitlink is not readable as source bytes"
     );
+
+    let script = snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.path.as_bytes() == b"run.sh")
+        .expect("executable entry present");
+    assert_eq!(script.kind, EntryKind::Executable);
+
+    sync_index_to_commit(&repo, commit_oid);
+    let index_snapshot = IndexSnapshot::open(&repo).expect("open index snapshot");
+    let index_link = index_snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.path.as_bytes() == b"link.ts")
+        .expect("symlink entry present in the index");
+    assert_eq!(index_link.kind, EntryKind::Symlink);
+    let index_submodule = index_snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.path.as_bytes() == b"vendor/lib")
+        .expect("submodule entry present in the index");
+    assert_eq!(index_submodule.kind, EntryKind::Submodule);
+    let index_script = index_snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.path.as_bytes() == b"run.sh")
+        .expect("executable entry present in the index");
+    assert_eq!(index_script.kind, EntryKind::Executable);
 }
 
 #[test]
@@ -403,6 +452,10 @@ fn merge_base_shallow_clone_is_g101() {
         err.to_string().to_lowercase().contains("shallow"),
         "the message names the shallow clone: {err}"
     );
+    assert!(
+        err.to_string().contains("--unshallow"),
+        "the message names how to deepen the clone: {err}"
+    );
 }
 
 #[test]
@@ -423,13 +476,99 @@ fn merge_base_unresolvable_ref_and_unrelated_history_are_g101() {
     let unrelated_err =
         mergebase::merge_base(&repo, "unrelated").expect_err("unrelated histories must fail");
     assert_eq!(unrelated_err.code(), "NSD-G101");
+    assert!(
+        !unrelated_err.to_string().contains("shallow"),
+        "unrelated histories are not misreported as a shallow clone: {unrelated_err}"
+    );
+    assert!(
+        unrelated_err.to_string().contains("unrelated"),
+        "the message names unrelated histories: {unrelated_err}"
+    );
 }
 
-fn find_content(entries: &[nsd::git::snapshot::Entry], path: &[u8]) -> Option<Vec<u8>> {
-    entries
+#[test]
+fn source_ceiling_bytes_bounds_the_read() {
+    let (dir, repo) = common::init_repo();
+    let under_ceiling = vec![b'a'; SOURCE_CEILING_BYTES as usize];
+    let over_ceiling = vec![b'b'; SOURCE_CEILING_BYTES as usize + 1];
+    common::commit_entries(
+        &repo,
+        &[
+            (b"under.ts".to_vec(), MODE_REGULAR, under_ceiling.clone()),
+            (b"over.ts".to_vec(), MODE_REGULAR, over_ceiling.clone()),
+        ],
+    );
+
+    let commit_snapshot = CommitSnapshot::head_or_empty(&repo).expect("open commit snapshot");
+    let under_entry = commit_snapshot
+        .entries
         .iter()
-        .find(|entry| entry.path.as_bytes() == path)
-        .and_then(|entry| entry.content.clone())
+        .find(|entry| entry.path.as_bytes() == b"under.ts")
+        .expect("under.ts entry present");
+    assert_eq!(under_entry.size, SOURCE_CEILING_BYTES);
+    assert_eq!(
+        commit_snapshot
+            .read(&repo, under_entry)
+            .expect("read under.ts"),
+        Some(under_ceiling.clone())
+    );
+
+    let over_entry = commit_snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.path.as_bytes() == b"over.ts")
+        .expect("over.ts entry present");
+    assert_eq!(over_entry.size, SOURCE_CEILING_BYTES + 1);
+    assert_eq!(
+        commit_snapshot
+            .read(&repo, over_entry)
+            .expect("read over.ts"),
+        None,
+        "a blob over the ceiling is not read into memory"
+    );
+
+    std::fs::write(dir.path().join("wt-under.ts"), &under_ceiling).expect("write wt-under.ts");
+    std::fs::write(dir.path().join("wt-over.ts"), &over_ceiling).expect("write wt-over.ts");
+    let worktree_snapshot = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+
+    let wt_under = worktree_snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.path.as_bytes() == b"wt-under.ts")
+        .expect("wt-under.ts entry present");
+    assert_eq!(wt_under.size, SOURCE_CEILING_BYTES);
+    assert_eq!(
+        worktree_snapshot
+            .read(&repo, wt_under)
+            .expect("read wt-under.ts"),
+        Some(under_ceiling)
+    );
+
+    let wt_over = worktree_snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.path.as_bytes() == b"wt-over.ts")
+        .expect("wt-over.ts entry present");
+    assert_eq!(wt_over.size, SOURCE_CEILING_BYTES + 1);
+    assert_eq!(
+        worktree_snapshot
+            .read(&repo, wt_over)
+            .expect("read wt-over.ts"),
+        None,
+        "an on-disk file over the ceiling is not read into memory, even if it grew after enumeration"
+    );
+}
+
+/// Looks up `path` in `entries` and returns its source bytes via `read`, the
+/// snapshot-specific accessor the caller closes over (e.g.
+/// `|entry| snapshot.read(&repo, entry)`).
+fn find_content(
+    entries: &[nsd::git::snapshot::Entry],
+    path: &[u8],
+    read: impl Fn(&nsd::git::snapshot::Entry) -> Result<Option<Vec<u8>>, nsd::git::GitError>,
+) -> Option<Vec<u8>> {
+    let entry = entries.iter().find(|entry| entry.path.as_bytes() == path)?;
+    read(entry).expect("read entry content")
 }
 
 fn current_branch_name(repo: &Repository) -> String {
