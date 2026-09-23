@@ -1,5 +1,6 @@
 class DifferB {
     void m() {
-        int sum = compute();
+        int shared = compute();
+        int total = computeB();
     }
 }

@@ -99,11 +99,6 @@ pub struct IrNode {
     /// The six rules' catch-body predicate: this node is the block
     /// directly forming a `catch` clause's body, or sits inside it.
     pub in_catch_body: bool,
-    /// The clones consumer's statement-token stream (D14), present only on
-    /// a node the lowering identifies as a clone-candidate container's
-    /// direct statement child -- the same granularity
-    /// `clones::normalized_statement_tokens` computes over.
-    pub token: Option<String>,
     pub children: Vec<IrNode>,
 }
 

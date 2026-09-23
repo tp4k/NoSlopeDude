@@ -6,8 +6,10 @@
 
 use tree_sitter::Node;
 
+#[cfg(test)]
 use crate::exec_lines::is_comment_kind;
 use crate::ir::{DamageKind, DecisionKind};
+#[cfg(test)]
 use crate::model::LanguageFamily;
 
 use super::Classification;
@@ -78,6 +80,11 @@ fn is_catch_body_root(kind: &str, parent_kind: Option<&str>) -> bool {
 /// `switch_block_statement_group`'s direct child other than its own
 /// `switch_label`. Takes the already-threaded `parent_kind` rather than
 /// calling `node.parent()` -- see `is_catch_body_root`'s doc comment.
+/// Test-only: kept for WS-4's clone-floor work, called today only from
+/// `super::is_clone_statement`'s test dispatcher (`IrNode::token`, the one
+/// production reader of this classification, was removed as unread and
+/// unbounded -- see `ir::IrNode`'s doc comment).
+#[cfg(test)]
 pub(super) fn is_clone_statement(node: Node, kind: &str, parent_kind: Option<&str>) -> bool {
     if !node.is_named() || is_comment_kind(kind, LanguageFamily::Java) {
         return false;
@@ -119,7 +126,6 @@ pub(super) fn classify(node: Node, _source: &str, parent: Option<Node>) -> Class
         is_terminator: TERMINATOR_KINDS.contains(&kind),
         in_block: parent_kind.is_some_and(is_block_kind),
         is_catch_body_root: is_catch_body_root(kind, parent_kind),
-        is_clone_statement: is_clone_statement(node, kind, parent_kind),
         damage: classify_damage(node, parent_kind),
     }
 }

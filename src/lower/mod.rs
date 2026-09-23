@@ -16,7 +16,9 @@ use std::path::PathBuf;
 
 use tree_sitter::Node;
 
-use crate::exec_lines::{is_comment_kind, is_executable_leaf};
+#[cfg(test)]
+use crate::exec_lines::is_comment_kind;
+use crate::exec_lines::is_executable_leaf;
 use crate::ir::{DamageKind, DamageSpan, DecisionKind, IrNode, Span};
 use crate::model::LanguageFamily;
 use crate::parse::ParsedFile;
@@ -37,6 +39,11 @@ pub const JSTS_LOWERING_VERSION: u32 = 1;
 /// `nsd-plan-final.md` M0b item 4 calls for), so the two must agree on this
 /// exact value for the byte-for-byte comparison to mean anything; it cannot
 /// be imported since the original is private to `src/clones/mod.rs`.
+/// Test-only: nothing in `src/` reads a clone-candidate token stream yet
+/// (`IrNode::token`, its only production reader, was removed as unread and
+/// unbounded -- see `ir::IrNode`'s doc comment); this and the two helpers
+/// below stay for WS-4 to build on, proven by the floor test in `mod tests`.
+#[cfg(test)]
 const STATEMENT_TOKEN_SEPARATOR: char = '\u{1}';
 
 /// One lowered file: the IR tree, plus every typed damage span found while
@@ -91,7 +98,6 @@ struct Classification {
     /// depth scales with its size, the pathological case
     /// `test_deeply_nested_file_does_not_abort_the_scan` exists to catch).
     is_catch_body_root: bool,
-    is_clone_statement: bool,
     damage: Option<DamageKind>,
 }
 
@@ -114,13 +120,15 @@ fn classify(
 /// Whether `node` is a clone-candidate container's direct statement child --
 /// the same granularity `clones::statement_children`'s containers enumerate,
 /// re-derived here (that function is private to `src/clones/mod.rs`, and
-/// this stream may not widen it). `java::classify`/`jsts::classify` each call
-/// their own copy directly to populate `Classification::is_clone_statement`;
-/// this dispatcher exists only for tests below, which need to enumerate the
-/// tree-sitter nodes they compare the lowering's tokens against. Test-only,
-/// so deriving `node.parent()` directly (rather than threading it, as
-/// `build_ir` does for the production path) is fine: nothing here runs
-/// against the deep-nesting perf fixture.
+/// this stream may not widen it). `java::is_clone_statement`/
+/// `jsts::is_clone_statement` are kept for WS-4's clone-floor work even
+/// though nothing in `src/` reads their result today (the `IrNode.token`
+/// field that once carried it was removed as unread/unbounded -- see
+/// `ir::IrNode`'s doc comment); this dispatcher exists only for tests below,
+/// which need to enumerate the tree-sitter nodes they compare the lowering's
+/// tokens against. Test-only, so deriving `node.parent()` directly (rather
+/// than threading it, as `build_ir` does for the production path) is fine:
+/// nothing here runs against the deep-nesting perf fixture.
 #[cfg(test)]
 fn is_clone_statement(node: Node, language: LanguageFamily) -> bool {
     let kind = node.kind();
@@ -139,6 +147,8 @@ fn is_clone_statement(node: Node, language: LanguageFamily) -> bool {
 /// `clones::normalized_statement_tokens` uses, not a call to it: the floor
 /// prototype (`nsd-plan-final.md` M0b item 4) exists to prove this
 /// independent derivation agrees with the pre-IR one, not to wrap it.
+/// Test-only -- see `STATEMENT_TOKEN_SEPARATOR`'s doc comment.
+#[cfg(test)]
 fn statement_token_stream(statement: Node, language: LanguageFamily, source: &str) -> String {
     let mut tokens = String::new();
     for_each_descendant(statement, |node| {
@@ -158,7 +168,11 @@ fn statement_token_stream(statement: Node, language: LanguageFamily, source: &st
 /// Iterative pre-order traversal via a single reused `TreeCursor`: visits
 /// `root` and every descendant. The same shape as
 /// `exec_lines::for_each_descendant` / `clones::for_each_descendant`, a
-/// fresh copy here since both are private to their own modules.
+/// fresh copy here since both are private to their own modules. Test-only --
+/// see `STATEMENT_TOKEN_SEPARATOR`'s doc comment; `build_ir` below has its
+/// own production traversal, since it also needs to assemble a tree rather
+/// than only visit.
+#[cfg(test)]
 fn for_each_descendant<'tree>(root: Node<'tree>, mut visit: impl FnMut(Node<'tree>)) {
     let mut cursor = root.walk();
     loop {
@@ -193,7 +207,6 @@ fn fallback_node(root: Node) -> IrNode {
         is_terminator: false,
         in_block: false,
         in_catch_body: false,
-        token: None,
         children: Vec::new(),
     }
 }
@@ -231,11 +244,6 @@ fn build_ir(
         if let Some(kind) = classification.damage {
             damage_out.push(DamageSpan { kind, span });
         }
-        let token = if classification.is_clone_statement {
-            Some(statement_token_stream(node, language, source))
-        } else {
-            None
-        };
         let in_catch_body = classification.is_catch_body_root || parent_in_catch_body;
         let ir_node = IrNode {
             span,
@@ -244,7 +252,6 @@ fn build_ir(
             is_terminator: classification.is_terminator,
             in_block: classification.in_block,
             in_catch_body,
-            token,
             children: Vec::with_capacity(node.child_count()),
         };
         (ir_node, in_catch_body)
@@ -476,5 +483,43 @@ mod tests {
         for child in &node.children {
             collect_ir_nodes(child, out);
         }
+    }
+
+    /// Every clone-candidate statement's own token stream, in document
+    /// order, for one fixture file under `tests/fixtures/`.
+    fn clone_statement_tokens(path: &str, language: LanguageFamily) -> Vec<String> {
+        let full_path = fixtures_root().join(path);
+        let (grammar, _) = grammar_language(&full_path).expect("known fixture extension");
+        let source = fs::read_to_string(&full_path).expect("read fixture");
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_language(grammar))
+            .expect("set_language");
+        let tree = parser.parse(&source, None).expect("parse");
+        let mut tokens = Vec::new();
+        for_each_descendant(tree.root_node(), |node| {
+            if is_clone_statement(node, language) {
+                tokens.push(statement_token_stream(node, language, &source));
+            }
+        });
+        tokens
+    }
+
+    /// The clone-token floor's equality is discriminating, not vacuous
+    /// (`nsd-plan-final.md` M0b item 4): two fixtures whose two-statement
+    /// clone body agrees on the first statement and differs on the second
+    /// produce token streams that agree at index zero and differ at index
+    /// one. Calls `statement_token_stream` directly rather than reading
+    /// `IrNode::token` -- that field carried no reader in `src/` and was
+    /// removed; WS-4 derives a stream on demand the same way this test does.
+    #[test]
+    fn test_ir_tokens_differ_when_a_statement_differs() {
+        let a_tokens = clone_statement_tokens("ir/DifferA.java", LanguageFamily::Java);
+        let b_tokens = clone_statement_tokens("ir/DifferB.java", LanguageFamily::Java);
+
+        assert_eq!(a_tokens.len(), 2, "{a_tokens:?}");
+        assert_eq!(b_tokens.len(), 2, "{b_tokens:?}");
+        assert_eq!(a_tokens[0], b_tokens[0]);
+        assert_ne!(a_tokens[1], b_tokens[1]);
     }
 }

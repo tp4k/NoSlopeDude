@@ -298,27 +298,7 @@ fn test_clean_source_lowers_with_no_damage_spans() {
     assert!(ir_file.damage.is_empty(), "{:#?}", ir_file.damage);
 }
 
-#[test]
-fn test_ir_tokens_differ_when_a_statement_differs() {
-    let files = parsed_files(&[("DifferA.java", JAVA), ("DifferB.java", JAVA)]);
-    let a_ir = lower::lower_file(&files[0]);
-    let b_ir = lower::lower_file(&files[1]);
-
-    let mut a_nodes = Vec::new();
-    collect(&a_ir.root, &mut a_nodes);
-    let mut b_nodes = Vec::new();
-    collect(&b_ir.root, &mut b_nodes);
-
-    let a_tokens: Vec<&str> = a_nodes
-        .iter()
-        .filter_map(|node| node.token.as_deref())
-        .collect();
-    let b_tokens: Vec<&str> = b_nodes
-        .iter()
-        .filter_map(|node| node.token.as_deref())
-        .collect();
-
-    assert_eq!(a_tokens.len(), 1, "{a_tokens:?}");
-    assert_eq!(b_tokens.len(), 1, "{b_tokens:?}");
-    assert_ne!(a_tokens[0], b_tokens[0]);
-}
+// test_ir_tokens_differ_when_a_statement_differs moved to
+// src/lower/mod.rs::tests (Decision 11): it now calls
+// `statement_token_stream` directly rather than reading `IrNode::token`,
+// which carried no reader in `src/` and was removed.

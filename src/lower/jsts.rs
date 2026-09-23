@@ -4,8 +4,10 @@
 
 use tree_sitter::Node;
 
+#[cfg(test)]
 use crate::exec_lines::is_comment_kind;
 use crate::ir::{DamageKind, DecisionKind};
+#[cfg(test)]
 use crate::model::LanguageFamily;
 
 use super::Classification;
@@ -73,7 +75,12 @@ fn is_catch_body_root(kind: &str, parent_kind: Option<&str>) -> bool {
 /// `node.parent()` -- see `is_catch_body_root`'s doc comment. The
 /// `switch_case`/`switch_default` arm is the one caller in either lowering
 /// that needs the parent `Node` itself, not just its kind, since
-/// `children_by_field_name` is a method on `Node`.
+/// `children_by_field_name` is a method on `Node`. Test-only: kept for WS-4's
+/// clone-floor work, called today only from `super::is_clone_statement`'s
+/// test dispatcher (`IrNode::token`, the one production reader of this
+/// classification, was removed as unread and unbounded -- see
+/// `ir::IrNode`'s doc comment).
+#[cfg(test)]
 pub(super) fn is_clone_statement(
     node: Node,
     kind: &str,
@@ -136,7 +143,6 @@ pub(super) fn classify(node: Node, _source: &str, parent: Option<Node>) -> Class
         is_terminator: TERMINATOR_KINDS.contains(&kind),
         in_block: parent_kind.is_some_and(is_block_kind),
         is_catch_body_root: is_catch_body_root(kind, parent_kind),
-        is_clone_statement: is_clone_statement(node, kind, parent, parent_kind),
         damage: classify_damage(node, parent_kind),
     }
 }
