@@ -41,14 +41,74 @@ pub const ALL_RULE_IDS: [RuleId; 6] = [
 ];
 
 /// Runs the rules stage: every rule finding (D22) plus the D23 verbosity
-/// score, overall and per language family (D20).
+/// score, overall and per language family (D20). One rayon pass over
+/// `parsed_files` (D21) lowers each file exactly once (`lower::lower_file`)
+/// and derives both a file's findings (`findings_from_ir`) and its
+/// D11-filtered executable-line set (`executable_lines_from_ir`) from that
+/// single `IrFile` -- `metrics/mod.rs` and `clones/mod.rs` still each lower
+/// independently for their own stages, but this is the one place in the
+/// rules stage that used to lower every file twice. `summary_index` maps a
+/// file back to its position in `metrics.file_scan_summaries`, so the
+/// language-lines row lands in a `Vec<Option<_>>` slot sized and ordered
+/// exactly like that summary list before being flattened -- `files`'s order
+/// and every downstream index (`path_index` in `compute_verbosity`) stay
+/// what they were when this ran as two separate passes. `find_findings` and
+/// `file_language_lines` below still each lower independently; they are not
+/// on this path any more, kept only so `tests/rules.rs` and this file's own
+/// `#[cfg(test)] mod tests` can call one function or the other directly.
+/// One rayon task's output in `run`'s fused pass: a file's findings, plus
+/// (when that file has a `metrics.file_scan_summaries` entry) the index of
+/// that entry alongside the `FileLanguageLines` row derived from the same
+/// lowering.
+type PerFileScan = (Vec<RuleFinding>, Option<(usize, FileLanguageLines)>);
+
 pub fn run(
     parsed_files: &[ParsedFile],
     metrics: &MetricsResult,
     clones: &ClonesResult,
 ) -> RulesResult {
-    let findings = find_findings(parsed_files);
-    let files = file_language_lines(parsed_files, metrics);
+    let summary_index: HashMap<&Path, usize> = metrics
+        .file_scan_summaries
+        .iter()
+        .enumerate()
+        .map(|(index, summary)| (summary.relative_path.as_path(), index))
+        .collect();
+
+    let per_file: Vec<PerFileScan> = parsed_files
+        .par_iter()
+        .map(|file| {
+            let ir_file = lower::lower_file(file);
+            let findings = findings_from_ir(file, &ir_file);
+            let language_lines = summary_index
+                .get(file.relative_path.as_path())
+                .map(|&index| {
+                    let summary = &metrics.file_scan_summaries[index];
+                    let entry = FileLanguageLines {
+                        relative_path: summary.relative_path.clone(),
+                        language: file.language,
+                        scanned_lines: summary.scanned_lines,
+                        executable_lines: executable_lines_from_ir(&ir_file),
+                    };
+                    (index, entry)
+                });
+            (findings, language_lines)
+        })
+        .collect();
+
+    let mut findings = Vec::new();
+    let mut files_by_summary: Vec<Option<FileLanguageLines>> =
+        (0..metrics.file_scan_summaries.len())
+            .map(|_| None)
+            .collect();
+    for (file_findings, language_lines) in per_file {
+        findings.extend(file_findings);
+        if let Some((index, entry)) = language_lines {
+            files_by_summary[index] = Some(entry);
+        }
+    }
+    sort_findings(&mut findings);
+    let files: Vec<FileLanguageLines> = files_by_summary.into_iter().flatten().collect();
+
     let verbosity = compute_verbosity(&files, &findings, &clones.groups);
     RulesResult {
         findings,
@@ -57,8 +117,23 @@ pub fn run(
     }
 }
 
+/// `find_findings`'s and `run`'s shared sort: `relative_path` then
+/// `start_line` then `rule_id`, for a deterministic result regardless of
+/// which rayon task finished first.
+fn sort_findings(findings: &mut [RuleFinding]) {
+    findings.sort_by(|a, b| {
+        a.relative_path
+            .cmp(&b.relative_path)
+            .then(a.start_line.cmp(&b.start_line))
+            .then(a.rule_id.cmp(b.rule_id))
+    });
+}
+
 /// D22: every rule finding across every parsed file, one rayon task per
-/// file (D21), sorted for a deterministic result.
+/// file (D21), sorted for a deterministic result. Lowers each file
+/// independently (see `scan_file_for_rules`) -- not `run`'s production path,
+/// kept `pub` for `tests/rules.rs`'s direct calls against hand-built inline
+/// sources.
 pub fn find_findings(parsed_files: &[ParsedFile]) -> Vec<RuleFinding> {
     let per_file: Vec<Vec<RuleFinding>> =
         parsed_files.par_iter().map(scan_file_for_rules).collect();
@@ -66,25 +141,86 @@ pub fn find_findings(parsed_files: &[ParsedFile]) -> Vec<RuleFinding> {
     for file_findings in per_file {
         findings.extend(file_findings);
     }
-    findings.sort_by(|a, b| {
-        a.relative_path
-            .cmp(&b.relative_path)
-            .then(a.start_line.cmp(&b.start_line))
-            .then(a.rule_id.cmp(b.rule_id))
+    sort_findings(&mut findings);
+    findings
+}
+
+/// D22: one parsed file's rule findings, lowering it once. `run`'s own
+/// fused pass calls `findings_from_ir` directly on an `IrFile` it already
+/// lowered for `executable_lines_from_ir` too, so this wrapper (and its
+/// caller, `find_findings`) exist only for `tests/rules.rs`'s direct calls.
+fn scan_file_for_rules(file: &ParsedFile) -> Vec<RuleFinding> {
+    let ir_file = lower::lower_file(file);
+    findings_from_ir(file, &ir_file)
+}
+
+/// D22: every rule finding in one parsed file, from a single pass over its
+/// already-lowered IR tree (no D9 nested-callable exclusion — a rule
+/// applies inside a nested callable's body too).
+fn findings_from_ir(file: &ParsedFile, ir_file: &lower::IrFile) -> Vec<RuleFinding> {
+    let language = file.language;
+    let mut findings = Vec::new();
+    for_each_ir_node(&ir_file.root, |node, is_root| {
+        if is_unreachable_container(node, is_root, language) {
+            if let Some((start_line, end_line, flagged_lines)) = find_unreachable_after_return(node)
+            {
+                findings.push(RuleFinding {
+                    relative_path: file.relative_path.clone(),
+                    language,
+                    rule_id: unreachable_rule_id(language),
+                    start_line,
+                    end_line,
+                    flagged_lines,
+                });
+            }
+        }
+        if node.decision == Some(DecisionKind::Catch) {
+            if let Some((start_line, end_line, flagged_lines)) = find_empty_catch(node) {
+                findings.push(RuleFinding {
+                    relative_path: file.relative_path.clone(),
+                    language,
+                    rule_id: empty_catch_rule_id(language),
+                    start_line,
+                    end_line,
+                    flagged_lines,
+                });
+            }
+        }
+        if node.decision == Some(DecisionKind::Branch) {
+            if let Some((start_line, end_line, flagged_lines)) = find_redundant_else(node) {
+                findings.push(RuleFinding {
+                    relative_path: file.relative_path.clone(),
+                    language,
+                    rule_id: redundant_else_rule_id(language),
+                    start_line,
+                    end_line,
+                    flagged_lines,
+                });
+            }
+        }
     });
     findings
 }
 
+/// D11: `collect_ir_executable_lines` over a whole lowered file's root —
+/// extracted out of `file_language_lines`'s per-file closure so `run`'s
+/// fused pass can call it on an `IrFile` it already lowered for
+/// `findings_from_ir`, instead of lowering the same file a second time.
+fn executable_lines_from_ir(ir_file: &lower::IrFile) -> BTreeSet<usize> {
+    let mut executable_lines = BTreeSet::new();
+    collect_ir_executable_lines(&ir_file.root, &mut executable_lines);
+    executable_lines
+}
+
 /// D12/D20/D11: joins WS-2's per-file scanned-line count with the language
 /// and D11-filtered executable-line set the IR carries for that same file --
-/// `FileScanSummary` alone has neither. The lowering this does per file
-/// (`lower::lower_file`) is the only whole-tree build on this path, so it
-/// fans out with rayon (D21) like every other whole-corpus pass in the
-/// pipeline; `files_by_path` is built serially first and shared by
-/// reference (`ParsedFile` is already proven `Sync` by `find_findings`'s own
-/// `par_iter` above). Rayon's `collect` into a `Vec` preserves input order
-/// (`file_scan_summaries`'s order), so `files`'s order and every downstream
-/// index (`path_index` in `compute_verbosity`) are unchanged.
+/// `FileScanSummary` alone has neither. Lowers each file independently, like
+/// `scan_file_for_rules` does for findings — `run`'s own fused pass computes
+/// this same `FileLanguageLines` shape without a second lowering (see
+/// `run`'s doc comment), so this function is no longer called from
+/// production; it stays `#[cfg(test)]`, kept only for
+/// `test_file_language_lines_come_from_ir_spans`'s direct call below.
+#[cfg(test)]
 fn file_language_lines(
     parsed_files: &[ParsedFile],
     metrics: &MetricsResult,
@@ -101,13 +237,11 @@ fn file_language_lines(
                 .get(summary.relative_path.as_path())
                 .map(|file| {
                     let ir_file = lower::lower_file(file);
-                    let mut executable_lines = BTreeSet::new();
-                    collect_ir_executable_lines(&ir_file.root, &mut executable_lines);
                     FileLanguageLines {
                         relative_path: summary.relative_path.clone(),
                         language: file.language,
                         scanned_lines: summary.scanned_lines,
-                        executable_lines,
+                        executable_lines: executable_lines_from_ir(&ir_file),
                     }
                 })
         })
@@ -204,55 +338,6 @@ fn verbosity_score(flagged_lines: usize, scanned_lines: usize) -> VerbosityScore
         scanned_lines,
         ratio,
     }
-}
-
-/// D22: every rule finding in one parsed file, from a single pass over its
-/// lowered IR tree (no D9 nested-callable exclusion — a rule applies inside
-/// a nested callable's body too).
-fn scan_file_for_rules(file: &ParsedFile) -> Vec<RuleFinding> {
-    let ir_file = lower::lower_file(file);
-    let language = file.language;
-    let mut findings = Vec::new();
-    for_each_ir_node(&ir_file.root, |node, is_root| {
-        if is_unreachable_container(node, is_root, language) {
-            if let Some((start_line, end_line, flagged_lines)) = find_unreachable_after_return(node)
-            {
-                findings.push(RuleFinding {
-                    relative_path: file.relative_path.clone(),
-                    language,
-                    rule_id: unreachable_rule_id(language),
-                    start_line,
-                    end_line,
-                    flagged_lines,
-                });
-            }
-        }
-        if node.decision == Some(DecisionKind::Catch) {
-            if let Some((start_line, end_line, flagged_lines)) = find_empty_catch(node) {
-                findings.push(RuleFinding {
-                    relative_path: file.relative_path.clone(),
-                    language,
-                    rule_id: empty_catch_rule_id(language),
-                    start_line,
-                    end_line,
-                    flagged_lines,
-                });
-            }
-        }
-        if node.decision == Some(DecisionKind::Branch) {
-            if let Some((start_line, end_line, flagged_lines)) = find_redundant_else(node) {
-                findings.push(RuleFinding {
-                    relative_path: file.relative_path.clone(),
-                    language,
-                    rule_id: redundant_else_rule_id(language),
-                    start_line,
-                    end_line,
-                    flagged_lines,
-                });
-            }
-        }
-    });
-    findings
 }
 
 fn unreachable_rule_id(language: LanguageFamily) -> RuleId {
@@ -365,11 +450,18 @@ fn find_empty_catch(node: &IrNode) -> Option<(usize, usize, Vec<usize>)> {
 /// `[condition, consequence, alternative]` in that order in both grammars
 /// (confirmed against `tree-sitter-java`/`tree-sitter-javascript`'s own
 /// `node-types.json` field declarations), so positions 1 and 2 are the
-/// two branches without needing a field name off the IR.
+/// two branches without needing a field name off the IR. Walks
+/// `node.children` directly rather than collecting `statement_children`'s
+/// `Vec<&IrNode>` first, so the common case (an `if` with no `else`) takes
+/// no heap allocation.
 fn find_redundant_else(node: &IrNode) -> Option<(usize, usize, Vec<usize>)> {
-    let children = statement_children(node);
-    let consequence = *children.get(1)?;
-    let alternative = *children.get(2)?;
+    let mut named = node
+        .children
+        .iter()
+        .filter(|child| child.is_named && !child.is_comment);
+    named.next()?;
+    let consequence = named.next()?;
+    let alternative = named.next()?;
     if !always_returns(consequence) {
         return None;
     }
