@@ -12,7 +12,8 @@ use git2::{IndexEntry, IndexTime, Oid, Repository};
 use tempfile::TempDir;
 
 use nsd::git::diff::{self, Change};
-use nsd::git::snapshot::{EntryKind, WorktreeSnapshot};
+use nsd::git::path::RepoPath;
+use nsd::git::snapshot::{EntryKind, WorktreeSnapshot, SOURCE_CEILING_BYTES};
 
 const MODE_REGULAR: i32 = 0o100644;
 const MODE_SYMLINK: i32 = 0o120000;
@@ -211,6 +212,77 @@ fn symlink_and_submodule_changes_are_typed() {
             kind: EntryKind::Symlink
         } if path.as_bytes() == b"link.ts"
     )));
+}
+
+#[test]
+fn worktree_over_ceiling_unchanged_file_is_not_reported() {
+    let (dir, repo) = common::init_repo();
+    let over_ceiling = vec![b'a'; SOURCE_CEILING_BYTES as usize + 1];
+    let base_oid = common::commit_entries(
+        &repo,
+        &[(b"big.js".to_vec(), MODE_REGULAR, over_ceiling.clone())],
+    );
+    sync_index_to_commit(&repo, base_oid);
+    std::fs::write(dir.path().join("big.js"), &over_ceiling)
+        .expect("rewrite big.js with identical over-ceiling content");
+
+    let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let changes = diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree)
+        .expect("diff commit to worktree");
+
+    assert!(
+        changes.is_empty(),
+        "an unchanged tracked over-ceiling file must not appear: {changes:?}"
+    );
+}
+
+#[test]
+fn worktree_over_ceiling_file_over_empty_base_is_modified() {
+    let (dir, repo) = common::init_repo();
+    let base_oid = common::commit_entries(&repo, &[(b"src/x.ts".to_vec(), MODE_REGULAR, Vec::new())]);
+    sync_index_to_commit(&repo, base_oid);
+    std::fs::create_dir_all(dir.path().join("src")).expect("create src/ directory");
+    let over_ceiling = vec![b'b'; SOURCE_CEILING_BYTES as usize + 1];
+    std::fs::write(dir.path().join("src/x.ts"), &over_ceiling)
+        .expect("write over-ceiling content over an empty base file");
+
+    let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let changes = diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree)
+        .expect("diff commit to worktree");
+
+    assert_eq!(changes.len(), 1, "{changes:?}");
+    assert!(matches!(
+        &changes[0],
+        Change::Modified {
+            path,
+            kind: EntryKind::Regular
+        } if path.as_bytes() == b"src/x.ts"
+    ));
+}
+
+#[test]
+fn worktree_over_ceiling_add_is_not_a_rename_of_an_empty_file() {
+    let (dir, repo) = common::init_repo();
+    let base_oid = common::commit_entries(&repo, &[(b"empty.ts".to_vec(), MODE_REGULAR, Vec::new())]);
+    sync_index_to_commit(&repo, base_oid);
+    // `commit_entries` never writes to disk (D23), so `empty.ts` is already
+    // absent from the worktree — an on-disk deletion, with nothing to
+    // remove.
+    let over_ceiling = vec![b'c'; SOURCE_CEILING_BYTES as usize + 1];
+    std::fs::write(dir.path().join("big.js"), &over_ceiling)
+        .expect("write an unrelated untracked over-ceiling file");
+
+    let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let changes = diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree)
+        .expect("diff commit to worktree");
+
+    assert_eq!(changes.len(), 2, "expected a delete and an unrelated add, not a rename: {changes:?}");
+    assert!(changes
+        .iter()
+        .any(|c| matches!(c, Change::Deleted { path, .. } if path.as_bytes() == b"empty.ts")));
+    assert!(changes
+        .iter()
+        .any(|c| matches!(c, Change::Added { path, .. } if path.as_bytes() == b"big.js")));
 }
 
 #[test]
