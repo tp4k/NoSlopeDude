@@ -56,12 +56,6 @@ pub const ALL_RULE_IDS: [RuleId; 6] = [
 /// `file_language_lines` below still each lower independently; they are not
 /// on this path any more, kept only so `tests/rules.rs` and this file's own
 /// `#[cfg(test)] mod tests` can call one function or the other directly.
-/// One rayon task's output in `run`'s fused pass: a file's findings, plus
-/// (when that file has a `metrics.file_scan_summaries` entry) the index of
-/// that entry alongside the `FileLanguageLines` row derived from the same
-/// lowering.
-type PerFileScan = (Vec<RuleFinding>, Option<(usize, FileLanguageLines)>);
-
 pub fn run(
     parsed_files: &[ParsedFile],
     metrics: &MetricsResult,
@@ -116,6 +110,12 @@ pub fn run(
         incomplete: metrics.incomplete,
     }
 }
+
+/// One rayon task's output in `run`'s fused pass: a file's findings, plus
+/// (when that file has a `metrics.file_scan_summaries` entry) the index of
+/// that entry alongside the `FileLanguageLines` row derived from the same
+/// lowering.
+type PerFileScan = (Vec<RuleFinding>, Option<(usize, FileLanguageLines)>);
 
 /// `find_findings`'s and `run`'s shared sort: `relative_path` then
 /// `start_line` then `rule_id`, for a deterministic result regardless of
