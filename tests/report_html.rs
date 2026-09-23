@@ -101,9 +101,14 @@ fn test_html_escapes_source_excerpts_and_paths() {
     assert_eq!(skipped.reason, "user_exclude");
 
     // `build_skipped_files` sorts by relative_path (mod.rs:373): excluding
-    // every `.js` file skips several of them plus Broken.java's own parse
-    // failure, a real multi-element list on which an unsorted order is
-    // observably different, not an equivalent mutant.
+    // every `.js` file skips several of them, a real multi-element list on
+    // which an unsorted order is observably different, not an equivalent
+    // mutant. (WS-6 declared delta: `Broken.java` used to add a
+    // `parse_syntax_error` entry to this same list -- it salvage-parses now
+    // and no longer appears in `skipped_files` at all, so it no longer
+    // contributes an element here; the sortedness check needs no other
+    // repair, an unsorted order stays observably different regardless of
+    // this list's length.)
     let observed_relative_paths: Vec<_> = excluded_output
         .report
         .skipped_files

@@ -179,9 +179,36 @@ fn test_unparsed_files_excluded_from_denominator_and_marked_incomplete() {
         .iter()
         .find(|summary| summary.relative_path == Path::new("broken/Good.java"))
         .expect("Good.java should have parsed and been scanned");
+
+    // WS-6 declared delta: `Broken.java` used to be dropped wholesale (never
+    // parsed, never lowered, contributing nothing anywhere), so it never
+    // reached `file_scan_summaries` at all. Salvage means it is now lowered
+    // like any other file -- its one callable (`method`) intersects the
+    // damage and is pruned to an empty IR node (fail-closed, contributing
+    // no executable lines of its own), but D12's per-file scanned-line count
+    // is unconditioned on callable boundaries (`metrics::scan_file`'s own
+    // doc comment) and still walks whatever survives pruning around it: the
+    // class wrapper's own lines. `broken_summary.scanned_lines` documents
+    // that contribution directly rather than pinning a bare "+2".
+    let broken_summary = metrics_result
+        .file_scan_summaries
+        .iter()
+        .find(|summary| summary.relative_path == Path::new("broken/Broken.java"))
+        .expect("Broken.java should still reach the metrics stage under salvage");
+    assert!(
+        metrics_result
+            .callables
+            .iter()
+            .all(|callable| callable.relative_path != Path::new("broken/Broken.java")),
+        "Broken.java's one callable intersects the damage and must stay unmeasured: {:?}",
+        metrics_result.callables
+    );
     assert_eq!(
-        rules_result.verbosity.overall.scanned_lines, good_summary.scanned_lines,
-        "the broken file must not contribute to the denominator"
+        rules_result.verbosity.overall.scanned_lines,
+        good_summary.scanned_lines + broken_summary.scanned_lines,
+        "the denominator is the sum of every salvage-parsed file's own scanned lines, \
+         not just Good.java's -- Broken.java's damaged callable itself still \
+         contributes none of its own (fail-closed), only its enclosing class wrapper's"
     );
 }
 

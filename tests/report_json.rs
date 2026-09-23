@@ -163,15 +163,19 @@ fn test_json_report_contains_every_required_section() {
         "a scan inside a git work tree publishes the D6 dirty flag"
     );
 
-    // Skipped files.
+    // Skipped files. WS-6 declared delta: `Broken.java` salvage-parses now
+    // (its damage is IR-level, entity-scoped) instead of being dropped
+    // wholesale, so it no longer appears in `skipped_files` at all --
+    // `incomplete` still tracks it via `parse_failures`, asserted in
+    // `test_incomplete_marker_set_on_parse_failure` below.
     let skipped = value["skipped_files"]
         .as_array()
         .expect("skipped_files array");
     assert!(
-        skipped
+        !skipped
             .iter()
             .any(|file| file["reason"] == "parse_syntax_error"),
-        "Broken.java should be recorded with its parse-failure reason: {skipped:?}"
+        "a syntax-error file salvage-parses now and must not be listed as skipped: {skipped:?}"
     );
 
     // Assumptions-mandated adaptation label (non-equivalence disclosure).
@@ -284,13 +288,19 @@ fn test_incomplete_marker_set_on_parse_failure() {
         "Broken.java's syntax error should mark the report incomplete"
     );
 
-    let broken = output
-        .report
-        .skipped_files
-        .iter()
-        .find(|file| file.relative_path == Path::new("src/Broken.java"))
-        .expect("Broken.java should be listed as skipped");
-    assert_eq!(broken.reason, "parse_syntax_error");
+    // WS-6 declared delta: salvage means `Broken.java` is no longer a
+    // whole-file skip -- it still marks the scan incomplete (asserted
+    // above) via `parse_failures`, but it must not also appear in
+    // `skipped_files` (that would double-report the same residual damage).
+    assert!(
+        !output
+            .report
+            .skipped_files
+            .iter()
+            .any(|file| file.relative_path == Path::new("src/Broken.java")),
+        "Broken.java salvage-parses now and must not be listed as skipped: {:?}",
+        output.report.skipped_files
+    );
 }
 
 #[test]

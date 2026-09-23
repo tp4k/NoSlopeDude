@@ -425,7 +425,16 @@ fn test_unparseable_file_is_skipped_and_marks_incomplete() {
         language: LanguageFamily::JsTs,
     }];
     let (parsed, failures) = parse::parse_all(&root, &files);
-    assert!(parsed.is_empty(), "expected no successfully parsed files");
+    // WS-6 declared delta: salvage (`nsd-plan-final.md`'s salvage row) means
+    // a syntax-error file still produces a `ParsedFile` alongside its
+    // `ParseFailure` -- it is no longer dropped wholesale, only its damaged
+    // entities are excluded downstream. `failures` still carries the
+    // `SyntaxError` entry (unchanged below), so `incomplete` still flips.
+    assert_eq!(
+        parsed.len(),
+        1,
+        "salvage still hands the file to later stages"
+    );
     assert_eq!(failures.len(), 1);
     assert_eq!(failures[0].relative_path, PathBuf::from("broken/Broken.ts"));
     assert_eq!(failures[0].reason, ParseFailureReason::SyntaxError);
