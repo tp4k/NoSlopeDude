@@ -101,6 +101,16 @@ impl CommitSnapshot {
     pub fn read(&self, repo: &Repository, entry: &Entry) -> Result<Option<Vec<u8>>, GitError> {
         read_blob_source(repo, entry)
     }
+
+    /// A symlink entry's target bytes (D24: WS-2's diff seam); `Ok(None)`
+    /// for any other kind.
+    pub fn link_target(
+        &self,
+        repo: &Repository,
+        entry: &Entry,
+    ) -> Result<Option<Vec<u8>>, GitError> {
+        read_blob_link_target(repo, entry)
+    }
 }
 
 /// A snapshot of the Git index (`--staged`'s candidate, D5's "index bytes
@@ -157,6 +167,16 @@ impl IndexSnapshot {
     pub fn read(&self, repo: &Repository, entry: &Entry) -> Result<Option<Vec<u8>>, GitError> {
         read_blob_source(repo, entry)
     }
+
+    /// A symlink entry's target bytes (D24: WS-2's diff seam); `Ok(None)`
+    /// for any other kind.
+    pub fn link_target(
+        &self,
+        repo: &Repository,
+        entry: &Entry,
+    ) -> Result<Option<Vec<u8>>, GitError> {
+        read_blob_link_target(repo, entry)
+    }
 }
 
 /// A snapshot of the worktree: the index (D5) overlaid with on-disk
@@ -187,7 +207,8 @@ impl WorktreeSnapshot {
             let full_path = repo_path_to_fs(&workdir, entry.path.as_bytes());
             match fs::symlink_metadata(&full_path) {
                 Ok(metadata) => {
-                    if let Some(refreshed) = refresh_from_disk(&entry.path, &metadata, entry.kind)?
+                    if let Some(refreshed) =
+                        refresh_from_disk(&entry.path, &metadata, entry.kind, entry.oid)?
                     {
                         by_path.insert(entry.path.clone(), refreshed);
                     }
@@ -237,6 +258,30 @@ impl WorktreeSnapshot {
             return Ok(None);
         }
         Ok(Some(buf))
+    }
+
+    /// A symlink entry's target bytes, read fresh from disk (D24: WS-2's
+    /// diff seam); `Ok(None)` for any other kind.
+    pub fn link_target(
+        &self,
+        repo: &Repository,
+        entry: &Entry,
+    ) -> Result<Option<Vec<u8>>, GitError> {
+        if entry.kind != EntryKind::Symlink {
+            return Ok(None);
+        }
+        let workdir = worktree_dir(repo)?;
+        let full_path = repo_path_to_fs(&workdir, entry.path.as_bytes());
+        let target = fs::read_link(&full_path).map_err(|err| {
+            GitError::new(
+                CODE_SNAPSHOT_UNAVAILABLE,
+                format!(
+                    "cannot read symlink target for {}: {err}",
+                    entry.path.render()
+                ),
+            )
+        })?;
+        Ok(Some(os_str_bytes(target.as_os_str())))
     }
 }
 
@@ -288,6 +333,22 @@ fn read_blob_source(repo: &Repository, entry: &Entry) -> Result<Option<Vec<u8>>,
         return Ok(None);
     }
     if entry.size > SOURCE_CEILING_BYTES {
+        return Ok(None);
+    }
+    let Some(oid) = entry.oid else {
+        return Ok(None);
+    };
+    let blob = repo
+        .find_blob(oid)
+        .map_err(|err| wrap_git_error("cannot read blob", &err))?;
+    Ok(Some(blob.content().to_vec()))
+}
+
+/// A `Symlink` entry's target bytes for `Commit`/`Index` (the blob content
+/// itself, since Git stores a symlink's target as its blob); `Ok(None)`
+/// for any other kind.
+fn read_blob_link_target(repo: &Repository, entry: &Entry) -> Result<Option<Vec<u8>>, GitError> {
+    if entry.kind != EntryKind::Symlink {
         return Ok(None);
     }
     let Some(oid) = entry.oid else {
@@ -368,13 +429,16 @@ fn refresh_from_disk(
     path: &RepoPath,
     metadata: &fs::Metadata,
     original_kind: EntryKind,
+    original_oid: Option<Oid>,
 ) -> Result<Option<Entry>, GitError> {
     if metadata.is_dir() {
         if original_kind == EntryKind::Submodule {
+            // D24: keep the index's gitlink OID (WS-2's diff seam needs
+            // it), rather than dropping it to `None`.
             return Ok(Some(Entry {
                 path: path.clone(),
                 kind: EntryKind::Submodule,
-                oid: None,
+                oid: original_oid,
                 size: 0,
             }));
         }
