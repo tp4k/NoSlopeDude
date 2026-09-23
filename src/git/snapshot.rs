@@ -401,11 +401,20 @@ fn walk_tree(
 }
 
 /// Joins a repository-relative byte path onto `workdir` for a filesystem
-/// access. On-disk names are always valid UTF-8 in practice (D23: APFS
-/// rejects non-UTF-8 file names), so a lossy conversion never loses bytes
-/// for a real filesystem path; it is only ever exercised on paths built
-/// straight from `std::fs::read_dir`, never on the non-UTF-8 tree/index
-/// fixtures.
+/// access. A tracked path can carry non-UTF-8 bytes (an attacker-controlled
+/// blob path, or any byte a filesystem other than the one running this
+/// check will accept), and a lossy conversion would silently alias it to
+/// whatever real file happens to share the escaped name. On unix, the path
+/// is rebuilt from its exact bytes via `OsStr::from_bytes`, so no byte is
+/// ever substituted. Only on a platform without a byte-oriented `OsStr`
+/// does this fall back to a lossy conversion.
+#[cfg(unix)]
+fn repo_path_to_fs(workdir: &Path, path: &[u8]) -> PathBuf {
+    use std::os::unix::ffi::OsStrExt;
+    workdir.join(std::ffi::OsStr::from_bytes(path))
+}
+
+#[cfg(not(unix))]
 fn repo_path_to_fs(workdir: &Path, path: &[u8]) -> PathBuf {
     workdir.join(String::from_utf8_lossy(path).as_ref())
 }
