@@ -250,3 +250,76 @@ pub fn is_in_catch_body(node: &IrNode) -> bool {
 pub fn is_clear_of_damage(span: Span, damage: &[DamageSpan]) -> bool {
     !damage.iter().any(|entry| span.intersects(entry.span))
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn span(start_byte: u32, end_byte: u32) -> Span {
+        Span {
+            start_byte,
+            end_byte,
+            start_line: 1,
+            end_line: 1,
+        }
+    }
+
+    #[test]
+    fn test_two_overlapping_non_empty_spans_intersect() {
+        assert!(span(0, 10).intersects(span(5, 15)));
+        assert!(span(5, 15).intersects(span(0, 10)));
+    }
+
+    #[test]
+    fn test_two_disjoint_non_empty_spans_do_not_intersect() {
+        assert!(
+            !span(0, 5).intersects(span(5, 10)),
+            "touching at one boundary byte is not overlap for two non-empty spans"
+        );
+        assert!(!span(0, 5).intersects(span(10, 15)));
+    }
+
+    /// The regression repro (WS-6 round 3, security MEDIUM): a truncated
+    /// file's `MISSING "}"` is a zero-width span sitting exactly at its
+    /// enclosing callable's own `end_byte`.
+    #[test]
+    fn test_a_zero_width_span_at_the_others_end_byte_intersects() {
+        assert!(span(0, 10).intersects(span(10, 10)));
+        assert!(span(10, 10).intersects(span(0, 10)));
+    }
+
+    #[test]
+    fn test_a_zero_width_span_at_the_others_start_byte_intersects() {
+        assert!(span(10, 20).intersects(span(10, 10)));
+        assert!(span(10, 10).intersects(span(10, 20)));
+    }
+
+    #[test]
+    fn test_a_zero_width_span_strictly_outside_does_not_intersect() {
+        assert!(!span(0, 10).intersects(span(20, 20)));
+        assert!(!span(20, 20).intersects(span(0, 10)));
+    }
+
+    #[test]
+    fn test_two_zero_width_spans_at_the_same_position_intersect() {
+        assert!(span(5, 5).intersects(span(5, 5)));
+    }
+
+    #[test]
+    fn test_two_zero_width_spans_at_different_positions_do_not_intersect() {
+        assert!(!span(5, 5).intersects(span(6, 6)));
+    }
+
+    #[test]
+    fn test_is_clear_of_damage_is_true_with_no_damage() {
+        assert!(is_clear_of_damage(span(0, 10), &[]));
+    }
+
+    #[test]
+    fn test_is_clear_of_damage_is_false_when_a_zero_width_damage_sits_at_the_boundary() {
+        let damage = [DamageSpan {
+            kind: DamageKind::Unclassified,
+            span: span(10, 10),
+        }];
+        assert!(!is_clear_of_damage(span(0, 10), &damage));
+    }
+}

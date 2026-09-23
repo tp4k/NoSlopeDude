@@ -788,4 +788,54 @@ mod tests {
         assert_eq!(a_tokens[0], b_tokens[0]);
         assert_ne!(a_tokens[1], b_tokens[1]);
     }
+    /// WS-6 round 3 (security MEDIUM: bare/stray damage escaping pruning
+    /// entirely, finding (c)): a damage span that sits outside every
+    /// callable and block -- `build_ir`'s classifier never calls it a
+    /// callable or block, so the entity-level exclusion path in
+    /// `lower_file` never sees it as an entity to exclude -- must still be
+    /// redacted from the tree via `redact_targets`' bare-damage union
+    /// (every `damage_out` span, not just excluded entities' own spans), so
+    /// no analyzer that walks `ir_file.root` unconditionally (metrics' own
+    /// file-level `scanned_lines`, `clones::run`, `rules::run`) can ever
+    /// reach a node whose own span carries damage. The surrounding clean
+    /// callable is unaffected: it survives in `ir_file.callables`, and none
+    /// of its own nodes fail `is_clear_of_damage`.
+    #[test]
+    fn test_stray_damage_outside_any_callable_or_block_is_excluded_from_every_analyzer() {
+        let source = "export function safe(x) {\n  return x;\n}\n\n)));\n".to_string();
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
+            .expect("set_language");
+        let tree = parser.parse(&source, None).expect("parse");
+        let parsed = ParsedFile {
+            relative_path: PathBuf::from("stray.ts"),
+            language: LanguageFamily::JsTs,
+            source,
+            tree,
+        };
+
+        let ir_file = lower_file(&parsed);
+        assert!(
+            !ir_file.damage.is_empty(),
+            "expected at least one damage span from the trailing `)));`"
+        );
+        assert!(
+            ir_file.callables.iter().any(|callable| callable.name.contains("safe")),
+            "expected the clean `safe` callable to survive: {:?}",
+            ir_file.callables
+        );
+
+        let mut nodes = Vec::new();
+        collect_ir_nodes(&ir_file.root, &mut nodes);
+        for node in nodes {
+            if node.executable || node.is_clone_statement {
+                assert!(
+                    is_clear_of_damage(node.span, &ir_file.damage),
+                    "expected every executable/clone-candidate node to be damage-clear: {:?}",
+                    node.span
+                );
+            }
+        }
+    }
 }

@@ -322,6 +322,167 @@ fn test_report_json_gains_no_new_top_level_field() {
     );
 }
 
+/// WS-6 round 3 (security HIGH: a clean entity nested inside a damaged
+/// outer entity survived in `metrics.callables` despite its own `IrNode`
+/// subtree being wiped by pruning, publishing a bogus `cc:1,sloc:0`):
+/// `broken`'s parameter list is truncated by a missing `)` (Java: a
+/// `@Nullable` varargs annotation the grammar cannot place; TS: an
+/// unterminated `formal_parameters`), so `broken` itself is excluded, and
+/// its nested-but-otherwise-clean callable (`clean`'s lambda / arrow
+/// function) must be excluded too -- it is physically inside `broken`'s own
+/// span, so `prune_damage` wipes its `IrNode` subtree regardless of
+/// whether the nested callable's *own* span happens to avoid the damage.
+#[test]
+fn test_a_clean_callable_nested_inside_a_damaged_outer_callable_is_not_measured() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        dir.path().join("Nested.java"),
+        "class Nested {\n    void broken(Class<?> @Nullable ... cs) {\n        Runnable clean = () -> {\n            System.out.println(\"hi\");\n        };\n    }\n}\n",
+    )
+    .expect("write Nested.java");
+    fs::write(
+        dir.path().join("nested.ts"),
+        "export function broken(a: number {\n  const f = () => { return 1; };\n  return a;\n}\n",
+    )
+    .expect("write nested.ts");
+
+    let (_output_dir, output) = run_scan(dir.path(), |_| {});
+
+    for relative_path in ["Nested.java", "nested.ts"] {
+        let path = Path::new(relative_path);
+        assert!(
+            !output
+                .metrics
+                .callables
+                .iter()
+                .any(|callable| callable.relative_path == path),
+            "{relative_path}: no callable (outer damaged or nested-clean) should survive: {:?}",
+            output.metrics.callables
+        );
+    }
+}
+
+/// WS-6 round 3 (security HIGH: `Span::intersects`'s old strict two-sided
+/// `<` test never registered a zero-width `MISSING` span sitting exactly at
+/// an entity's own `end_byte` as intersecting it): a truncated file (its
+/// last `}` is simply absent) has its one callable's own span end exactly
+/// where the `MISSING` token is inserted, so this fixture is only salvaged
+/// correctly once that boundary case is fixed.
+#[test]
+fn test_a_callable_truncated_at_its_own_end_byte_is_not_measured() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        dir.path().join("truncated.ts"),
+        "export function broken(a: number) {\n  return a;\n",
+    )
+    .expect("write truncated.ts");
+
+    let (_output_dir, output) = run_scan(dir.path(), |_| {});
+
+    assert!(
+        !output
+            .metrics
+            .callables
+            .iter()
+            .any(|callable| callable.relative_path == Path::new("truncated.ts")),
+        "the truncated callable must not be measured: {:?}",
+        output.metrics.callables
+    );
+}
+
+/// WS-6 round 3 (security MEDIUM: bare/stray damage sitting outside every
+/// callable and block used to escape pruning entirely): a syntax error that
+/// sits after a clean function, not inside any callable or block, must
+/// still be redacted -- the surrounding clean callable is measured with its
+/// real body, and the file's `scanned_lines` count reflects only that
+/// clean body, never anything derived from the stray damage.
+#[test]
+fn test_stray_damage_outside_any_callable_or_block_does_not_reach_metrics() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        dir.path().join("stray.ts"),
+        "export function safe(x) {\n  return x;\n}\n\n)));\n",
+    )
+    .expect("write stray.ts");
+
+    let (_output_dir, output) = run_scan(dir.path(), |_| {});
+
+    let safe = output
+        .metrics
+        .callables
+        .iter()
+        .find(|callable| callable.relative_path == Path::new("stray.ts"))
+        .unwrap_or_else(|| {
+            panic!(
+                "expected the clean `safe` callable to be measured: {:?}",
+                output.metrics.callables
+            )
+        });
+    assert_eq!(safe.name, "safe");
+    assert_eq!(safe.cc, 1, "no branching inside `safe`'s body: {safe:?}");
+    assert_eq!(
+        safe.sloc, 1,
+        "safe's body is exactly the one `return x;` line: {safe:?}"
+    );
+
+    let summary = output
+        .metrics
+        .file_scan_summaries
+        .iter()
+        .find(|summary| summary.relative_path == Path::new("stray.ts"))
+        .unwrap_or_else(|| {
+            panic!(
+                "expected a file scan summary for stray.ts: {:?}",
+                output.metrics.file_scan_summaries
+            )
+        });
+    assert_eq!(
+        summary.scanned_lines, 2,
+        "only safe's own two executable-leaf-bearing lines (its `x` parameter and its \
+         `return x;` body) should ever count toward scanned_lines -- the stray `)));` \
+         contributes none: {summary:?}"
+    );
+}
+
+/// WS-6 round 3 (perf HIGH: `prune_damage`'s old `Vec<Span>` membership
+/// test made the redact step `Θ(nodes × pruned-entities)`, and the old
+/// per-entity `is_clear_of_damage` scan made entity classification
+/// `Θ(entities × damage)`): 1,200 independently-damaged callables in one
+/// file must still salvage in bounded wall-clock time, not the quadratic
+/// blowup either bound would produce -- the same shape and assertion style
+/// as `tests/metrics.rs::test_deeply_nested_file_does_not_abort_the_scan`.
+#[test]
+fn test_many_damaged_callables_do_not_cause_a_quadratic_blowup() {
+    const DAMAGED_CALLABLE_COUNT: usize = 1_200;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut source = String::new();
+    for index in 0..DAMAGED_CALLABLE_COUNT {
+        source.push_str(&format!(
+            "export function broken{index}(a: number {{\n  return a;\n}}\n"
+        ));
+    }
+    fs::write(dir.path().join("ManyBroken.ts"), source).expect("write ManyBroken.ts");
+
+    let started = std::time::Instant::now();
+    let (_output_dir, output) = run_scan(dir.path(), |_| {});
+    let elapsed = started.elapsed();
+
+    assert!(
+        elapsed < std::time::Duration::from_secs(20),
+        "salvage over {DAMAGED_CALLABLE_COUNT} damaged callables took {elapsed:?}, expected a bounded, non-quadratic run"
+    );
+    assert!(
+        !output
+            .metrics
+            .callables
+            .iter()
+            .any(|callable| callable.relative_path == Path::new("ManyBroken.ts")),
+        "every one of the {DAMAGED_CALLABLE_COUNT} callables is damaged and must stay unmeasured: {:?}",
+        output.metrics.callables
+    );
+}
+
 /// The reverse direction from `test_incomplete_is_driven_only_by_analysis_failure`:
 /// an analysis-failure skip (an unreadable subdirectory, discovered but
 /// never even reaching parsing) still flips `incomplete` to `true`, with no
