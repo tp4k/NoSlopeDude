@@ -413,6 +413,29 @@ fn test_malformed_corpus_report_matches_its_baseline_with_declared_deltas_only()
     );
 }
 
+/// Every fixture under `tests/fixtures/` must land in exactly one of the two
+/// corpora -- a fixture excluded from both (as `salvage/Mixed.java` and
+/// `salvage/Mixed.ts` were, via `CLEAN_CORPUS_ONLY_EXCLUSIONS`) is covered by
+/// neither corpus test, silently. If a future fixture needs excluding from
+/// the clean corpus, `MALFORMED_CORPUS_SOURCES` is the only sanctioned way
+/// to do that -- growing it, or capturing a fresh malformed baseline -- not
+/// a third exclusion list.
+#[test]
+fn test_every_fixture_is_in_exactly_one_corpus() {
+    let clean = clean_corpus_sources();
+    let malformed = malformed_corpus_sources();
+    let all = all_fixture_relative_paths();
+    assert_eq!(
+        clean.len() + malformed.len(),
+        all.len(),
+        "clean_corpus_sources() ({}) + malformed_corpus_sources() ({}) must equal \
+         all_fixture_relative_paths() ({}) -- a fixture fell outside both corpora",
+        clean.len(),
+        malformed.len(),
+        all.len()
+    );
+}
+
 #[test]
 fn test_comparator_detects_a_perturbed_baseline() {
     let baseline = read_baseline(CLEAN_BASELINE_PATH);
