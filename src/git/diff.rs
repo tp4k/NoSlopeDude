@@ -267,17 +267,21 @@ pub fn diff_commit_to_worktree(
     // so asking `find_similar` to score it fails with `NotFound` and, left
     // uncaught, degrades every *other* rename in the same diff. Each such
     // path is pulled out of the diff before rename detection runs and
-    // resolved afterwards by comparing its own already-known real object id
-    // against each remaining Deleted delta's old-side blob id - the only
-    // similarity an unwritten blob can ever prove.
-    let mut over_ceiling: Vec<(RepoPath, EntryKind, Oid)> = Vec::new();
+    // resolved afterwards: an Added entry by comparing its own already-known
+    // real object id against each remaining Deleted delta's old-side blob id
+    // (the only similarity an unwritten blob can ever prove); a Typechange
+    // entry has no such old-side blob to compare (its old side may be a
+    // symlink or gitlink), so it is matched by path instead, against the
+    // same-path Deleted delta the re-diff below produces.
+    let mut over_ceiling: Vec<(RepoPath, EntryKind, Oid, Delta)> = Vec::new();
 
     if needs_phase_two {
         // Phase 2: write only the Added / blob-Typechange worktree entries'
         // content, so `find_similar` can inflate them against the old-side
         // blobs already sitting in the real repository's own ODB.
         for delta in diff.deltas() {
-            if !matches!(delta.status(), Delta::Added | Delta::Typechange) {
+            let status = delta.status();
+            if !matches!(status, Delta::Added | Delta::Typechange) {
                 continue;
             }
             let path = repo_path_from_file(&delta.new_file())?;
@@ -315,7 +319,7 @@ pub fn diff_commit_to_worktree(
                             )
                         })?
                         .id;
-                    over_ceiling.push((path, kind, oid));
+                    over_ceiling.push((path, kind, oid, status));
                 }
             }
         }
@@ -324,7 +328,7 @@ pub fn diff_commit_to_worktree(
             // Never let `find_similar` see these paths at all: removing
             // them keeps the lookup it performs for every other candidate
             // from ever hitting the unwritten blob.
-            for (path, _, _) in &over_ceiling {
+            for (path, _, _, _) in &over_ceiling {
                 index
                     .remove_path(&bytes_to_path(path.as_bytes()))
                     .map_err(|err| {
@@ -348,7 +352,37 @@ pub fn diff_commit_to_worktree(
     let mut changes =
         changes_from_diff(&mut diff, base_tree.as_ref(), NewFileSource::Index(&index))?;
 
-    for (path, kind, oid) in over_ceiling {
+    for (path, kind, oid, status) in over_ceiling {
+        if status == Delta::Typechange {
+            // A Typechange's old side is never a blob (row 1's comment
+            // above), so it cannot be matched by object id like an Added
+            // entry: match the same-path Deleted delta the re-diff above
+            // produced instead, and rebuild the one Typechange it replaces.
+            let idx = changes
+                .iter()
+                .position(
+                    |change| matches!(change, Change::Deleted { path: from, .. } if *from == path),
+                )
+                .ok_or_else(|| {
+                    GitError::new(
+                        CODE_SNAPSHOT_UNAVAILABLE,
+                        format!(
+                            "an over-ceiling typechange entry {} has no matching deleted old side",
+                            path.render()
+                        ),
+                    )
+                })?;
+            let Change::Deleted { kind: old_kind, .. } = changes.remove(idx) else {
+                unreachable!("matched idx only ever indexes a Change::Deleted");
+            };
+            changes.push(Change::Typechange {
+                path,
+                old_kind,
+                new_kind: kind,
+            });
+            continue;
+        }
+
         let matched_idx = changes.iter().position(|change| match change {
             Change::Deleted {
                 path: from,
