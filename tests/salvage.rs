@@ -390,6 +390,63 @@ fn test_a_callable_truncated_at_its_own_end_byte_is_not_measured() {
     );
 }
 
+/// WS-6 round 4 (security HIGH regression from round 3's `35508d9`): an
+/// entity whose own span sits *inside* a bare damage span -- no enclosing
+/// damaged callable/block between them -- used to stay measured, since the
+/// old sweep only opened an excluded ancestor for a callable/block entry,
+/// never for a damage-span entry, while `redact_targets` unconditionally
+/// wiped the same span's `IrNode` subtree anyway; `find_ir_subtree` then
+/// missed and `metrics::fallback_ir_body` published a fabricated `cc:1
+/// sloc:0` measurement. Java: `alpha`'s own signature and body are clean,
+/// but the enclosing class's own closing `}` is missing, so the parser's
+/// error recovery cannot commit to a `class_declaration` at all -- it wraps
+/// the class name, the whole (otherwise clean) `alpha` method, and the
+/// trailing unterminated `beta` in one top-level `ERROR`/damage span, with no
+/// `class_declaration`/block ancestor of `alpha` surviving between them at
+/// all. TS: `alpha` sits clean at module scope, but a second, malformed
+/// function's body (`{{{};`) produces the same bare-damage-contains-entity
+/// shape (the whole `export_statement` wrapping `alpha` ends up inside one
+/// top-level `ERROR` span too).
+#[test]
+fn test_a_clean_callable_contained_in_a_bare_damage_span_is_not_measured() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        dir.path().join("Alpha.java"),
+        "class Alpha { int alpha(int a) { if (a > 0) { return a + 1; } return 0; } int beta(i",
+    )
+    .expect("write Alpha.java");
+    fs::write(
+        dir.path().join("alpha.ts"),
+        "export function alpha(a: number) { return a + 1; }\nfunction beta() {\n  {{{};\n",
+    )
+    .expect("write alpha.ts");
+
+    let (_output_dir, output) = run_scan(dir.path(), |_| {});
+
+    for relative_path in ["Alpha.java", "alpha.ts"] {
+        let path = Path::new(relative_path);
+        assert!(
+            !output
+                .metrics
+                .callables
+                .iter()
+                .any(|callable| callable.relative_path == path && callable.name.contains("alpha")),
+            "{relative_path}: alpha sits inside a bare damage span and must not be measured: {:?}",
+            output.metrics.callables
+        );
+        assert!(
+            !output
+                .metrics
+                .callables
+                .iter()
+                .any(|callable| callable.relative_path == path && callable.sloc == 0),
+            "{relative_path}: no callable should ever be published with a fabricated cc:1 \
+             sloc:0 measurement: {:?}",
+            output.metrics.callables
+        );
+    }
+}
+
 /// WS-6 round 3 (security MEDIUM: bare/stray damage sitting outside every
 /// callable and block used to escape pruning entirely): a syntax error that
 /// sits after a clean function, not inside any callable or block, must
