@@ -505,6 +505,50 @@ mod tests {
         tokens
     }
 
+    /// Every clone-candidate statement's own document-order start line, for
+    /// one fixture file under `tests/fixtures/` -- test-only support for
+    /// `test_clone_candidate_containers_cover_every_container_arm` below.
+    fn clone_statement_start_lines(path: &str, language: LanguageFamily) -> Vec<u32> {
+        let full_path = fixtures_root().join(path);
+        let (grammar, _) = grammar_language(&full_path).expect("known fixture extension");
+        let source = fs::read_to_string(&full_path).expect("read fixture");
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_language(grammar))
+            .expect("set_language");
+        let tree = parser.parse(&source, None).expect("parse");
+        let mut lines = Vec::new();
+        for_each_descendant(tree.root_node(), |node| {
+            if is_clone_statement(node, language) {
+                lines.push(node.start_position().row as u32 + 1);
+            }
+        });
+        lines
+    }
+
+    /// HIGH-2 (round 2): the clone-floor container set was unproven -- the
+    /// suite stayed green with `"constructor_body"`/
+    /// `"switch_block_statement_group"` (Java) or `"program"`/
+    /// `switch_case`/`switch_default` body field (JS/TS) deleted from
+    /// `is_clone_statement`. `ContainerSet.java` exercises a constructor
+    /// whose `constructor_body` holds exactly two statements and a `switch`
+    /// whose `switch_block_statement_group` holds exactly two non-label
+    /// statements (plus the `switch_statement` itself, a `block`-parented
+    /// clone candidate already covered elsewhere); `container_set.ts`
+    /// exercises two top-level `program` statements plus a top-level
+    /// function declaration, and a `switch_case` whose `body` field holds
+    /// two statements. Asserts document-order start lines, not just a count,
+    /// so a swapped container arm (matching the wrong parent kind) cannot
+    /// hide behind a coincidentally-equal total.
+    #[test]
+    fn test_clone_candidate_containers_cover_every_container_arm() {
+        let java_lines = clone_statement_start_lines("ir/ContainerSet.java", LanguageFamily::Java);
+        assert_eq!(java_lines, vec![3, 4, 8, 10, 11], "{java_lines:?}");
+
+        let ts_lines = clone_statement_start_lines("ir/container_set.ts", LanguageFamily::JsTs);
+        assert_eq!(ts_lines, vec![1, 2, 4, 5, 7, 8], "{ts_lines:?}");
+    }
+
     /// The clone-token floor's equality is discriminating, not vacuous
     /// (`nsd-plan-final.md` M0b item 4): two fixtures whose two-statement
     /// clone body agrees on the first statement and differs on the second
