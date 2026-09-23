@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use git2::{
-    Delta, Diff, DiffDelta, DiffFile, DiffFindOptions, DiffLineType, DiffOptions, ErrorCode, Index,
+    Delta, Diff, DiffDelta, DiffFile, DiffFindOptions, DiffLineType, DiffOptions, Index,
     IndexEntry, IndexTime, ObjectType, Oid, Patch, Repository, Tree,
 };
 
@@ -26,6 +26,10 @@ const MODE_SUBMODULE: u32 = 0o160000;
 /// detected for regular files only (A6); `nsd-plan-final.md` *Amendments*
 /// A6 and `nsd-plan-implementation.md` *Policy and analysis behavior*.
 pub const RENAME_THRESHOLD: u16 = 50;
+
+/// libgit2 scores an exact-OID match at 100 without reading any content
+/// (`similarity_measure`, vendored `diff_tform.c`).
+const EXACT_RENAME_SIMILARITY: u16 = 100;
 
 /// libgit2's own built-in rename-candidate cap (`DEFAULT_RENAME_LIMIT`,
 /// vendored `diff_tform.c:244`), set explicitly so a user's
@@ -256,18 +260,17 @@ pub fn diff_commit_to_worktree(
 
     // Gate: any Deleted/Typechange delta whose *old* side is a blob is a
     // possible rename source, so Phase 2 must run.
-    let mut needs_phase_two = false;
-    for delta in diff.deltas() {
-        if !matches!(delta.status(), Delta::Deleted | Delta::Typechange) {
-            continue;
-        }
-        let path = repo_path_from_file(&delta.old_file())?;
-        let kind = old_side_kind(base_tree.as_ref(), path.as_bytes())?;
-        if matches!(kind, EntryKind::Regular | EntryKind::Executable) {
-            needs_phase_two = true;
-            break;
-        }
-    }
+    let needs_phase_two = has_blob_rename_source(&diff, base_tree.as_ref())?;
+
+    // Row 1: an Added/Typechange worktree entry whose real bytes were never
+    // read (over SOURCE_CEILING_BYTES) can never be written to the mempack,
+    // so asking `find_similar` to score it fails with `NotFound` and, left
+    // uncaught, degrades every *other* rename in the same diff. Each such
+    // path is pulled out of the diff before rename detection runs and
+    // resolved afterwards by comparing its own already-known real object id
+    // against each remaining Deleted delta's old-side blob id - the only
+    // similarity an unwritten blob can ever prove.
+    let mut over_ceiling: Vec<(RepoPath, EntryKind, Oid)> = Vec::new();
 
     if needs_phase_two {
         // Phase 2: write only the Added / blob-Typechange worktree entries'
@@ -287,21 +290,88 @@ pub fn diff_commit_to_worktree(
             };
             let entry = &worktree.entries[entry_idx];
             // `worktree.read` itself reports `None` for an over-ceiling
-            // entry (row 1's guarantee): skip it exactly as Phase 1 did,
-            // relying on the same already-inserted real, unwritten oid.
-            if let Some(content) = worktree.read(repo, entry)? {
-                candidate_repo.blob(&content).map_err(|err| {
+            // entry (row 1's guarantee): relying on the same already-
+            // inserted real, unwritten oid to reconcile it after rename
+            // detection instead of writing it.
+            match worktree.read(repo, entry)? {
+                Some(content) => {
+                    candidate_repo.blob(&content).map_err(|err| {
+                        wrap_git_error(
+                            "cannot write worktree file content to the in-memory object store",
+                            &err,
+                        )
+                    })?;
+                }
+                None => {
+                    let oid = index
+                        .get_path(&bytes_to_path(path.as_bytes()), 0)
+                        .ok_or_else(|| {
+                            GitError::new(
+                                CODE_SNAPSHOT_UNAVAILABLE,
+                                format!(
+                                    "an over-ceiling worktree entry {} is missing from its own in-memory index",
+                                    path.render()
+                                ),
+                            )
+                        })?
+                        .id;
+                    over_ceiling.push((path, kind, oid));
+                }
+            }
+        }
+
+        if !over_ceiling.is_empty() {
+            // Never let `find_similar` see these paths at all: removing
+            // them keeps the lookup it performs for every other candidate
+            // from ever hitting the unwritten blob.
+            for (path, _, _) in &over_ceiling {
+                index
+                    .remove_path(&bytes_to_path(path.as_bytes()))
+                    .map_err(|err| {
+                        wrap_git_error(
+                            "cannot remove an over-ceiling entry before rename detection",
+                            &err,
+                        )
+                    })?;
+            }
+            diff = candidate_repo
+                .diff_tree_to_index(base_tree.as_ref(), Some(&index), Some(&mut opts))
+                .map_err(|err| {
                     wrap_git_error(
-                        "cannot write worktree file content to the in-memory object store",
+                        "cannot re-diff commit to worktree without over-ceiling adds",
                         &err,
                     )
                 })?;
-            }
         }
     }
 
     let mut changes =
         changes_from_diff(&mut diff, base_tree.as_ref(), NewFileSource::Index(&index))?;
+
+    for (path, kind, oid) in over_ceiling {
+        let matched_idx = changes.iter().position(|change| match change {
+            Change::Deleted {
+                path: from,
+                kind: EntryKind::Regular | EntryKind::Executable,
+            } => old_side_blob_oid(base_tree.as_ref(), from.as_bytes()) == Some(oid),
+            _ => false,
+        });
+        match matched_idx {
+            Some(idx) => {
+                let Change::Deleted { path: from, .. } = changes.remove(idx) else {
+                    unreachable!("matched_idx only ever indexes a Change::Deleted");
+                };
+                changes.push(Change::Renamed {
+                    from,
+                    to: path,
+                    kind,
+                    similarity: EXACT_RENAME_SIMILARITY,
+                });
+            }
+            None => changes.push(Change::Added { path, kind }),
+        }
+    }
+
     changes.append(&mut nested_checkouts);
     changes.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
     Ok(changes)
@@ -443,6 +513,35 @@ fn resolve_tree<'repo>(
     Ok(Some(tree))
 }
 
+/// Whether `diff` has any Deleted/Typechange delta whose *old* side is a
+/// regular/executable blob - the only shape `find_similar` can ever match a
+/// rename candidate against, so Phase 2 of `diff_commit_to_worktree` only
+/// needs to run when this is true.
+fn has_blob_rename_source(diff: &Diff<'_>, base_tree: Option<&Tree<'_>>) -> Result<bool, GitError> {
+    for delta in diff.deltas() {
+        if !matches!(delta.status(), Delta::Deleted | Delta::Typechange) {
+            continue;
+        }
+        let path = repo_path_from_file(&delta.old_file())?;
+        let kind = old_side_kind(base_tree, path.as_bytes())?;
+        if matches!(kind, EntryKind::Regular | EntryKind::Executable) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// The old-side blob's object id at `path_bytes` in `base_tree`, or `None`
+/// when `base_tree` is absent (D2's unborn-HEAD case) or has no entry
+/// there. Used by row 1's over-ceiling exact-rename reconciliation, which
+/// can only ever prove a match by object id.
+fn old_side_blob_oid(base_tree: Option<&Tree<'_>>, path_bytes: &[u8]) -> Option<Oid> {
+    base_tree?
+        .get_path(&bytes_to_path(path_bytes))
+        .ok()
+        .map(|entry| entry.id())
+}
+
 /// Where a diff's new-side file mode is read from: a candidate commit's
 /// tree (`diff_commit_to_commit`), or a Git index (`diff_commit_to_index`,
 /// `diff_commit_to_worktree`). The old side is always a tree (or "no tree"
@@ -464,34 +563,8 @@ fn changes_from_diff(
         .renames(true)
         .rename_threshold(RENAME_THRESHOLD)
         .rename_limit(DEFAULT_RENAME_LIMIT);
-    if let Err(err) = diff.find_similar(Some(&mut find_opts)) {
-        // A rename candidate whose content was never written to any ODB
-        // (row 1: an over-SOURCE_CEILING_BYTES worktree entry) cannot be
-        // looked up when libgit2 scores similarity. Contrary to the
-        // comment at libgit2's `diff_tform.c:506-508` ("if lookup fails,
-        // just skip this item"), the lookup's error code is only cleared
-        // from the thread-local error message there, not reset to success,
-        // so it still propagates out of `find_similar` as `NotFound`
-        // (confirmed empirically, not merely by reading the comment).
-        // Retry once, comparing only exact OIDs: an over-ceiling entry's
-        // real content is never written anywhere for libgit2 to compare
-        // byte-for-byte, so it can only ever exact-match itself unchanged,
-        // never a near-duplicate. That degrades the crash into the
-        // conservative Deleted+Added the ceiling exists to guarantee,
-        // without weakening non-exact rename detection for any entry that
-        // does not hit this path.
-        if err.code() != ErrorCode::NotFound {
-            return Err(wrap_git_error("cannot detect renamed files", &err));
-        }
-        let mut exact_only_opts = DiffFindOptions::new();
-        exact_only_opts
-            .renames(true)
-            .rename_threshold(RENAME_THRESHOLD)
-            .rename_limit(DEFAULT_RENAME_LIMIT)
-            .exact_match_only(true);
-        diff.find_similar(Some(&mut exact_only_opts))
-            .map_err(|err| wrap_git_error("cannot detect renamed files", &err))?;
-    }
+    diff.find_similar(Some(&mut find_opts))
+        .map_err(|err| wrap_git_error("cannot detect renamed files", &err))?;
 
     let mut changes = Vec::new();
     for (idx, delta) in diff.deltas().enumerate() {
