@@ -391,7 +391,11 @@ fn named_non_comment_children<'tree>(
 /// literal) text preserved verbatim. Cached once per container, per perf
 /// row 1, so a multi-statement run's fingerprint is built by feeding these
 /// in sequence, never by re-walking the statements it already covers.
-fn normalized_statement_tokens(statement: Node, language: LanguageFamily, source: &str) -> String {
+pub(crate) fn normalized_statement_tokens(
+    statement: Node,
+    language: LanguageFamily,
+    source: &str,
+) -> String {
     let mut tokens = String::new();
     for_each_descendant(statement, |node| {
         if node.child_count() != 0 || is_comment_kind(node.kind(), language) {
