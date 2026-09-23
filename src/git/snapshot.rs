@@ -535,14 +535,17 @@ fn walk_worktree(
         child_bytes.extend_from_slice(&name_bytes);
         let relative = RepoPath::from_bytes(child_bytes.clone());
 
-        let metadata = dir_entry.metadata().map_err(|err| {
+        // `file_type()` decides is_dir/is_symlink without an extra stat
+        // (perf LOW): a tracked file's full `metadata()` is fetched only
+        // below, after the `tracked.contains` skip rules it out.
+        let file_type = dir_entry.file_type().map_err(|err| {
             GitError::new(
                 CODE_SNAPSHOT_UNAVAILABLE,
                 format!("cannot stat worktree entry {}: {err}", relative.render()),
             )
         })?;
 
-        if metadata.is_dir() {
+        if file_type.is_dir() {
             if tracked.contains(&relative) {
                 continue; // A tracked submodule directory: already handled by the overlay step.
             }
@@ -566,7 +569,7 @@ fn walk_worktree(
         if tracked.contains(&relative) {
             continue; // Already handled by the overlay step.
         }
-        if metadata.file_type().is_symlink() {
+        if file_type.is_symlink() {
             by_path.insert(
                 relative.clone(),
                 Entry {
@@ -578,6 +581,12 @@ fn walk_worktree(
             );
             continue;
         }
+        let metadata = dir_entry.metadata().map_err(|err| {
+            GitError::new(
+                CODE_SNAPSHOT_UNAVAILABLE,
+                format!("cannot stat worktree entry {}: {err}", relative.render()),
+            )
+        })?;
         let kind = if is_executable(&metadata) {
             EntryKind::Executable
         } else {
