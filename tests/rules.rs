@@ -203,6 +203,63 @@ fn test_terminator_predicate_is_language_agnostic() {
     assert!(!ir::is_terminator(node_starting_at_line(&js_ir, 1))); // function m(a) {
 }
 
+/// D22 IR retarget: `find_unreachable_after_return` keys on the narrower
+/// `ir::is_unreachable_terminator` (`Return`/`Throw`/`Break`), not the wider
+/// `ir::is_terminator` (which also matches `continue`) — the pre-IR rule's
+/// own `UNREACHABLE_TERMINATOR_KINDS` excluded `continue_statement` too
+/// (`687a86b:src/rules/mod.rs:57-58`), so a loop body's `continue;` must not
+/// make the statement after it "unreachable".
+#[test]
+fn test_continue_in_a_loop_does_not_trigger_unreachable_after_return() {
+    let source = "class C {\n    void m() {\n        for (int i = 0; i < 3; i++) {\n            continue;\n            doThing();\n        }\n    }\n}\n";
+    let files = vec![parse_inline_java(source)];
+    let findings = rules::find_findings(&files);
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f.rule_id == rules::JAVA_UNREACHABLE_AFTER_RETURN),
+        "continue must not be treated as an unreachable-after-return terminator: {findings:?}"
+    );
+}
+
+/// D22 IR retarget: `always_returns` keys on the narrower
+/// `ir::is_return_or_throw` (`Return`/`Throw`), not the wider
+/// `ir::is_terminator` (which also matches `break`) — the pre-IR rule's own
+/// `always_returns` matched only `return_statement`/`throw_statement` too
+/// (`687a86b:src/rules/mod.rs:386-394`), so an `if`'s consequence ending in a
+/// bare `break;` inside a loop must not make its sibling `else` "redundant".
+#[test]
+fn test_break_terminated_consequence_does_not_trigger_redundant_else() {
+    let source = "class C {\n    void m() {\n        for (int i = 0; i < 3; i++) {\n            if (i == 2) {\n                break;\n            } else {\n                doThing();\n            }\n        }\n    }\n}\n";
+    let files = vec![parse_inline_java(source)];
+    let findings = rules::find_findings(&files);
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f.rule_id == rules::JAVA_REDUNDANT_ELSE_AFTER_RETURN),
+        "a break-terminated consequence must not make its else 'redundant': {findings:?}"
+    );
+}
+
+/// D22 IR retarget: `is_unreachable_container`'s `is_root` disjunct is the
+/// one case block-membership alone cannot see — JS/TS's top-level `program`
+/// node is never itself a `{ }` block. A program-level `throw` must still
+/// make the statements after it fire `*-UNREACHABLE-AFTER-RETURN`, exactly
+/// as it did pre-retarget when `"program"` was named explicitly in the
+/// grammar-string container list.
+#[test]
+fn test_unreachable_after_return_fires_at_the_jsts_program_top_level() {
+    let source = "throw new Error(\"boom\");\nconsole.log(\"a\");\nconsole.log(\"b\");\n";
+    let files = vec![parse_inline_jsts(source)];
+    let findings = rules::find_findings(&files);
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    let hit = &findings[0];
+    assert_eq!(hit.rule_id, rules::JSTS_UNREACHABLE_AFTER_RETURN);
+    assert_eq!(hit.start_line, 2, "{hit:?}");
+    assert_eq!(hit.end_line, 3, "{hit:?}");
+    assert_eq!(hit.flagged_lines, vec![2, 3], "{hit:?}");
+}
+
 /// D22 IR retarget: `*-EMPTY-CATCH` reads `IrNode::in_catch_body` (the IR's
 /// own catch-body-membership flag), not a `catch_clause` grammar string —
 /// a genuinely empty catch still fires, and a catch holding only a comment
