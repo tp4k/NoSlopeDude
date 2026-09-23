@@ -67,6 +67,10 @@ fn clear_rename_detected() {
                 "expected similarity >= {}, got {similarity}",
                 diff::RENAME_THRESHOLD
             );
+            assert!(
+                *similarity < 100,
+                "one line of 40 differs, so this cannot be an exact match: got {similarity}"
+            );
         }
         other => panic!("expected a Renamed change, got {other:?}"),
     }
@@ -571,6 +575,58 @@ fn worktree_over_ceiling_add_does_not_disable_renames_elsewhere() {
             );
         }
         other => panic!("expected a Renamed change among {changes:?}, got {other:?}"),
+    }
+}
+
+#[test]
+fn worktree_content_rename_detected() {
+    let (dir, repo) = common::init_repo();
+    let base_oid = common::commit_entries(
+        &repo,
+        &[(
+            b"src/Old.java".to_vec(),
+            MODE_REGULAR,
+            numbered_lines(40, None),
+        )],
+    );
+    sync_index_to_commit(&repo, base_oid);
+    // `commit_entries` never writes to disk (D23): `src/Old.java` is already
+    // an on-disk deletion; write only the renamed replacement.
+    std::fs::create_dir_all(dir.path().join("src")).expect("create src/ directory");
+    std::fs::write(
+        dir.path().join("src/New.java"),
+        numbered_lines(40, Some((20, "line 20 EDITED"))),
+    )
+    .expect("write the renamed replacement");
+
+    let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let odb_objects_before = count_odb_objects(&repo);
+    let changes = diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree)
+        .expect("diff commit to worktree");
+    let odb_objects_after = count_odb_objects(&repo);
+
+    assert_eq!(
+        odb_objects_before, odb_objects_after,
+        "a content rename must not write to the ODB (D24)"
+    );
+    assert_eq!(changes.len(), 1, "expected exactly one change: {changes:?}");
+    match &changes[0] {
+        Change::Renamed {
+            from,
+            to,
+            kind,
+            similarity,
+        } => {
+            assert_eq!(from.as_bytes(), b"src/Old.java");
+            assert_eq!(to.as_bytes(), b"src/New.java");
+            assert_eq!(*kind, EntryKind::Regular);
+            assert!(
+                *similarity >= diff::RENAME_THRESHOLD,
+                "expected similarity >= {}, got {similarity}",
+                diff::RENAME_THRESHOLD
+            );
+        }
+        other => panic!("expected a Renamed change, got {other:?}"),
     }
 }
 
