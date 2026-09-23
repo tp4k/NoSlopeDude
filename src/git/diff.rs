@@ -580,25 +580,10 @@ fn changes_from_diff(
     Ok(changes)
 }
 
-/// A `Delta::Renamed` delta's similarity score (D8's `RENAME_THRESHOLD`),
-/// read from libgit2's own `delta->similarity` (`diff_print.c:393`, the
-/// "similarity index NN%" patch header). git2 does not expose that field
-/// through any typed accessor: `DiffDelta::similarity()` exists in git2's
-/// own source but stays commented out, "expose when diffs are more
-/// exposed" (`diff.rs:520-523`).
-///
-/// This builds a `Patch` for just `idx`, never `Diff::print` or
-/// `Diff::foreach`: both call `git_diff_foreach`, which unconditionally
-/// runs full patch generation - and so a full blob read - for *every*
-/// delta in the diff (`diff.c:139-147`), not only the renamed one. On
-/// `diff_commit_to_worktree` that reintroduces exactly the crash rows 1-2
-/// remove: confirmed empirically (not assumed) by a NotFound while
-/// building the previous version's whole-diff `Diff::print(Raw, ..)` call,
-/// on an over-SOURCE_CEILING_BYTES entry that was never even part of any
-/// rename. A single delta's own patch needs only that delta's two blobs,
-/// which a `Renamed` status already proves are both readable: content-
-/// based `find_similar` had to read them to score the match in the first
-/// place, and an exact-match rename compares only OIDs, at 100% (D5/D2).
+/// `Delta::Renamed`'s similarity (D8): libgit2's own `delta->similarity`
+/// via a per-delta `Patch`, never `Diff::print`/`Diff::foreach` (both build
+/// a full patch, and so a full blob read, for every delta). Both blobs are
+/// size-capped by `diff_options`'s `max_size` (`SOURCE_CEILING_BYTES`).
 fn rename_similarity(diff: &Diff<'_>, idx: usize) -> Result<u16, GitError> {
     let mut patch = Patch::from_diff(diff, idx)
         .map_err(|err| wrap_git_error("cannot build a patch for a renamed delta", &err))?
@@ -611,18 +596,20 @@ fn rename_similarity(diff: &Diff<'_>, idx: usize) -> Result<u16, GitError> {
     let text = patch
         .to_buf()
         .map_err(|err| wrap_git_error("cannot render a renamed delta's patch text", &err))?;
-    let text = std::str::from_utf8(&text).map_err(|_| {
-        GitError::new(
-            CODE_SNAPSHOT_UNAVAILABLE,
-            "a renamed delta's patch text is not valid UTF-8",
-        )
-    })?;
-    for line in text.lines() {
-        if let Some(rest) = line.strip_prefix("similarity index ") {
-            if let Some(digits) = rest.strip_suffix('%') {
-                if let Ok(similarity) = digits.parse::<u16>() {
-                    return Ok(similarity);
-                }
+    // Scanned as bytes, never decoded whole (the hunk lines are raw file
+    // content, so a text-classified rename can still hold invalid UTF-8):
+    // only the digits after the header prefix need to be valid UTF-8.
+    const SIMILARITY_PREFIX: &[u8] = b"similarity index ";
+    for line in text.split(|&byte| byte == b'\n') {
+        let Some(rest) = line.strip_prefix(SIMILARITY_PREFIX) else {
+            continue;
+        };
+        let Some(digits) = rest.strip_suffix(b"%") else {
+            continue;
+        };
+        if let Ok(digits) = std::str::from_utf8(digits) {
+            if let Ok(similarity) = digits.parse::<u16>() {
+                return Ok(similarity);
             }
         }
     }
