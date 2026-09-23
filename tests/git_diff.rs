@@ -613,6 +613,48 @@ fn worktree_over_ceiling_exact_rename_is_renamed() {
     }
 }
 
+/// An over-ceiling worktree entry whose base side is a Typechange (not an
+/// Added) must stay one `Typechange` delta, never split into a same-path
+/// `Deleted` + `Added` pair by the over-ceiling reconciliation.
+#[test]
+fn worktree_over_ceiling_typechange_stays_typechange() {
+    let (dir, repo) = common::init_repo();
+    let base_oid = common::commit_entries(
+        &repo,
+        &[
+            (b"gone.ts".to_vec(), MODE_REGULAR, b"x\n".to_vec()),
+            (b"link".to_vec(), MODE_SYMLINK, b"target.ts".to_vec()),
+        ],
+    );
+    sync_index_to_commit(&repo, base_oid);
+    // `commit_entries` never writes to disk (D23): `gone.ts` is already an
+    // on-disk deletion. `link` becomes an over-ceiling regular file on disk,
+    // type-changed from its base symlink.
+    let over_ceiling = vec![b'e'; SOURCE_CEILING_BYTES as usize + 1];
+    std::fs::write(dir.path().join("link"), &over_ceiling)
+        .expect("write link as an over-ceiling regular file");
+
+    let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let changes = diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree)
+        .expect("diff commit to worktree");
+
+    assert_eq!(
+        changes,
+        vec![
+            Change::Deleted {
+                path: RepoPath::from_bytes(b"gone.ts".to_vec()),
+                kind: EntryKind::Regular,
+            },
+            Change::Typechange {
+                path: RepoPath::from_bytes(b"link".to_vec()),
+                old_kind: EntryKind::Symlink,
+                new_kind: EntryKind::Regular,
+            },
+        ],
+        "an over-ceiling typechange must stay one Typechange, not split into Deleted+Added: {changes:?}"
+    );
+}
+
 #[test]
 fn worktree_content_rename_detected() {
     let (dir, repo) = common::init_repo();
