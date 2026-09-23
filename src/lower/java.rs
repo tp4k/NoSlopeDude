@@ -149,10 +149,18 @@ fn is_catch_body_root(kind: &str, parent_kind: Option<&str>) -> bool {
 /// named, non-comment child of a `block`/`constructor_body`, or a
 /// `switch_block_statement_group`'s direct child other than its own
 /// `switch_label`. Takes the already-threaded `parent_kind` rather than
-/// calling `node.parent()` -- see `is_catch_body_root`'s doc comment.
-/// Production: its result is `IrNode::is_clone_statement`.
-pub(super) fn is_clone_statement(node: Node, kind: &str, parent_kind: Option<&str>) -> bool {
-    if !node.is_named() || is_comment_kind(kind, LanguageFamily::Java) {
+/// calling `node.parent()` -- see `is_catch_body_root`'s doc comment -- and
+/// the caller's own already-computed `is_named`/`is_comment` (see
+/// `classify`'s own doc comment: each is computed exactly once per node and
+/// threaded into every helper, rather than re-derived here). Production: its
+/// result is `IrNode::is_clone_statement`.
+pub(super) fn is_clone_statement(
+    kind: &str,
+    parent_kind: Option<&str>,
+    is_named: bool,
+    is_comment: bool,
+) -> bool {
+    if !is_named || is_comment {
         return false;
     }
     match parent_kind {
@@ -181,21 +189,26 @@ fn classify_damage(node: Node, parent_kind: Option<&str>) -> Option<DamageKind> 
 /// `parent` is the tree-sitter `Node` `src/lower/mod.rs`'s `build_ir` already
 /// holds for this node's parent (threaded down the traversal in a stack
 /// mirroring its own node stack), so nothing below this point calls
-/// `node.parent()`. `kind`/`parent_kind` are each computed exactly once here
-/// and threaded into every helper, rather than every helper re-deriving
-/// `node.kind()` (a strlen + full-UTF8-validate call) independently.
+/// `node.parent()`. `kind`/`parent_kind`/`is_named`/`is_comment` are each
+/// computed exactly once here and threaded into every helper, rather than
+/// every helper re-deriving `node.kind()` (a strlen + full-UTF8-validate
+/// call), `node.is_named()` or `is_comment_kind` independently.
 pub(super) fn classify(node: Node, source: &str, parent: Option<Node>) -> Classification {
     let kind = node.kind();
     let parent_kind = parent.map(|parent| parent.kind());
+    let is_named = node.is_named();
+    let is_comment = is_comment_kind(kind, LanguageFamily::Java);
     Classification {
         decision: decision_kind(node, kind),
         terminator: terminator_kind(kind),
         in_block: parent_kind.is_some_and(is_block_kind),
         is_catch_body_root: is_catch_body_root(kind, parent_kind),
         damage: classify_damage(node, parent_kind),
-        is_clone_statement: is_clone_statement(node, kind, parent_kind),
+        is_clone_statement: is_clone_statement(kind, parent_kind, is_named, is_comment),
         is_hoisted_or_type_only: false,
         is_block: is_block_kind(kind),
         callable: callable_info(node, kind, parent, source),
+        is_comment,
+        is_named,
     }
 }

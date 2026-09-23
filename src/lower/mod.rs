@@ -16,6 +16,7 @@ use std::path::PathBuf;
 
 use tree_sitter::Node;
 
+#[cfg(test)]
 use crate::exec_lines::is_comment_kind;
 use crate::exec_lines::is_executable_leaf;
 use crate::ir::{
@@ -108,6 +109,13 @@ struct Classification {
     /// `test_deeply_nested_file_does_not_abort_the_scan` exists to catch).
     is_catch_body_root: bool,
     damage: Option<DamageKind>,
+    /// `exec_lines::is_comment_kind`, computed once here and reused for
+    /// `IrNode::is_comment` and (with `is_named` below) `is_clone_statement`'s
+    /// own guard, rather than re-derived by both readers.
+    is_comment: bool,
+    /// Tree-sitter's own `node.is_named()`, computed once here for the same
+    /// reason as `is_comment` above.
+    is_named: bool,
     /// D15: this node is a direct statement child of one of the six
     /// clone-candidate containers.
     is_clone_statement: bool,
@@ -138,10 +146,11 @@ fn classify(
     language: LanguageFamily,
     source: &str,
     parent: Option<Node>,
+    field_name: Option<&'static str>,
 ) -> Classification {
     match language {
         LanguageFamily::Java => java::classify(node, source, parent),
-        LanguageFamily::JsTs => jsts::classify(node, source, parent),
+        LanguageFamily::JsTs => jsts::classify(node, source, parent, field_name),
     }
 }
 
@@ -153,17 +162,28 @@ fn classify(
 /// `IrNode::is_clone_statement`); this dispatcher itself stays test-only --
 /// it exists only for the tests below, which need to enumerate the
 /// tree-sitter nodes they compare the lowering's tokens against, and derives
-/// `node.parent()` directly (rather than threading it, as `build_ir` does
-/// for the production path) since nothing here runs against the
-/// deep-nesting perf fixture.
+/// `node.parent()` and its own field name by scanning directly (rather than
+/// threading them, as `build_ir` does for the production path) since nothing
+/// here runs against the deep-nesting perf fixture.
 #[cfg(test)]
 fn is_clone_statement(node: Node, language: LanguageFamily) -> bool {
     let kind = node.kind();
     let parent = node.parent();
     let parent_kind = parent.map(|parent| parent.kind());
+    let is_named = node.is_named();
+    let is_comment = is_comment_kind(kind, language);
     match language {
-        LanguageFamily::Java => java::is_clone_statement(node, kind, parent_kind),
-        LanguageFamily::JsTs => jsts::is_clone_statement(node, kind, parent, parent_kind),
+        LanguageFamily::Java => java::is_clone_statement(kind, parent_kind, is_named, is_comment),
+        LanguageFamily::JsTs => {
+            let field_name = parent.and_then(|parent| {
+                let mut cursor = parent.walk();
+                let index = parent
+                    .children(&mut cursor)
+                    .position(|child| child.id() == node.id())?;
+                parent.field_name_for_child(index as u32)
+            });
+            jsts::is_clone_statement(parent_kind, field_name, is_named, is_comment)
+        }
     }
 }
 
@@ -258,12 +278,13 @@ fn build_ir(
     let open = |node: Node,
                 parent: Option<Node>,
                 parent_in_catch_body: bool,
+                field_name: Option<&'static str>,
                 damage_out: &mut Vec<DamageSpan>,
                 callables_out: &mut Vec<IrCallable>,
                 blocks_out: &mut Vec<IrBlock>|
      -> (IrNode, bool) {
         let span = Span::from_node(node);
-        let classification = classify(node, language, source, parent);
+        let classification = classify(node, language, source, parent, field_name);
         if let Some(kind) = classification.damage {
             damage_out.push(DamageSpan { kind, span });
         }
@@ -288,8 +309,8 @@ fn build_ir(
             terminator: classification.terminator,
             in_block: classification.in_block,
             in_catch_body,
-            is_comment: is_comment_kind(node.kind(), language),
-            is_named: node.is_named(),
+            is_comment: classification.is_comment,
+            is_named: classification.is_named,
             is_clone_statement: classification.is_clone_statement,
             is_hoisted_or_type_only: classification.is_hoisted_or_type_only,
             children: Vec::with_capacity(node.child_count()),
@@ -298,8 +319,15 @@ fn build_ir(
     };
 
     let mut cursor = root.walk();
-    let (root_node, root_in_catch_body) =
-        open(root, None, false, damage_out, callables_out, blocks_out);
+    let (root_node, root_in_catch_body) = open(
+        root,
+        None,
+        false,
+        None,
+        damage_out,
+        callables_out,
+        blocks_out,
+    );
     let mut stack: Vec<IrNode> = vec![root_node];
     // Mirrors `stack`'s depth exactly: `catch_flags[i]` is `stack[i]`'s own
     // `in_catch_body` flag, so a child node reads its parent's flag in O(1)
@@ -314,10 +342,12 @@ fn build_ir(
         if cursor.goto_first_child() {
             let parent_in_catch_body = *catch_flags.last().unwrap_or(&false);
             let parent = *parents.last().unwrap_or(&root);
+            let field_name = cursor.field_name();
             let (node, in_catch_body) = open(
                 cursor.node(),
                 Some(parent),
                 parent_in_catch_body,
+                field_name,
                 damage_out,
                 callables_out,
                 blocks_out,
@@ -340,10 +370,12 @@ fn build_ir(
             if cursor.goto_next_sibling() {
                 let parent_in_catch_body = *catch_flags.last().unwrap_or(&false);
                 let parent_node = *parents.last().unwrap_or(&root);
+                let field_name = cursor.field_name();
                 let (node, in_catch_body) = open(
                     cursor.node(),
                     Some(parent_node),
                     parent_in_catch_body,
+                    field_name,
                     damage_out,
                     callables_out,
                     blocks_out,
