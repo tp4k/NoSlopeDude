@@ -370,3 +370,236 @@ fn test_clone_scan_matches_hand_computation() {
         output_twenty.clones.groups
     );
 }
+
+/// WS-4: the IR retarget's own floor. `--include-tests` over the *whole*
+/// `tests/fixtures/clones` tree (every fixture the suite above exercises
+/// individually, plus the two `src/`-rooted pairs `test_clone_scan_matches_
+/// hand_computation` covers) exercises every container kind and every
+/// per-test scenario at once; this pins the exact group set the pre-IR
+/// implementation produced for that same scan (captured before the
+/// retarget, at `min_clone_lines: 10`), so the retarget in `src/clones/
+/// mod.rs` is checked against it rather than against a re-derivation of
+/// the same numbers.
+#[test]
+fn test_ir_backed_groups_match_the_pre_ir_groups_on_every_fixture() {
+    let root = fixture_root();
+    let settings = ScanSettings {
+        output: std::env::temp_dir(),
+        include_tests: true,
+        exclude: Vec::new(),
+        min_clone_lines: 10,
+    };
+    let output = pipeline::run(root.to_str().expect("utf-8 fixture root"), settings)
+        .expect("pipeline run over the whole clones fixture tree");
+
+    // (path, start_line, end_line, source_lines) for one location.
+    type ExpectedLocation<'a> = (&'a str, usize, usize, usize);
+    // (redundant_lines, language, locations), in the exact canonical group
+    // and location order `clones::run` produces.
+    type ExpectedGroup<'a> = (usize, LanguageFamily, Vec<ExpectedLocation<'a>>);
+    let expected: Vec<ExpectedGroup> = vec![
+        (
+            72,
+            JAVA,
+            vec![
+                ("__tests__/DupIdenticalA.java", 3, 14, 12),
+                ("__tests__/DupIdenticalB.java", 4, 18, 12),
+                ("__tests__/IdentifierA.java", 3, 14, 12),
+                ("__tests__/SubsumedA.java", 3, 14, 12),
+                ("__tests__/SubsumedB.java", 3, 14, 12),
+                ("src/main/java/DupA.java", 5, 16, 12),
+                ("src/main/java/DupB.java", 6, 17, 12),
+            ],
+        ),
+        (
+            20,
+            JAVA,
+            vec![
+                ("__tests__/RankGX1.java", 3, 12, 10),
+                ("__tests__/RankGX2.java", 3, 12, 10),
+                ("__tests__/RankGX3.java", 3, 12, 10),
+            ],
+        ),
+        (
+            20,
+            JS_TS,
+            vec![
+                ("__tests__/SwitchDupJs.js", 4, 13, 10),
+                ("__tests__/SwitchDupJs.js", 15, 24, 10),
+                ("__tests__/SwitchDupJs.js", 26, 35, 10),
+            ],
+        ),
+        (
+            15,
+            JAVA,
+            vec![
+                ("__tests__/RankGY1.java", 3, 17, 15),
+                ("__tests__/RankGY2.java", 3, 17, 15),
+            ],
+        ),
+        (
+            15,
+            JAVA,
+            vec![
+                ("__tests__/SubsumedA.java", 3, 17, 15),
+                ("__tests__/SubsumedB.java", 3, 17, 15),
+            ],
+        ),
+        (
+            12,
+            JAVA,
+            vec![
+                ("__tests__/ConstructorBodyA.java", 3, 14, 12),
+                ("__tests__/ConstructorBodyB.java", 3, 14, 12),
+            ],
+        ),
+        (
+            12,
+            JS_TS,
+            vec![
+                ("__tests__/ModuleLevelA.js", 1, 12, 12),
+                ("__tests__/ModuleLevelB.js", 1, 12, 12),
+            ],
+        ),
+        (
+            12,
+            JAVA,
+            vec![
+                ("__tests__/PartialRun.java", 4, 15, 12),
+                ("__tests__/PartialRun.java", 21, 32, 12),
+            ],
+        ),
+        (
+            10,
+            JAVA,
+            vec![
+                ("__tests__/SwitchDupJava.java", 5, 14, 10),
+                ("__tests__/SwitchDupJava.java", 16, 25, 10),
+            ],
+        ),
+        (
+            10,
+            JS_TS,
+            vec![("src/widgetA.js", 2, 11, 10), ("src/widgetB.js", 2, 11, 10)],
+        ),
+    ];
+
+    assert_eq!(
+        output.clones.groups.len(),
+        expected.len(),
+        "{:?}",
+        output.clones.groups
+    );
+    for (group, (redundant_lines, language, locations)) in
+        output.clones.groups.iter().zip(expected.iter())
+    {
+        assert_eq!(group.redundant_lines, *redundant_lines, "{:?}", group);
+        assert_eq!(group.language, *language, "{:?}", group);
+        assert_eq!(group.locations.len(), locations.len(), "{:?}", group);
+        for (location, (path, start_line, end_line, source_lines)) in
+            group.locations.iter().zip(locations.iter())
+        {
+            assert_eq!(location.relative_path, PathBuf::from(*path), "{:?}", group);
+            assert_eq!(location.start_line, *start_line, "{:?}", group);
+            assert_eq!(location.end_line, *end_line, "{:?}", group);
+            assert_eq!(location.source_lines, *source_lines, "{:?}", group);
+        }
+    }
+}
+
+/// WS-4: the container/statement enumeration is now `ir::IrNode::
+/// is_clone_statement` membership, not a `(language, "<grammar kind>")`
+/// match — this exercises all six D15 containers (Java `block`,
+/// `constructor_body`, `switch_block_statement_group`; JS/TS
+/// `statement_block`, `program`, `switch_case`/`switch_default` body) and
+/// pins that each still yields the exact statement list (as the group it
+/// forms) the pre-retarget container match produced.
+#[test]
+fn test_statement_children_come_from_ir_block_membership() {
+    // Java `block` (a method body).
+    let block_files = parsed_files(&[
+        ("__tests__/DupIdenticalA.java", JAVA),
+        ("__tests__/DupIdenticalB.java", JAVA),
+    ]);
+    let block_result = clones::run(&block_files, 10);
+    assert_eq!(block_result.groups.len(), 1, "{:?}", block_result.groups);
+    assert_eq!(block_result.groups[0].locations.len(), 2);
+
+    // Java `constructor_body`.
+    let constructor_files = parsed_files(&[
+        ("__tests__/ConstructorBodyA.java", JAVA),
+        ("__tests__/ConstructorBodyB.java", JAVA),
+    ]);
+    let constructor_result = clones::run(&constructor_files, 10);
+    assert_eq!(
+        constructor_result.groups.len(),
+        1,
+        "{:?}",
+        constructor_result.groups
+    );
+    assert_eq!(constructor_result.groups[0].locations.len(), 2);
+
+    // Java `switch_block_statement_group`.
+    let java_switch_files = parsed_files(&[("__tests__/SwitchDupJava.java", JAVA)]);
+    let java_switch_result = clones::run(&java_switch_files, 10);
+    assert_eq!(
+        java_switch_result.groups.len(),
+        1,
+        "{:?}",
+        java_switch_result.groups
+    );
+    assert_eq!(java_switch_result.groups[0].locations.len(), 2);
+
+    // JS/TS `statement_block` (a function body).
+    let statement_block_files =
+        parsed_files(&[("src/widgetA.js", JS_TS), ("src/widgetB.js", JS_TS)]);
+    let statement_block_result = clones::run(&statement_block_files, 10);
+    assert_eq!(
+        statement_block_result.groups.len(),
+        1,
+        "{:?}",
+        statement_block_result.groups
+    );
+    assert_eq!(statement_block_result.groups[0].locations.len(), 2);
+
+    // JS/TS top-level `program`.
+    let program_files = parsed_files(&[
+        ("__tests__/ModuleLevelA.js", JS_TS),
+        ("__tests__/ModuleLevelB.js", JS_TS),
+    ]);
+    let program_result = clones::run(&program_files, 10);
+    assert_eq!(
+        program_result.groups.len(),
+        1,
+        "{:?}",
+        program_result.groups
+    );
+    assert_eq!(program_result.groups[0].locations.len(), 2);
+
+    // JS/TS `switch_case`/`switch_default` body.
+    let js_switch_files = parsed_files(&[("__tests__/SwitchDupJs.js", JS_TS)]);
+    let js_switch_result = clones::run(&js_switch_files, 10);
+    assert_eq!(
+        js_switch_result.groups.len(),
+        1,
+        "{:?}",
+        js_switch_result.groups
+    );
+    assert_eq!(js_switch_result.groups[0].locations.len(), 3);
+}
+
+/// WS-4: the IR token stream `ir_statement_tokens` derives from is built
+/// fresh per `clones::run` call (no caching across calls), so its BLAKE3
+/// group key must be deterministic across two independent runs over the
+/// same input, not merely stable within one run.
+#[test]
+fn test_fingerprint_is_stable_across_two_runs_of_the_ir_path() {
+    let files = parsed_files(&[
+        ("__tests__/DupIdenticalA.java", JAVA),
+        ("__tests__/DupIdenticalB.java", JAVA),
+    ]);
+    let first = clones::run(&files, 10);
+    let second = clones::run(&files, 10);
+    assert_eq!(first.groups.len(), 1, "{:?}", first.groups);
+    assert_eq!(first.groups, second.groups);
+}
