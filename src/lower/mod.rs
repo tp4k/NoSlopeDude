@@ -799,6 +799,18 @@ mod tests {
         assert!(!files.is_empty(), "expected at least one fixture file");
 
         let mut compared = 0usize;
+        // WS-6 round 4 (code + security MEDIUM, merged: `compared > 0` alone
+        // is satisfiable by the clean fixtures alone, so re-inserting a skip
+        // on `tree.root_node().has_error()` after `parser.parse` would leave
+        // this test green while silently losing every damaged-tree
+        // comparison the round-3 rewrite exists to add). Counts a fixture
+        // toward `damaged_files` only once it both has a parse error *and*
+        // actually contributed at least one damage-clear comparison, so a
+        // reintroduced whole-file skip on `has_error()` -- which would zero
+        // every damaged fixture's own `compared_in_file` -- is caught here
+        // even though `compared` itself would still be positive from the
+        // clean fixtures.
+        let mut damaged_files = 0usize;
         for path in files {
             let Some((grammar, language)) = grammar_language(&path) else {
                 continue;
@@ -835,6 +847,7 @@ mod tests {
                 }
             });
 
+            let mut compared_in_file = 0usize;
             for statement in statements {
                 if !is_clear_of_damage(Span::from_node(statement), &damage) {
                     continue;
@@ -849,9 +862,17 @@ mod tests {
                     statement.start_position().row + 1
                 );
                 compared += 1;
+                compared_in_file += 1;
+            }
+            if tree.root_node().has_error() && compared_in_file > 0 {
+                damaged_files += 1;
             }
         }
         assert!(compared > 0, "expected at least one comparable statement");
+        assert!(
+            damaged_files > 0,
+            "expected at least one damaged fixture to contribute a damage-clear comparison"
+        );
     }
 
     /// The D11/SLOC requirement: the IR `executable` flag agrees with
@@ -869,6 +890,11 @@ mod tests {
         every_fixture_file(&fixtures_root(), &mut files);
 
         let mut checked = 0usize;
+        // See the sibling test's own `damaged_files` comment: same
+        // discrimination gap, same fix, one per fixture actually reached
+        // (has a parse error *and* contributed at least one damage-clear
+        // node comparison).
+        let mut damaged_files = 0usize;
         for path in files {
             let Some((grammar, language)) = grammar_language(&path) else {
                 continue;
@@ -904,6 +930,7 @@ mod tests {
             for_each_descendant(tree.root_node(), |node| ts_nodes.push(node));
 
             assert_eq!(ir_nodes.len(), ts_nodes.len(), "{}", path.display());
+            let mut checked_in_file = 0usize;
             for (ir_node, ts_node) in ir_nodes.iter().zip(ts_nodes.iter()) {
                 if !is_clear_of_damage(Span::from_node(*ts_node), &damage) {
                     continue;
@@ -917,9 +944,17 @@ mod tests {
                     ts_node.start_position().row + 1
                 );
                 checked += 1;
+                checked_in_file += 1;
+            }
+            if tree.root_node().has_error() && checked_in_file > 0 {
+                damaged_files += 1;
             }
         }
         assert!(checked > 0, "expected at least one node checked");
+        assert!(
+            damaged_files > 0,
+            "expected at least one damaged fixture to contribute a damage-clear comparison"
+        );
     }
 
     /// Pre-order collect of every `IrNode` in the tree the lowering
