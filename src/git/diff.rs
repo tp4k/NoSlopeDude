@@ -793,3 +793,108 @@ fn insert_index_entry(
         .add(&entry)
         .map_err(|err| wrap_git_error("cannot add an in-memory index entry", &err))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use git2::Signature;
+    use tempfile::TempDir;
+
+    fn init_repo() -> (TempDir, Repository) {
+        let dir = TempDir::new().expect("create a temp dir for the test repository");
+        let repo = Repository::init(dir.path()).expect("init the test repository");
+        (dir, repo)
+    }
+
+    /// Commits `entries` (raw path, raw mode, content) as a single flat
+    /// tree, returning the new commit's id.
+    fn commit_entries(repo: &Repository, entries: &[(&[u8], u32, &[u8])]) -> Oid {
+        let mut builder = repo.treebuilder(None).expect("create a tree builder");
+        for (path, mode, content) in entries {
+            let blob_oid = repo.blob(content).expect("write a blob");
+            builder
+                .insert(bytes_to_path(path), blob_oid, *mode as i32)
+                .expect("insert a tree entry");
+        }
+        let tree_oid = builder.write().expect("write the tree");
+        let tree = repo.find_tree(tree_oid).expect("find the built tree");
+        let signature = Signature::now("nsd test fixture", "fixture@example.invalid")
+            .expect("build a signature");
+        repo.commit(None, &signature, &signature, "fixture", &tree, &[])
+            .expect("commit the fixture tree")
+    }
+
+    /// An in-memory index (D24) reflecting `entries` (raw path, raw mode,
+    /// content used only to compute its size and blob id).
+    fn build_index(repo: &Repository, entries: &[(&[u8], u32, &[u8])]) -> Index {
+        let mut index = Index::new().expect("create an in-memory index");
+        for (path, mode, content) in entries {
+            let blob_oid = repo.blob(content).expect("write a blob");
+            let path = RepoPath::from_bytes(path.to_vec());
+            insert_index_entry(&mut index, &path, *mode, content.len() as u64, blob_oid)
+                .expect("insert an in-memory index entry");
+        }
+        index
+    }
+
+    #[test]
+    fn no_deleted_or_typechanged_blob_is_false() {
+        // (a) Base {a.ts}, index {a.ts modified, b.ts added}: a Modified
+        // and an Added delta, no Deleted/Typechange delta at all.
+        let (_dir, repo) = init_repo();
+        let base_oid = commit_entries(&repo, &[(b"a.ts", MODE_REGULAR, b"one\n")]);
+        let base_tree = repo.find_commit(base_oid).unwrap().tree().unwrap();
+        let index = build_index(
+            &repo,
+            &[
+                (b"a.ts", MODE_REGULAR, b"two\n"),
+                (b"b.ts", MODE_REGULAR, b"new\n"),
+            ],
+        );
+
+        let diff = repo
+            .diff_tree_to_index(Some(&base_tree), Some(&index), Some(&mut diff_options()))
+            .expect("diff tree to index");
+
+        assert!(!has_blob_rename_source(&diff, Some(&base_tree)).expect("gate check"));
+    }
+
+    #[test]
+    fn a_deleted_regular_blob_is_true() {
+        // (b) Base {a.ts, gone.ts}, index {a.ts}: gone.ts is a Deleted
+        // delta whose old side is a regular blob.
+        let (_dir, repo) = init_repo();
+        let base_oid = commit_entries(
+            &repo,
+            &[
+                (b"a.ts", MODE_REGULAR, b"one\n"),
+                (b"gone.ts", MODE_REGULAR, b"bye\n"),
+            ],
+        );
+        let base_tree = repo.find_commit(base_oid).unwrap().tree().unwrap();
+        let index = build_index(&repo, &[(b"a.ts", MODE_REGULAR, b"one\n")]);
+
+        let diff = repo
+            .diff_tree_to_index(Some(&base_tree), Some(&index), Some(&mut diff_options()))
+            .expect("diff tree to index");
+
+        assert!(has_blob_rename_source(&diff, Some(&base_tree)).expect("gate check"));
+    }
+
+    #[test]
+    fn a_deleted_symlink_is_false() {
+        // (c) Base {link (MODE_SYMLINK)}, index {}: link is a Deleted
+        // delta, but its old side is a symlink, not a regular/executable
+        // blob (find_similar can never match against it).
+        let (_dir, repo) = init_repo();
+        let base_oid = commit_entries(&repo, &[(b"link", MODE_SYMLINK, b"target.ts")]);
+        let base_tree = repo.find_commit(base_oid).unwrap().tree().unwrap();
+        let index = Index::new().expect("create an empty in-memory index");
+
+        let diff = repo
+            .diff_tree_to_index(Some(&base_tree), Some(&index), Some(&mut diff_options()))
+            .expect("diff tree to index");
+
+        assert!(!has_blob_rename_source(&diff, Some(&base_tree)).expect("gate check"));
+    }
+}
