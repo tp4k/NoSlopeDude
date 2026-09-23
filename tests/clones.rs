@@ -1,4 +1,5 @@
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use nsd::clones::{self, redundant_occurrences};
 use nsd::model::{DiscoveredFile, LanguageFamily, ScanSettings};
@@ -9,9 +10,8 @@ fn fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/clones")
 }
 
-/// Parses every `(relative path, language)` pair under `tests/fixtures/clones/`.
-fn parsed_files(paths: &[(&str, LanguageFamily)]) -> Vec<ParsedFile> {
-    let root = fixture_root();
+/// Parses every `(relative path, language)` pair under a given root.
+fn parsed_files_under(root: &Path, paths: &[(&str, LanguageFamily)]) -> Vec<ParsedFile> {
     let files: Vec<DiscoveredFile> = paths
         .iter()
         .map(|(path, language)| DiscoveredFile {
@@ -19,12 +19,17 @@ fn parsed_files(paths: &[(&str, LanguageFamily)]) -> Vec<ParsedFile> {
             language: *language,
         })
         .collect();
-    let (parsed, failures) = parse::parse_all(&root, &files);
+    let (parsed, failures) = parse::parse_all(root, &files);
     assert!(
         failures.is_empty(),
         "unexpected parse failures: {failures:?}"
     );
     parsed
+}
+
+/// Parses every `(relative path, language)` pair under `tests/fixtures/clones/`.
+fn parsed_files(paths: &[(&str, LanguageFamily)]) -> Vec<ParsedFile> {
+    parsed_files_under(&fixture_root(), paths)
 }
 
 const JAVA: LanguageFamily = LanguageFamily::Java;
@@ -602,4 +607,41 @@ fn test_fingerprint_is_stable_across_two_runs_of_the_ir_path() {
     let second = clones::run(&files, 10);
     assert_eq!(first.groups.len(), 1, "{:?}", first.groups);
     assert_eq!(first.groups, second.groups);
+}
+
+/// triage-ws4-r2.md row 1: `tree-sitter-javascript` 0.25.0 aliases
+/// `seq('static', /\s+/, 'get', /\s*\n/)` to the single anonymous kind
+/// `"static get"` (`grammar.js:1252`) — its own source text carries
+/// whatever internal whitespace and trailing newline the author wrote,
+/// unlike most anonymous tokens whose text *is* their `kind()`. Two
+/// copy-pasted blocks differing only in that token's internal spacing must
+/// still fingerprint identically. Written into a `tempfile::tempdir()`
+/// rather than under `tests/fixtures/clones/`, so this never retrips the
+/// neutrality gate's corpus membership the way WS-3 round 1's parity
+/// fixtures did.
+#[test]
+fn test_static_get_whitespace_does_not_break_the_group() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        dir.path().join("StaticGetA.js"),
+        "class Sample {\n  static get\n  value() {\n    return 1;\n  }\n}\n\nfunction helper() {\n  return 2;\n}\n",
+    )
+    .expect("write StaticGetA.js");
+    fs::write(
+        dir.path().join("StaticGetB.js"),
+        "class Sample {\n  static  get\n  value() {\n    return 1;\n  }\n}\n\nfunction helper() {\n  return 2;\n}\n",
+    )
+    .expect("write StaticGetB.js");
+    let files = parsed_files_under(
+        dir.path(),
+        &[("StaticGetA.js", JS_TS), ("StaticGetB.js", JS_TS)],
+    );
+    let result = clones::run(&files, 3);
+    assert_eq!(
+        result.groups.len(),
+        1,
+        "an anonymous leaf's internal whitespace must not change its normalized token: {:?}",
+        result.groups
+    );
+    assert_eq!(result.groups[0].locations.len(), 2, "{:?}", result.groups);
 }
