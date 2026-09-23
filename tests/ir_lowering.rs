@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use nsd::ir::{self, DamageKind, DecisionKind, IrNode};
 use nsd::lower;
+use nsd::metrics;
 use nsd::model::{DiscoveredFile, Grammar, LanguageFamily};
 use nsd::parse::{self, ParsedFile};
 
@@ -19,22 +20,25 @@ fn fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ir")
 }
 
-/// Parses every `(relative path, language)` pair under `tests/fixtures/ir/`
-/// via the production `parse::parse_all` path -- the same helper shape
+fn metrics_fixture_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/metrics")
+}
+
+fn clones_fixture_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/clones")
+}
+
+fn rules_fixture_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rules")
+}
+
+/// Parses every `(relative path, language)` pair under `root` via the
+/// production `parse::parse_all` path -- the same helper shape
 /// `tests/clones.rs` uses. Every fixture passed here must parse without
 /// error; the three damage fixtures use `parse_damaged` below instead,
 /// since `parse_all` itself routes an `ERROR`-tree file to a `ParseFailure`
 /// rather than a `ParsedFile` (the same filter that keeps a damaged file
 /// out of the real pipeline's clones/metrics/rules stages).
-fn parsed_files(paths: &[(&str, LanguageFamily)]) -> Vec<ParsedFile> {
-    parsed_files_under(&fixture_root(), paths)
-}
-
-/// `parsed_files`, generalized to a caller-chosen fixture root: this round's
-/// new tests cross-reference fixtures that already exist under
-/// `tests/fixtures/metrics/`, `clones/` and `rules/` (see `## Reuse and
-/// scope`'s "no new/edited fixture" constraint) rather than `tests/fixtures/
-/// ir/`, so the root can no longer be a hardcoded constant.
 fn parsed_files_under(root: &Path, paths: &[(&str, LanguageFamily)]) -> Vec<ParsedFile> {
     let files: Vec<DiscoveredFile> = paths
         .iter()
@@ -51,11 +55,10 @@ fn parsed_files_under(root: &Path, paths: &[(&str, LanguageFamily)]) -> Vec<Pars
     parsed
 }
 
-/// `metrics::run`'s own fixture root (`tests/fixtures/metrics/`), reused here
-/// rather than duplicated as a fixture -- `test_nullish_coalescing_is_a_
-/// decision_point` and later tests in this file read fixtures under it.
-fn metrics_fixture_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/metrics")
+/// `parsed_files_under`, rooted at `tests/fixtures/ir/` -- the root every
+/// pre-round-3 test in this file already assumes.
+fn parsed_files(paths: &[(&str, LanguageFamily)]) -> Vec<ParsedFile> {
+    parsed_files_under(&fixture_root(), paths)
 }
 
 /// Parses one fixture file directly with tree-sitter, bypassing
@@ -114,9 +117,9 @@ fn decision_sequence(root: &IrNode) -> Vec<DecisionKind> {
 
 #[test]
 fn test_version_constants_are_exported() {
-    assert_eq!(nsd::ir::IR_VERSION, 1);
-    assert_eq!(lower::JAVA_LOWERING_VERSION, 1);
-    assert_eq!(lower::JSTS_LOWERING_VERSION, 1);
+    assert_eq!(nsd::ir::IR_VERSION, 2);
+    assert_eq!(lower::JAVA_LOWERING_VERSION, 2);
+    assert_eq!(lower::JSTS_LOWERING_VERSION, 2);
 }
 
 /// Iterative pre-order traversal via a single reused `TreeCursor`: the same
@@ -347,4 +350,259 @@ fn test_nullish_coalescing_is_a_decision_point() {
         .filter(|node| node.span.start_line == 6 && node.decision.is_some())
         .collect();
     assert!(line6_decisions.is_empty(), "{line6_decisions:#?}");
+}
+
+/// D8 + D10 parity with the live analyzer (`implementer-ws3-r1.md`'s other
+/// blocker), proved before WS-3 swaps to reading the IR: `IrFile::callables`'
+/// `(name, start_line)` pairs, concatenated across the three fixtures in
+/// path order, equal `metrics::run`'s own `MetricsResult::callables` pairs
+/// (globally sorted by path then start line, which is the same order for
+/// these three paths). Also pins the one Java callable kind with no `body`
+/// field: `static_initializer`'s body span comes from its unnamed `block`
+/// child, not the declaration's own span.
+#[test]
+fn test_callable_table_matches_the_metrics_callables() {
+    let root = metrics_fixture_root();
+    let files = parsed_files_under(
+        &root,
+        &[
+            ("__tests__/CallableKinds.java", JAVA),
+            ("__tests__/CallableKinds.ts", JS_TS),
+            ("__tests__/NameResolution.js", JS_TS),
+        ],
+    );
+
+    let expected: Vec<(String, usize)> = metrics::run(&files, false)
+        .callables
+        .iter()
+        .map(|callable| (callable.name.clone(), callable.start_line))
+        .collect();
+
+    let mut actual: Vec<(String, usize)> = Vec::new();
+    let mut static_initializer_body_span = None;
+    for file in &files {
+        let ir_file = lower::lower_file(file);
+        for callable in &ir_file.callables {
+            actual.push((callable.name.clone(), callable.span.start_line as usize));
+            if file.relative_path == Path::new("__tests__/CallableKinds.java")
+                && callable.span.start_line == 18
+            {
+                static_initializer_body_span = Some(callable.body_span);
+            }
+        }
+    }
+
+    assert_eq!(actual, expected);
+
+    let body_span = static_initializer_body_span.expect("the static_initializer callable");
+    assert_eq!(body_span.start_line, 18, "{body_span:?}");
+    assert_eq!(body_span.end_line, 20, "{body_span:?}");
+}
+
+/// `SyntaxBlock`'s three values, reproducible from the IR, in order:
+/// `IrFile::blocks`' `(kind, start_line, end_line)` triples, concatenated
+/// across the two fixtures in file order, equal `metrics::run`'s own
+/// `MetricsResult::syntax_blocks` triples (never globally sorted, unlike
+/// `callables` -- see `metrics::run`'s own doc comment).
+#[test]
+fn test_block_table_matches_the_metrics_syntax_blocks() {
+    let mut files = parsed_files_under(
+        &metrics_fixture_root(),
+        &[("__tests__/TopLevelBlock.js", JS_TS)],
+    );
+    files.extend(parsed_files(&[("StructuralPredicates.java", JAVA)]));
+
+    let expected: Vec<(&'static str, usize, usize)> = metrics::run(&files, false)
+        .syntax_blocks
+        .iter()
+        .map(|block| (block.kind, block.start_line, block.end_line))
+        .collect();
+
+    let mut actual: Vec<(&'static str, usize, usize)> = Vec::new();
+    for file in &files {
+        let ir_file = lower::lower_file(file);
+        for block in &ir_file.blocks {
+            actual.push((
+                block.kind,
+                block.span.start_line as usize,
+                block.span.end_line as usize,
+            ));
+        }
+    }
+
+    assert_eq!(actual, expected);
+    assert!(!actual.is_empty());
+}
+
+/// WS-4's blocker (`implementer-ws4-r1.md`): a comment and an anonymous
+/// punctuation leaf both read `executable == false` today, indistinguishable
+/// from each other. `is_comment` + `is_named` separate them: a comment is
+/// `is_comment && is_named`; an anonymous leaf like `;`/`(`/`)` is neither.
+#[test]
+fn test_comment_and_named_markers_separate_a_comment_from_anonymous_punctuation() {
+    let files = parsed_files_under(
+        &clones_fixture_root(),
+        &[("__tests__/CommentInStatementA.java", JAVA)],
+    );
+    let ir_file = lower::lower_file(&files[0]);
+
+    let mut nodes = Vec::new();
+    collect(&ir_file.root, &mut nodes);
+    let mut ts_nodes = Vec::new();
+    for_each_descendant(files[0].tree.root_node(), |node| ts_nodes.push(node));
+    assert_eq!(nodes.len(), ts_nodes.len());
+
+    let comment_index = ts_nodes
+        .iter()
+        .position(|node| node.start_position().row + 1 == 5 && node.kind() == "line_comment")
+        .expect("a line_comment on line 5");
+    let comment = nodes[comment_index];
+    assert!(comment.is_comment, "{comment:#?}");
+    assert!(comment.is_named, "{comment:#?}");
+    assert!(!comment.executable, "{comment:#?}");
+
+    let mut punctuation_checked = 0usize;
+    for (index, ts_node) in ts_nodes.iter().enumerate() {
+        if matches!(ts_node.kind(), ";" | "(" | ")") {
+            let leaf = nodes[index];
+            assert!(!leaf.is_comment, "{leaf:#?}");
+            assert!(!leaf.is_named, "{leaf:#?}");
+            assert!(!leaf.executable, "{leaf:#?}");
+            punctuation_checked += 1;
+        }
+    }
+    assert!(
+        punctuation_checked > 0,
+        "expected at least one `;`/`(`/`)` leaf"
+    );
+}
+
+/// Round 2's discriminating-container proof (`test_clone_candidate_containers_
+/// cover_every_container_arm`, `src/lower/mod.rs::tests`), reproduced through
+/// `IrNode::is_clone_statement` -- the field this round promotes the same
+/// classification into, rather than the tree-sitter-derived
+/// `is_clone_statement` dispatcher that test calls directly.
+#[test]
+fn test_clone_statement_flag_reproduces_the_proven_container_set() {
+    let java_files = parsed_files(&[("ContainerSet.java", JAVA)]);
+    let java_ir = lower::lower_file(&java_files[0]);
+    let mut java_nodes = Vec::new();
+    collect(&java_ir.root, &mut java_nodes);
+    let java_lines: Vec<u32> = java_nodes
+        .iter()
+        .filter(|node| node.is_clone_statement)
+        .map(|node| node.span.start_line)
+        .collect();
+    assert_eq!(java_lines, vec![3, 4, 8, 10, 11], "{java_lines:?}");
+
+    let ts_files = parsed_files(&[("container_set.ts", JS_TS)]);
+    let ts_ir = lower::lower_file(&ts_files[0]);
+    let mut ts_nodes = Vec::new();
+    collect(&ts_ir.root, &mut ts_nodes);
+    let ts_lines: Vec<u32> = ts_nodes
+        .iter()
+        .filter(|node| node.is_clone_statement)
+        .map(|node| node.span.start_line)
+        .collect();
+    assert_eq!(ts_lines, vec![1, 2, 4, 5, 7, 8], "{ts_lines:?}");
+}
+
+/// WS-5's blocker (`implementer-ws5-r1.md`): the hoisted/type-only exemption
+/// is JS/TS-only -- the Java lowering never sets it.
+#[test]
+fn test_hoisted_and_type_only_flag_is_jsts_only() {
+    let root = rules_fixture_root();
+
+    let ts_files = parsed_files_under(&root, &[("__tests__/CleanTs.ts", JS_TS)]);
+    let ts_ir = lower::lower_file(&ts_files[0]);
+    let mut ts_nodes = Vec::new();
+    collect(&ts_ir.root, &mut ts_nodes);
+    let ts_flagged_lines: Vec<u32> = ts_nodes
+        .iter()
+        .filter(|node| node.is_hoisted_or_type_only)
+        .map(|node| node.span.start_line)
+        .collect();
+    assert!(ts_flagged_lines.contains(&4), "{ts_flagged_lines:?}");
+    assert!(ts_flagged_lines.contains(&12), "{ts_flagged_lines:?}");
+
+    let js_files = parsed_files_under(&root, &[("__tests__/JsRulesFixture.js", JS_TS)]);
+    let js_ir = lower::lower_file(&js_files[0]);
+    let mut js_nodes = Vec::new();
+    collect(&js_ir.root, &mut js_nodes);
+    let js_flagged_lines: Vec<u32> = js_nodes
+        .iter()
+        .filter(|node| node.is_hoisted_or_type_only)
+        .map(|node| node.span.start_line)
+        .collect();
+    assert!(js_flagged_lines.contains(&27), "{js_flagged_lines:?}");
+    assert!(js_flagged_lines.contains(&30), "{js_flagged_lines:?}");
+
+    for (path, language) in [
+        ("__tests__/JavaRulesFixture.java", JAVA),
+        ("__tests__/CleanJava.java", JAVA),
+    ] {
+        let files = parsed_files_under(&root, &[(path, language)]);
+        let ir_file = lower::lower_file(&files[0]);
+        let mut nodes = Vec::new();
+        collect(&ir_file.root, &mut nodes);
+        assert!(
+            nodes.iter().all(|node| !node.is_hoisted_or_type_only),
+            "{path}: expected no node flagged"
+        );
+    }
+}
+
+/// WS-5's other blocker: the two narrower terminator subsets split `break`
+/// from `continue` (only `break` is `is_unreachable_terminator`), and split
+/// `return`/`throw` from `break`/`continue` (only `return`/`throw` is
+/// `is_return_or_throw`).
+#[test]
+fn test_terminator_subsets_split_break_and_continue() {
+    let files = parsed_files_under(
+        &metrics_fixture_root(),
+        &[("__tests__/BareControlFlow.js", JS_TS)],
+    );
+    let ir_file = lower::lower_file(&files[0]);
+    let mut nodes = Vec::new();
+    collect(&ir_file.root, &mut nodes);
+
+    let continue_node = nodes
+        .iter()
+        .find(|node| node.span.start_line == 4 && ir::is_terminator(node))
+        .expect("the continue on line 4");
+    assert!(!ir::is_unreachable_terminator(continue_node));
+    assert!(!ir::is_return_or_throw(continue_node));
+
+    let break_node = nodes
+        .iter()
+        .find(|node| node.span.start_line == 7 && ir::is_terminator(node))
+        .expect("the break on line 7");
+    assert!(ir::is_unreachable_terminator(break_node));
+    assert!(!ir::is_return_or_throw(break_node));
+
+    let java_files = parsed_files(&[("StructuralPredicates.java", JAVA)]);
+    let java_ir = lower::lower_file(&java_files[0]);
+    let mut java_nodes = Vec::new();
+    collect(&java_ir.root, &mut java_nodes);
+    let returns: Vec<_> = java_nodes
+        .iter()
+        .filter(|node| {
+            ir::is_terminator(node) && (node.span.start_line == 7 || node.span.start_line == 9)
+        })
+        .collect();
+    assert_eq!(returns.len(), 2, "{returns:#?}");
+    for ret in &returns {
+        assert!(ir::is_unreachable_terminator(ret));
+        assert!(ir::is_return_or_throw(ret));
+    }
+}
+
+/// Round 2's HIGH-4 shrink (88 -> 48 bytes) must survive this round's four
+/// new bool fields plus the `bool` -> `Option<TerminatorKind>` widening: a
+/// scan retains one `IrNode` per tree-sitter node, so per-node size is the
+/// dominant memory cost.
+#[test]
+fn test_ir_node_stays_within_56_bytes() {
+    let size = std::mem::size_of::<IrNode>();
+    assert!(size <= 56, "{size}");
 }
