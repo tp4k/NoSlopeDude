@@ -98,8 +98,13 @@ checkout it came from:
    from the archive via the same `parse_report` / `build_digest` pipeline and
    asserts it equals the committed file. Without `NSD_ARCHIVED_REPORT` set,
    this test (and `test_gate_is_reported_pending_when_the_archive_is_absent`)
-   report the reproducibility leg as **pending**, not passing — a missing
-   archive never silently reads as green.
+   report the reproducibility leg as **pending**, not passing — no equality
+   is ever asserted on a missing archive, so it can never invent a pass.
+   That said, a plain `cargo test` still reports the pending run as Cargo's
+   ordinary `ok`, indistinguishable from a verified one in the summary
+   line; set `NSD_REQUIRE_ARCHIVE_VERIFIED=1` alongside the archive path to
+   turn a still-missing archive into a panic instead, for a CI job (once
+   wired) that has the archive and wants to demand it.
 3. `test_committed_digest_carries_no_paths_names_or_excerpts` runs
    unconditionally, with no archive needed, and checks the committed file
    itself for forbidden keys and absolute-path-shaped strings.

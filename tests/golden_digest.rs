@@ -29,6 +29,13 @@ use serde_json::Value;
 /// only; it is never written into a repository file.
 const ARCHIVED_REPORT_ENV_VAR: &str = "NSD_ARCHIVED_REPORT";
 
+/// Opt-in env var that promotes the pending arm below from a silent `ok` to
+/// a panic. Unset (the default for every local/dev run), a missing archive
+/// still reads as a plain Cargo pass -- this var exists so a CI job that
+/// *does* have the archive can demand one and fail loudly if it is
+/// absent, without changing the test's default, archive-optional behavior.
+const REQUIRE_ARCHIVE_VERIFIED_ENV_VAR: &str = "NSD_REQUIRE_ARCHIVE_VERIFIED";
+
 /// How many `excerpt` occurrences the real archived `java-fixture-01`
 /// report carries at the three sites A1 normalizes: `findings[].location`
 /// (340) + `duplicates[].locations[]` (172) + `top25[].location` (25).
@@ -96,15 +103,47 @@ fn pending_notice() -> String {
     )
 }
 
+/// Pure classification of a possibly-absent `NSD_REQUIRE_ARCHIVE_VERIFIED`
+/// value, split out the same way `classify_archive_gate` is: so `None` and
+/// `Some("")` (unset, and set-but-empty) can each be asserted directly as
+/// "not required", rather than only observed through the process's own
+/// environment.
+fn classify_verification_requirement(raw: Option<OsString>) -> bool {
+    matches!(raw, Some(value) if !value.is_empty())
+}
+
+fn verification_required() -> bool {
+    classify_verification_requirement(std::env::var_os(REQUIRE_ARCHIVE_VERIFIED_ENV_VAR))
+}
+
+/// The message a required-but-pending run panics with -- extracted so a
+/// test can assert its content once, same as `pending_notice` above.
+fn required_but_pending_message() -> String {
+    format!(
+        "{REQUIRE_ARCHIVE_VERIFIED_ENV_VAR} demands a verified run, but \
+         {ARCHIVED_REPORT_ENV_VAR} is unset -- supply the archive or unset \
+         {REQUIRE_ARCHIVE_VERIFIED_ENV_VAR}"
+    )
+}
+
 /// Recomputes the digest from the archived report and asserts it against
 /// the committed golden, proving the golden was derived and is
 /// re-derivable rather than typed in by hand.
+///
+/// A missing archive never invents a pass here: the pending arm asserts
+/// nothing. By default that pending run still reports as Cargo's plain
+/// `ok`, same as a verified one -- `NSD_REQUIRE_ARCHIVE_VERIFIED` is the
+/// opt-in a CI job with the archive can set to turn that silence into a
+/// panic instead.
 #[test]
 fn test_committed_digest_matches_the_archived_report() -> Result<()> {
     let path = match archive_gate() {
         ArchiveGate::Resolved(path) => path,
         ArchiveGate::Pending => {
             println!("{}", pending_notice());
+            if verification_required() {
+                panic!("{}", required_but_pending_message());
+            }
             return Ok(());
         }
     };
@@ -204,6 +243,33 @@ fn test_pending_notice_names_the_env_var() {
     assert!(
         notice.contains(ARCHIVED_REPORT_ENV_VAR),
         "notice was: {notice:?}"
+    );
+}
+
+/// `classify_verification_requirement` is the pure decision
+/// `verification_required` delegates to; tested directly for the same
+/// reason `classify_archive_gate` is -- the unset and set-but-empty cases
+/// must read as "not required", not just happen to.
+#[test]
+fn test_classify_verification_requirement_needs_a_non_empty_value() {
+    assert!(!classify_verification_requirement(None));
+    assert!(!classify_verification_requirement(Some(OsString::new())));
+    assert!(classify_verification_requirement(Some(OsString::from("1"))));
+}
+
+/// The panic message a required-but-pending run raises must name both env
+/// vars, so a developer or CI log immediately says what is missing and
+/// what to unset to get a plain pending run back.
+#[test]
+fn test_required_but_pending_message_names_both_env_vars() {
+    let message = required_but_pending_message();
+    assert!(
+        message.contains(REQUIRE_ARCHIVE_VERIFIED_ENV_VAR),
+        "message was: {message:?}"
+    );
+    assert!(
+        message.contains(ARCHIVED_REPORT_ENV_VAR),
+        "message was: {message:?}"
     );
 }
 
