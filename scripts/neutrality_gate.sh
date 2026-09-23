@@ -14,22 +14,54 @@
 # second binary, and this script never asserts anything the committed
 # baselines already cover -- it exists for a human to re-run the gate
 # against history directly.
+#
+# Usage:
+#   scripts/neutrality_gate.sh            -- compare HEAD against the pinned
+#                                             pre-IR commit (default mode).
+#   scripts/neutrality_gate.sh --capture  -- re-capture tests/golden/neutrality/
+#                                             baselines from the current HEAD
+#                                             by delegating to the Rust harness's
+#                                             own NSD_NEUTRALITY_CAPTURE mode
+#                                             (`cargo test --test neutrality`);
+#                                             skips the pre-IR worktree/diff
+#                                             logic entirely.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+if [ "${1:-}" = "--capture" ]; then
+  echo "Capturing tests/golden/neutrality/ baselines from HEAD via 'cargo test --test neutrality'..." >&2
+  cd "$REPO_ROOT"
+  NSD_NEUTRALITY_CAPTURE=1 cargo test --test neutrality
+  exit $?
+fi
 
 # The last commit before any M0b IR-retargeting stream touched an
 # analyzer (recorded at WS-2 dispatch time); this is the pre-IR reference
 # the gate always compares HEAD against.
 PRE_IR_SHA="5705e76522b7b0a16343cd861aa953e6ff37064a"
 
-# Kept in sync by hand with tests/neutrality.rs's CLEAN_CORPUS_SOURCES /
-# MALFORMED_CORPUS_SOURCES -- one "<label> <space-separated source list>"
-# pair per corpus.
-CORPUS_LABELS=(clean malformed)
-CORPUS_clean="tests/fixtures/rules/__tests__/CleanJava.java tests/fixtures/rules/__tests__/CleanJs.js tests/fixtures/rules/__tests__/CleanTs.ts"
-CORPUS_malformed="tests/fixtures/rules/broken/Broken.java tests/fixtures/rules/broken/Good.java"
+# The malformed corpus is exactly these three in-repo damaged fixtures
+# (plan decision 1); kept in sync by hand with tests/neutrality.rs's
+# MALFORMED_CORPUS_SOURCES. The clean corpus is everything else under
+# tests/fixtures/ and is enumerated below, so it needs no manual sync.
+MALFORMED_SOURCES=(
+  "tests/fixtures/metrics/broken/Broken.ts"
+  "tests/fixtures/rules/broken/Broken.java"
+  "tests/fixtures/report/src/Broken.java"
+)
+
+is_malformed_source() {
+  local candidate="$1"
+  local malformed
+  for malformed in "${MALFORMED_SOURCES[@]}"; do
+    if [ "$candidate" = "$malformed" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
 
 WORK_DIR="$(mktemp -d)"
 WORKTREE_DIR="$WORK_DIR/pre-ir-src"
@@ -42,17 +74,37 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# copy_corpus <sources...> <dest_root> -- flattens each source file into
-# dest_root/src/<file name>, the same flattening tests/neutrality.rs's
-# copy_corpus does, so a source directory name such as __tests__ or
-# broken never lands somewhere the D16 default exclusions would skip.
+# copy_corpus <sources...> <dest_root> -- mirrors each source's path
+# relative to the repo root under dest_root, preserving directory
+# structure, so the D16 default-exclusion globs and include_tests's
+# TEST_GLOBS see the same directory shape a real scan target would.
+# Fails loudly (naming both the destination and the source) on a
+# collision, i.e. two different sources mapping to the same destination
+# path -- this should be impossible now that paths are mirrored rather
+# than flattened, but is kept as a cheap invariant check. Uses a plain
+# indexed array with a linear-search helper (not `declare -A`) for
+# portability with the bash 3.2 macOS ships by default.
 copy_corpus() {
   local dest_root="${*: -1}"
   local sources=("${@:1:$#-1}")
-  mkdir -p "$dest_root/src"
-  local source
+  local written=()
+  local source dest existing collided
   for source in "${sources[@]}"; do
-    cp "$REPO_ROOT/$source" "$dest_root/src/$(basename "$source")"
+    dest="$dest_root/$source"
+    collided=""
+    for existing in "${written[@]+"${written[@]}"}"; do
+      if [ "$existing" = "$dest" ]; then
+        collided="1"
+        break
+      fi
+    done
+    if [ -n "$collided" ]; then
+      echo "NEUTRALITY: corpus copy collision -- $source would overwrite an earlier copy at $dest" >&2
+      exit 1
+    fi
+    written+=("$dest")
+    mkdir -p "$(dirname "$dest")"
+    cp "$REPO_ROOT/$source" "$dest"
   done
 }
 
@@ -64,6 +116,20 @@ PRE_IR_BIN="$WORKTREE_DIR/target/debug/nsd"
 echo "Building HEAD binary..." >&2
 (cd "$REPO_ROOT" && cargo build --quiet)
 HEAD_BIN="$REPO_ROOT/target/debug/nsd"
+
+# Enumerate the full corpus split: clean = all of tests/fixtures/ minus
+# the three malformed sources above; malformed = exactly those three.
+ALL_SOURCES=()
+while IFS= read -r relative; do
+  ALL_SOURCES+=("tests/fixtures/$relative")
+done < <(cd "$REPO_ROOT/tests/fixtures" && find . -type f | sed 's#^\./##' | sort)
+
+CLEAN_SOURCES=()
+for source in "${ALL_SOURCES[@]+"${ALL_SOURCES[@]}"}"; do
+  if ! is_malformed_source "$source"; then
+    CLEAN_SOURCES+=("$source")
+  fi
+done
 
 DIFF_FILTER="$WORK_DIR/first_diff.jq"
 cat > "$DIFF_FILTER" << 'JQ_EOF'
@@ -87,12 +153,12 @@ def all_diffs(a; b; path):
 JQ_EOF
 
 identical_count=0
-for label in "${CORPUS_LABELS[@]}"; do
-  sources_var="CORPUS_$label"
-  # shellcheck disable=SC2086
-  # Intentional: ${!sources_var} holds a space-separated list of relative
-  # paths, not a single value, and must word-split into copy_corpus's args.
-  read -r -a sources <<< "${!sources_var}"
+for label in clean malformed; do
+  if [ "$label" = "clean" ]; then
+    sources=("${CLEAN_SOURCES[@]+"${CLEAN_SOURCES[@]}"}")
+  else
+    sources=("${MALFORMED_SOURCES[@]}")
+  fi
 
   corpus_dir="$WORK_DIR/corpus-$label"
   copy_corpus "${sources[@]}" "$corpus_dir"
@@ -100,8 +166,8 @@ for label in "${CORPUS_LABELS[@]}"; do
   pre_ir_out="$WORK_DIR/out-$label-pre-ir"
   head_out="$WORK_DIR/out-$label-head"
   mkdir -p "$pre_ir_out" "$head_out"
-  "$PRE_IR_BIN" scan "$corpus_dir" --output "$pre_ir_out" >/dev/null
-  "$HEAD_BIN" scan "$corpus_dir" --output "$head_out" >/dev/null
+  "$PRE_IR_BIN" scan "$corpus_dir" --output "$pre_ir_out" --include-tests >/dev/null
+  "$HEAD_BIN" scan "$corpus_dir" --output "$head_out" --include-tests >/dev/null
 
   diffs="$(jq -c -n --slurpfile a "$pre_ir_out/report.json" --slurpfile b "$head_out/report.json" -f "$DIFF_FILTER")"
   first_diff="$(echo "$diffs" | jq -r '.[0] // empty')"
