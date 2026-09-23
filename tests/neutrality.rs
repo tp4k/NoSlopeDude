@@ -575,8 +575,12 @@ fn test_java_fixture_01_strict_scan_is_byte_identical_to_the_archived_report() {
         exclude,
         min_clone_lines,
     };
-    pipeline::run(&target, settings)
-        .unwrap_or_else(|error| panic!("scanning the archive's recorded target: {error}"));
+    pipeline::run(&target, settings).unwrap_or_else(|_| {
+        panic!(
+            "scanning the archive's recorded target failed; details withheld \
+             (AGENTS.md, Fixture privacy)"
+        )
+    });
     let actual_text = fs::read_to_string(output_dir.path().join("report.json"))
         .expect("freshly rendered report.json exists");
 
