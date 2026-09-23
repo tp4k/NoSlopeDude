@@ -86,14 +86,52 @@ removing one of five redundant lowerings alone, and is therefore evidence
 about the branch, not about this fix.
 
 The fusion's own effect was, for that reason, unmeasured here for want of
-a control until the row appended below labeled `a370e3d`: the two
-existing unlabeled `2026-09-23` rows above it measure `e83228b` (the
-fusion commit) itself, and the `a370e3d` row measures the fusion's
-immediate parent commit, built in a detached worktree and run back to
-back on the same machine against the same already-fetched fixture root
-(the same pattern `scripts/neutrality_gate.sh` uses for its own pre-IR
-reference build) — this pair is the only one in this file that isolates
-the fusion's own effect from the rest of the M0b branch.
+a control. Round 4 supplied a first attempt: the two unlabeled
+`2026-09-23` rows above measure `e83228b` (the fusion commit) via two
+back-to-back `scripts/perf_scan.sh` runs at 18:53. About 20 minutes
+later, in a separate detached worktree (the `git worktree add --detach`
+pattern `scripts/neutrality_gate.sh` uses for its own pre-IR reference
+build, but built with `cargo build --release` — the profile
+`perf_scan.sh` itself uses, **not** `neutrality_gate.sh`'s own
+`cargo build --quiet` debug profile), a hand-replicated equivalent of
+that script measured `a370e3d` (the fusion's immediate parent) once,
+immediately after that worktree's from-scratch release build. That
+single run was **not** a back-to-back, like-for-like comparison with the
+`e83228b` pair: n=1 vs. n=2 (4.28s/4.14s), a cold build immediately
+preceding it rather than the warm steady state the `e83228b` rows were
+taken in, and — unlike every other row in this file — without a recorded
+`block input operations` value, so `## Known caveats`'s universal
+warm-page-cache claim was, for that one row, asserted rather than
+verified. The round-4 report read the resulting drop (6.90s → 4.28s/4.14s,
+~39%) as evidence the pair "isolates the fusion's own effect" — that
+claim was wrong on its own terms: this section's own arithmetic above
+caps the fusion's possible saving at ≤20% (≤1.38s off a 6.90s parent),
+and 2.69s is ~1.95× that ceiling, so at least ~1.3s of that recorded
+delta cannot be the fusion's — most plausibly session-to-session variance
+(cold build/cache), not evidence for or against `e83228b`.
+
+Round 5 re-ran the control twice more, same worktree pattern and release
+build, same already-fetched fixture root, this time recording
+`block input operations` for each run and treating the original 6.90s run
+as the cold-build warm-up it evidently was (its row below is relabeled
+accordingly; its number is untouched): 6.77s (1778.98 MB,
+`block input operations: 0`) and 5.68s (1777.41 MB,
+`block input operations: 0`) — both warm, both n=1 individually, mean
+6.225s. Against the `e83228b` pair's mean of 4.21s that is still a ~32%
+drop, and even the closer rerun alone (5.68s vs. 4.21s) is ~26% — both
+above the ≤20% ceiling this section's own arithmetic derives from the
+5→4 per-scan lowering count. **That means the ceiling arithmetic itself
+needs re-examining, not that a ~32% drop is unreachable**: either the
+lowering count alone does not capture the fusion's full effect on wall
+clock (e.g. avoided allocation/copy overhead beyond the lowering call
+itself), or some other uncontrolled difference between the two worktrees
+(filesystem cache locality, thermal state, background load) still
+separates them despite the warm rebuild. Three `a370e3d` runs (6.90s,
+6.77s, 5.68s) against two `e83228b` runs (4.28s, 4.14s) is still not the
+same reproducibility bar on both sides (n=3 vs. n=2, taken across two
+sessions ~20 minutes to hours apart, never back-to-back) — this file
+records what was measured, not a settled attribution of the fusion's own
+effect.
 
 ## Rows
 
@@ -111,4 +149,6 @@ exclusions combined).
 | 2026-09-18 | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 17.67s | 1248.16 MB | true | 7720 |
 | 2026-09-23 | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 4.28s | 1774.33 MB | true | 7720 |
 | 2026-09-23 | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 4.14s | 1775.42 MB | true | 7720 |
-| 2026-09-23 (a370e3d, fusion's parent commit — control) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 6.90s | 1779.59 MB | true | 7720 |
+| 2026-09-23 (a370e3d, fusion's parent commit — control, cold-build warm-up run, discarded from the ceiling comparison above; block input operations not recorded) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 6.90s | 1779.59 MB | true | 7720 |
+| 2026-09-23 (a370e3d, fusion's parent commit — control rerun 1, warm, block input operations: 0) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 6.77s | 1778.98 MB | true | 7720 |
+| 2026-09-23 (a370e3d, fusion's parent commit — control rerun 2, warm, block input operations: 0) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 5.68s | 1777.41 MB | true | 7720 |
