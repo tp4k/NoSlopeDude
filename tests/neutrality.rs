@@ -13,6 +13,7 @@
 //! passing, when that fixture is absent.
 
 use std::collections::HashSet;
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -582,4 +583,35 @@ fn test_java_fixture_01_strict_leg_is_reported_pending_when_the_archive_is_absen
             // ordinary (archive-absent) developer/CI run instead.
         }
     }
+}
+
+/// `classify_archive_gate` is the pure decision `archive_gate` delegates to;
+/// tested directly (not through `env::var_os`, which only the process's own
+/// environment can drive) so the unset case, the set-but-empty case, and the
+/// set-and-non-empty case are each pinned rather than only exercised
+/// incidentally by whichever of the three the test process happens to run
+/// under -- mirroring `tests/golden_digest.rs::test_classify_archive_gate`.
+#[test]
+fn test_classify_archive_gate() {
+    assert!(matches!(classify_archive_gate(None), ArchiveGate::Pending));
+    assert!(matches!(
+        classify_archive_gate(Some(OsString::new())),
+        ArchiveGate::Pending
+    ));
+    match classify_archive_gate(Some(OsString::from("/x"))) {
+        ArchiveGate::Resolved(path) => assert_eq!(path, PathBuf::from("/x")),
+        ArchiveGate::Pending => panic!("a non-empty path must resolve, not read as pending"),
+    }
+}
+
+/// `classify_verification_requirement` is the pure decision
+/// `verification_required` delegates to; tested directly for the same
+/// reason `classify_archive_gate` is -- the unset and set-but-empty cases
+/// must read as "not required", not just happen to -- mirroring
+/// `tests/golden_digest.rs::test_classify_verification_requirement_needs_a_non_empty_value`.
+#[test]
+fn test_classify_verification_requirement_needs_a_non_empty_value() {
+    assert!(!classify_verification_requirement(None));
+    assert!(!classify_verification_requirement(Some(OsString::new())));
+    assert!(classify_verification_requirement(Some(OsString::from("1"))));
 }
