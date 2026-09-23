@@ -41,7 +41,11 @@ fn decision_kind(node: Node, kind: &str) -> Option<DecisionKind> {
         "ternary_expression" => Some(DecisionKind::Ternary),
         "binary_expression" => match operator_text(node) {
             Some("&&") => Some(DecisionKind::And),
-            Some("||") => Some(DecisionKind::Or),
+            // `??` shares `Or`'s weight (D7: "`&&`/`||`/`??` add 1", one
+            // shared arm pre-IR) -- not a new variant, since
+            // `metrics::decision_weight`'s exhaustive match has no wildcard
+            // arm and lives outside this stream's fence.
+            Some("||") | Some("??") => Some(DecisionKind::Or),
             _ => None,
         },
         _ => None,
