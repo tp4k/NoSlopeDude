@@ -314,8 +314,7 @@ fn extension_of(path: &[u8]) -> Option<&str> {
 /// dependency/build, generated and WebJar glob lists above. These are
 /// fixed, already-tested glob strings (verbatim copies of a working
 /// module's own constants), so a compile failure here can only be an
-/// internal defect caught by this module's own tests; it degrades to an
-/// empty (non-matching) override rather than panicking.
+/// internal defect caught by this module's own tests.
 fn builtin_override() -> Override {
     let mut builder = OverrideBuilder::new(Path::new(GLOB_VALIDATION_ROOT));
     let globs = DEPENDENCY_BUILD_GLOBS
@@ -324,11 +323,9 @@ fn builtin_override() -> Override {
         .chain(GENERATED_GLOBS.iter().copied())
         .chain(std::iter::once(WEBJAR_GLOB));
     for glob in globs {
-        if builder.add(glob).is_err() {
-            return Override::empty();
-        }
+        builder.add(glob).expect("built-in exclusion glob compiles");
     }
-    builder.build().unwrap_or_else(|_| Override::empty())
+    builder.build().expect("built-in exclusion set compiles")
 }
 
 /// Converts repository-relative raw bytes into a standalone `Path` for
