@@ -91,8 +91,24 @@ pub enum SkipReason {
     ConfigExclude,
 }
 
+impl SkipReason {
+    /// The D20 spelling of this reason, for M3+ callers (reports, JSON) that
+    /// need a stable string without inventing their own (mirrors the
+    /// sibling `nsd::model::SkipReason::label`).
+    pub fn label(self) -> &'static str {
+        match self {
+            SkipReason::Symlink => "symlink",
+            SkipReason::Submodule => "submodule",
+            SkipReason::NestedCheckout => "nested_checkout",
+            SkipReason::BuiltinExclusion => "builtin_exclusion",
+            SkipReason::OutsideInclude => "outside_include",
+            SkipReason::ConfigExclude => "config_exclude",
+        }
+    }
+}
+
 /// One entry that was walked but not included, with the reason.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkippedEntry {
     pub path: RepoPath,
     pub reason: SkipReason,
