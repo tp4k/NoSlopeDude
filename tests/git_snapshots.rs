@@ -355,6 +355,31 @@ fn entry_kinds_symlink_and_submodule() {
 }
 
 #[test]
+fn commit_link_target_bounded_by_ceiling() {
+    let (_dir, repo) = common::init_repo();
+    let over_ceiling_target = vec![b'x'; SOURCE_CEILING_BYTES as usize + 1];
+    common::commit_entries(
+        &repo,
+        &[(b"huge-link.ts".to_vec(), MODE_SYMLINK, over_ceiling_target)],
+    );
+
+    let snapshot = CommitSnapshot::head_or_empty(&repo).expect("open commit snapshot");
+    let link = snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.path.as_bytes() == b"huge-link.ts")
+        .expect("huge-link.ts entry present");
+    assert_eq!(link.kind, EntryKind::Symlink);
+    assert_eq!(
+        snapshot
+            .link_target(&repo, link)
+            .expect("read huge-link.ts target"),
+        None,
+        "a symlink blob over the ceiling is not inflated into memory"
+    );
+}
+
+#[test]
 fn conflicted_index_is_g101() {
     let (_dir, repo) = common::init_repo();
     let ancestor_oid =
