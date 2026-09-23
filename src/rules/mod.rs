@@ -1,24 +1,20 @@
 //! Stage 4 (WS-4): wasteful-code rules and the adapted verbosity score
 //! (D22, D23). Six conservative, syntax-only rules — documented with their
 //! conservative-by-design rationale in `docs/wasteful-rules.md` — run over
-//! WS-2's parsed trees. This is an adaptation of scb-check's Python-only
+//! the IR (`nsd-plan-final.md` M0b item 6): terminator-ness, block
+//! membership and catch-body membership are IR structural queries here, not
+//! grammar-string matches. This is an adaptation of scb-check's Python-only
 //! wasteful-code rules, not a port and not a claim of numerical
 //! equivalence — see `docs/wasteful-rules.md`.
-//!
-//! D11's per-line "named, non-comment leaf" rule (`is_comment_kind`,
-//! `collect_executable_lines`, and the `is_executable_leaf` predicate
-//! `collect_executable_lines` applies) is shared, imported from
-//! `src/exec_lines.rs`; only `for_each_descendant`, this module's own
-//! traversal helper, stays independently implemented here.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
 use rayon::prelude::*;
-use tree_sitter::Node;
 
 use crate::clones::redundant_occurrences;
-use crate::exec_lines::{collect_executable_lines, is_comment_kind};
+use crate::ir::{self, DecisionKind, IrNode};
+use crate::lower;
 use crate::model::{
     CloneGroup, ClonesResult, FileLanguageLines, LanguageFamily, MetricsResult, RuleFinding,
     RuleId, RulesResult, VerbosityScore, VerbosityScores,
@@ -43,19 +39,6 @@ pub const ALL_RULE_IDS: [RuleId; 6] = [
     JSTS_EMPTY_CATCH,
     JSTS_REDUNDANT_ELSE_AFTER_RETURN,
 ];
-
-/// D22: the node kinds whose direct statement children the unreachable-
-/// after-return rule scans — the same "block" concept in each language.
-fn unreachable_container_kinds(language: LanguageFamily) -> &'static [&'static str] {
-    match language {
-        LanguageFamily::Java => &["block", "constructor_body"],
-        LanguageFamily::JsTs => &["statement_block", "program"],
-    }
-}
-
-/// D22: a statement kind that unconditionally exits its enclosing block.
-const UNREACHABLE_TERMINATOR_KINDS: &[&str] =
-    &["return_statement", "throw_statement", "break_statement"];
 
 /// Runs the rules stage: every rule finding (D22) plus the D23 verbosity
 /// score, overall and per language family (D20).
@@ -93,10 +76,10 @@ pub fn find_findings(parsed_files: &[ParsedFile]) -> Vec<RuleFinding> {
 }
 
 /// D12/D20/D11: joins WS-2's per-file scanned-line count with the language
-/// and D11-filtered executable-line set its own parsed file carries —
-/// `FileScanSummary` alone has neither. The tree walk this does per file
-/// (`collect_executable_lines`) is the only full-tree pass on this path, so
-/// it fans out with rayon (D21) like every other whole-corpus pass in the
+/// and D11-filtered executable-line set the IR carries for that same file --
+/// `FileScanSummary` alone has neither. The lowering this does per file
+/// (`lower::lower_file`) is the only whole-tree build on this path, so it
+/// fans out with rayon (D21) like every other whole-corpus pass in the
 /// pipeline; `files_by_path` is built serially first and shared by
 /// reference (`ParsedFile` is already proven `Sync` by `find_findings`'s own
 /// `par_iter` above). Rayon's `collect` into a `Vec` preserves input order
@@ -117,12 +100,9 @@ fn file_language_lines(
             files_by_path
                 .get(summary.relative_path.as_path())
                 .map(|file| {
+                    let ir_file = lower::lower_file(file);
                     let mut executable_lines = BTreeSet::new();
-                    collect_executable_lines(
-                        file.tree.root_node(),
-                        file.language,
-                        &mut executable_lines,
-                    );
+                    collect_ir_executable_lines(&ir_file.root, &mut executable_lines);
                     FileLanguageLines {
                         relative_path: summary.relative_path.clone(),
                         language: file.language,
@@ -137,7 +117,7 @@ fn file_language_lines(
 /// D23: the verbosity aggregation, decoupled from AST access so it can be
 /// tested directly against hand-built findings and clone groups. A rule
 /// finding contributes its own `flagged_lines` (already D11-filtered at
-/// detection time, see `collect_executable_lines`); a clone group
+/// detection time, see `collect_ir_executable_lines`); a clone group
 /// contributes, for every occurrence `redundant_occurrences` returns (every
 /// occurrence but the canonically first, D14), only the lines within its
 /// `[start_line, end_line]` span that are also members of that file's own
@@ -227,15 +207,15 @@ fn verbosity_score(flagged_lines: usize, scanned_lines: usize) -> VerbosityScore
 }
 
 /// D22: every rule finding in one parsed file, from a single pass over its
-/// whole tree (no D9 nested-callable exclusion — a rule applies inside a
-/// nested callable's body too).
+/// lowered IR tree (no D9 nested-callable exclusion — a rule applies inside
+/// a nested callable's body too).
 fn scan_file_for_rules(file: &ParsedFile) -> Vec<RuleFinding> {
-    let mut findings = Vec::new();
+    let ir_file = lower::lower_file(file);
     let language = file.language;
-    for_each_descendant(file.tree.root_node(), |node| {
-        if unreachable_container_kinds(language).contains(&node.kind()) {
-            if let Some((start_line, end_line, flagged_lines)) =
-                find_unreachable_after_return(node, language)
+    let mut findings = Vec::new();
+    for_each_ir_node(&ir_file.root, |node, is_root| {
+        if is_unreachable_container(node, is_root, language) {
+            if let Some((start_line, end_line, flagged_lines)) = find_unreachable_after_return(node)
             {
                 findings.push(RuleFinding {
                     relative_path: file.relative_path.clone(),
@@ -247,8 +227,8 @@ fn scan_file_for_rules(file: &ParsedFile) -> Vec<RuleFinding> {
                 });
             }
         }
-        if node.kind() == "catch_clause" {
-            if let Some((start_line, end_line, flagged_lines)) = find_empty_catch(node, language) {
+        if node.decision == Some(DecisionKind::Catch) {
+            if let Some((start_line, end_line, flagged_lines)) = find_empty_catch(node) {
                 findings.push(RuleFinding {
                     relative_path: file.relative_path.clone(),
                     language,
@@ -259,9 +239,8 @@ fn scan_file_for_rules(file: &ParsedFile) -> Vec<RuleFinding> {
                 });
             }
         }
-        if node.kind() == "if_statement" {
-            if let Some((start_line, end_line, flagged_lines)) = find_redundant_else(node, language)
-            {
+        if node.decision == Some(DecisionKind::Branch) {
+            if let Some((start_line, end_line, flagged_lines)) = find_redundant_else(node) {
                 findings.push(RuleFinding {
                     relative_path: file.relative_path.clone(),
                     language,
@@ -297,6 +276,24 @@ fn redundant_else_rule_id(language: LanguageFamily) -> RuleId {
     }
 }
 
+/// D22: an IR node this rule scans for a terminator among its direct
+/// statement children — the pre-IR `unreachable_container_kinds` grammar-
+/// string list ("block"/"constructor_body" for Java, "statement_block"/
+/// "program" for JS/TS), now a structural query: `node` is block-kind
+/// exactly when one of its own children has `in_block` set (that flag
+/// depends only on the child's parent's kind, so any one child settles it
+/// for all of them; a `{ }` block's own braces are themselves `IrNode`
+/// children, so this holds even for an empty block). JS/TS's top-level
+/// `program` is the one case this structural test cannot see on its own —
+/// `in_block` is deliberately false for it, since it is never itself a
+/// braced block — so `is_root` (true only for `for_each_ir_node`'s first
+/// call, on the file's own root) restores exactly that one exception, the
+/// same way the pre-IR list did by naming it explicitly.
+fn is_unreachable_container(node: &IrNode, is_root: bool, language: LanguageFamily) -> bool {
+    (is_root && language == LanguageFamily::JsTs)
+        || node.children.first().is_some_and(|child| child.in_block)
+}
+
 /// D22, `*-UNREACHABLE-AFTER-RETURN`: statements following an unconditional
 /// `return`/`throw`/`break` that is itself a direct child of `node` (so a
 /// terminator inside a nested `if` does not count — this rule never proves
@@ -304,61 +301,43 @@ fn redundant_else_rule_id(language: LanguageFamily) -> RuleId {
 /// statement after the first such terminator, to the end of the block,
 /// except a JS/TS statement `is_hoisted_or_type_only` exempts — those are
 /// not unreachable code in effect, only in source position.
-fn find_unreachable_after_return(
-    node: Node,
-    language: LanguageFamily,
-) -> Option<(usize, usize, Vec<usize>)> {
-    let statements = statement_children(node, language);
+fn find_unreachable_after_return(node: &IrNode) -> Option<(usize, usize, Vec<usize>)> {
+    let statements = statement_children(node);
     let terminator_index = statements
         .iter()
-        .position(|statement| UNREACHABLE_TERMINATOR_KINDS.contains(&statement.kind()))?;
-    let unreachable: Vec<Node> = statements[terminator_index + 1..]
+        .position(|statement| ir::is_unreachable_terminator(statement))?;
+    let unreachable: Vec<&IrNode> = statements[terminator_index + 1..]
         .iter()
         .copied()
-        .filter(|statement| !is_hoisted_or_type_only(*statement, language))
+        .filter(|statement| !statement.is_hoisted_or_type_only)
         .collect();
     let first = unreachable.first()?;
     let last = unreachable.last()?;
-    let start_line = first.start_position().row + 1;
-    let end_line = last.end_position().row + 1;
+    let start_line = first.span.start_line as usize;
+    let end_line = last.span.end_line as usize;
     let mut lines = BTreeSet::new();
     for statement in &unreachable {
-        collect_executable_lines(*statement, language, &mut lines);
+        collect_ir_executable_lines(statement, &mut lines);
     }
     Some((start_line, end_line, lines.into_iter().collect()))
 }
 
-/// D22 exception, JS/TS only: a statement kind that is not actually
-/// unreachable code in effect even when it sits after an unconditional
-/// terminator. `function_declaration`/`generator_function_declaration` are
-/// hoisted — they run regardless of where they sit in their block — and
-/// `type_alias_declaration`/`interface_declaration` are type-only and
-/// erased at runtime, so neither can be "dead code" in the sense this rule
-/// means. The Java path has no such exception: Java has no hoisting and no
-/// type-only declaration statement.
-fn is_hoisted_or_type_only(node: Node, language: LanguageFamily) -> bool {
-    language == LanguageFamily::JsTs
-        && matches!(
-            node.kind(),
-            "function_declaration"
-                | "generator_function_declaration"
-                | "type_alias_declaration"
-                | "interface_declaration"
-        )
-}
-
-/// D22, `*-EMPTY-CATCH`: a `catch_clause` whose `body` block has neither a
-/// statement nor a comment (a comment is a named child too, so it already
-/// excludes the documented-empty case).
-fn find_empty_catch(node: Node, language: LanguageFamily) -> Option<(usize, usize, Vec<usize>)> {
-    let body = node.child_by_field_name("body")?;
-    if body.named_child_count() != 0 {
+/// D22, `*-EMPTY-CATCH`: a `catch` clause whose body block has neither a
+/// statement nor a comment. `body`'s own IR children include both named
+/// statements and a comment (also named in tree-sitter's own sense, and
+/// thus already excluded here the same way `is_named` excludes it as a
+/// `statement_children` member elsewhere) — counting any named child, not
+/// just non-comment ones, is what makes the documented-empty (comment-only)
+/// case decline.
+fn find_empty_catch(node: &IrNode) -> Option<(usize, usize, Vec<usize>)> {
+    let body = node.children.iter().find(|child| child.in_catch_body)?;
+    if body.children.iter().any(|child| child.is_named) {
         return None;
     }
-    let start_line = node.start_position().row + 1;
-    let end_line = node.end_position().row + 1;
+    let start_line = node.span.start_line as usize;
+    let end_line = node.span.end_line as usize;
     let mut lines = BTreeSet::new();
-    collect_executable_lines(node, language, &mut lines);
+    collect_ir_executable_lines(node, &mut lines);
     Some((start_line, end_line, lines.into_iter().collect()))
 }
 
@@ -366,58 +345,138 @@ fn find_empty_catch(node: Node, language: LanguageFamily) -> Option<(usize, usiz
 /// `if` branch always returns, by the conservative, syntax-only test in
 /// `always_returns` (no dataflow: an if/else chain that returns on every
 /// path but does not end in a bare `return`/`throw` is not flagged).
-fn find_redundant_else(node: Node, language: LanguageFamily) -> Option<(usize, usize, Vec<usize>)> {
-    let consequence = node.child_by_field_name("consequence")?;
-    let alternative = node.child_by_field_name("alternative")?;
-    if !always_returns(consequence, language) {
+/// `if_statement`'s three named, non-comment children are always
+/// `[condition, consequence, alternative]` in that order in both grammars
+/// (confirmed against `tree-sitter-java`/`tree-sitter-javascript`'s own
+/// `node-types.json` field declarations), so positions 1 and 2 are the
+/// two branches without needing a field name off the IR.
+fn find_redundant_else(node: &IrNode) -> Option<(usize, usize, Vec<usize>)> {
+    let children = statement_children(node);
+    let consequence = *children.get(1)?;
+    let alternative = *children.get(2)?;
+    if !always_returns(consequence) {
         return None;
     }
-    let start_line = alternative.start_position().row + 1;
-    let end_line = alternative.end_position().row + 1;
+    let start_line = alternative.span.start_line as usize;
+    let end_line = alternative.span.end_line as usize;
     let mut lines = BTreeSet::new();
-    collect_executable_lines(alternative, language, &mut lines);
+    collect_ir_executable_lines(alternative, &mut lines);
     Some((start_line, end_line, lines.into_iter().collect()))
 }
 
 /// Conservative "always returns": the node itself is a bare `return`/
-/// `throw`, or it is a block/`statement_block` whose *last* direct
-/// statement is one. No recursion into nested `if`/`else` exhaustiveness —
-/// that would need dataflow, which D22 rules out.
-fn always_returns(node: Node, language: LanguageFamily) -> bool {
-    match node.kind() {
-        "return_statement" | "throw_statement" => true,
-        "block" | "statement_block" => statement_children(node, language)
-            .last()
-            .map(|last| matches!(last.kind(), "return_statement" | "throw_statement"))
-            .unwrap_or(false),
-        _ => false,
+/// `throw` (`ir::is_return_or_throw`), or it is a block-kind node (see
+/// `is_unreachable_container`'s doc comment for how block-kind-ness is
+/// read off the IR without a grammar string) whose *last* direct statement
+/// is one. No recursion into nested `if`/`else` exhaustiveness — that would
+/// need dataflow, which D22 rules out.
+fn always_returns(node: &IrNode) -> bool {
+    if ir::is_return_or_throw(node) {
+        return true;
     }
+    if node.children.first().is_some_and(|child| child.in_block) {
+        return statement_children(node)
+            .last()
+            .is_some_and(|last| ir::is_return_or_throw(last));
+    }
+    false
 }
 
-/// `node`'s direct named, non-comment children, in source order.
-fn statement_children<'tree>(node: Node<'tree>, language: LanguageFamily) -> Vec<Node<'tree>> {
-    let mut cursor = node.walk();
-    node.named_children(&mut cursor)
-        .filter(|child| !is_comment_kind(child.kind(), language))
+/// `node`'s direct named, non-comment children, in source order —
+/// `IrNode::is_named` + `::is_comment` over `IrNode::children`, which (unlike
+/// tree-sitter's own `named_children()`) holds anonymous children too.
+fn statement_children(node: &IrNode) -> Vec<&IrNode> {
+    node.children
+        .iter()
+        .filter(|child| child.is_named && !child.is_comment)
         .collect()
 }
 
-/// Iterative pre-order traversal via a single reused `TreeCursor` (no
-/// native call-stack growth): visits `root` and every descendant.
-fn for_each_descendant<'tree>(root: Node<'tree>, mut visit: impl FnMut(Node<'tree>)) {
-    let mut cursor = root.walk();
-    loop {
-        visit(cursor.node());
-        if cursor.goto_first_child() {
-            continue;
-        }
-        loop {
-            if cursor.goto_next_sibling() {
-                break;
+/// D11: every distinct 1-based source line within `node`'s own IR subtree
+/// that has at least one node the lowering already marked `executable`
+/// (`exec_lines::is_executable_leaf`, computed once per node during
+/// lowering) — an iterative walk over `IrNode::children`'s already-built
+/// `Vec`s, so it needs no cursor/parent bookkeeping the way a tree-sitter
+/// walk does.
+fn collect_ir_executable_lines(node: &IrNode, lines: &mut BTreeSet<usize>) {
+    let mut stack: Vec<&IrNode> = vec![node];
+    while let Some(current) = stack.pop() {
+        if current.executable {
+            let start = current.span.start_line as usize;
+            let end = current.span.end_line as usize;
+            for line in start..=end {
+                lines.insert(line);
             }
-            if !cursor.goto_parent() {
-                return;
-            }
         }
+        stack.extend(current.children.iter());
+    }
+}
+
+/// Visits `root` and every descendant, iteratively. `is_root` is `true`
+/// only for the single call on `root` itself — see
+/// `is_unreachable_container`'s doc comment for why that matters.
+fn for_each_ir_node<'a>(root: &'a IrNode, mut visit: impl FnMut(&'a IrNode, bool)) {
+    let mut stack: Vec<(&'a IrNode, bool)> = vec![(root, true)];
+    while let Some((node, is_root)) = stack.pop() {
+        visit(node, is_root);
+        for child in node.children.iter().rev() {
+            stack.push((child, false));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::model::FileScanSummary;
+
+    fn parse_java_inline(source: &str) -> ParsedFile {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_java::LANGUAGE.into())
+            .expect("java grammar");
+        let tree = parser.parse(source, None).expect("java parse");
+        ParsedFile {
+            relative_path: PathBuf::from("Inline.java"),
+            language: LanguageFamily::Java,
+            source: source.to_string(),
+            tree,
+        }
+    }
+
+    /// D12/D11: `file_language_lines`'s executable-line set must come from
+    /// the IR's own `executable` spans (`collect_ir_executable_lines`), not
+    /// a tree-sitter walk — the now-deleted `exec_lines::collect_executable_
+    /// lines` was the pre-retarget production caller this replaces (see
+    /// `:88:file_language_lines`'s doc comment). The expected set below is
+    /// the same answer that function gave for this exact fixture before its
+    /// removal: named, non-comment leaf tokens contribute their own line
+    /// (`class`/`void`/`{`/`}` are anonymous and excluded; the comment on
+    /// line 4 is excluded by kind), and the bare `return;` on line 5
+    /// contributes via the bare-control-flow special case — but the two
+    /// brace-only lines (6, 7) contribute nothing.
+    #[test]
+    fn test_file_language_lines_come_from_ir_spans() {
+        let source = "class C {\n    void m() {\n        int x = 1;\n        // comment\n        return;\n    }\n}\n";
+        let file = parse_java_inline(source);
+        let metrics = MetricsResult {
+            callables: Vec::new(),
+            syntax_blocks: Vec::new(),
+            file_scan_summaries: vec![FileScanSummary {
+                relative_path: file.relative_path.clone(),
+                scanned_lines: 7,
+            }],
+            erosion: 0.0,
+            top25: Vec::new(),
+            incomplete: false,
+        };
+        let files = file_language_lines(std::slice::from_ref(&file), &metrics);
+        assert_eq!(files.len(), 1);
+        let expected: BTreeSet<usize> = [1usize, 2, 3, 5].into_iter().collect();
+        assert_eq!(files[0].executable_lines, expected, "{:?}", files[0]);
+        assert_eq!(files[0].scanned_lines, 7);
+        assert_eq!(files[0].language, LanguageFamily::Java);
     }
 }

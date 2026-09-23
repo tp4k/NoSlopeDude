@@ -1,11 +1,67 @@
 use std::path::PathBuf;
 
+use nsd::ir::{self, IrNode};
+use nsd::lower;
 use nsd::model::{DiscoveredFile, LanguageFamily};
 use nsd::parse::{self, ParsedFile};
 use nsd::rules::{self, ALL_RULE_IDS};
 
 const JAVA: LanguageFamily = LanguageFamily::Java;
 const JS_TS: LanguageFamily = LanguageFamily::JsTs;
+
+/// Builds a `ParsedFile` directly from an inline source string, bypassing
+/// on-disk discovery — used by the three new IR-retarget regression tests
+/// below so they don't grow `tests/fixtures/rules/` (and, with it,
+/// `tests/neutrality.rs`'s clean-corpus membership, which is WS-2's fence,
+/// not this stream's).
+fn parse_inline_java(source: &str) -> ParsedFile {
+    let mut parser = tree_sitter::Parser::new();
+    parser
+        .set_language(&tree_sitter_java::LANGUAGE.into())
+        .expect("java grammar");
+    let tree = parser.parse(source, None).expect("java parse");
+    ParsedFile {
+        relative_path: PathBuf::from("Inline.java"),
+        language: JAVA,
+        source: source.to_string(),
+        tree,
+    }
+}
+
+fn parse_inline_jsts(source: &str) -> ParsedFile {
+    let mut parser = tree_sitter::Parser::new();
+    parser
+        .set_language(&tree_sitter_javascript::LANGUAGE.into())
+        .expect("javascript grammar");
+    let tree = parser.parse(source, None).expect("javascript parse");
+    ParsedFile {
+        relative_path: PathBuf::from("inline.js"),
+        language: JS_TS,
+        source: source.to_string(),
+        tree,
+    }
+}
+
+/// Every `IrNode` in `root`'s tree, pre-order (parent before its children) —
+/// mirrors `tests/ir_lowering.rs`'s own `collect` helper.
+fn collect<'a>(root: &'a IrNode, out: &mut Vec<&'a IrNode>) {
+    out.push(root);
+    for child in &root.children {
+        collect(child, out);
+    }
+}
+
+/// The first (pre-order, so outermost) IR node whose span starts on
+/// `line` (1-based) — used to locate a specific statement without a
+/// grammar-kind string, since the IR carries none.
+fn node_starting_at_line(root: &IrNode, line: u32) -> &IrNode {
+    let mut nodes = Vec::new();
+    collect(root, &mut nodes);
+    nodes
+        .into_iter()
+        .find(|node| node.span.start_line == line)
+        .unwrap_or_else(|| panic!("no IR node starts at line {line}"))
+}
 
 fn fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rules")
@@ -118,6 +174,81 @@ fn test_each_jsts_rule_fires_once_on_its_fixture() {
     assert!(
         !hit.flagged_lines.contains(&27),
         "the second unreachable-after-return hit must exclude the exempt helper declaration's line: {hit:?}"
+    );
+}
+
+/// D22 IR retarget: one predicate, `ir::is_terminator`, answers
+/// terminator-ness for a Java `return`/`break`/`throw` and its JS/TS
+/// counterpart alike — no `language ==` branch inside the predicate
+/// itself (`ir::is_terminator`'s own body only matches on `terminator`,
+/// never on `LanguageFamily`). Each terminator statement is located by the
+/// line it starts on, not by a grammar-kind string, since the IR carries
+/// none; a non-terminator statement (each fixture's own method/function
+/// header line) must answer `false` in both families too, so the
+/// predicate isn't merely "always true here".
+#[test]
+fn test_terminator_predicate_is_language_agnostic() {
+    let java_source = "class C {\n    int m(int a) {\n        if (a > 0) {\n            return 1;\n        }\n        for (int i = 0; i < a; i++) {\n            if (i == 2) {\n                break;\n            }\n        }\n        throw new RuntimeException();\n    }\n}\n";
+    let java_ir = lower::lower_file(&parse_inline_java(java_source)).root;
+    assert!(ir::is_terminator(node_starting_at_line(&java_ir, 4))); // return 1;
+    assert!(ir::is_terminator(node_starting_at_line(&java_ir, 8))); // break;
+    assert!(ir::is_terminator(node_starting_at_line(&java_ir, 11))); // throw ...;
+    assert!(!ir::is_terminator(node_starting_at_line(&java_ir, 2))); // int m(int a) {
+
+    let js_source = "function m(a) {\n    if (a > 0) {\n        return 1;\n    }\n    for (let i = 0; i < a; i++) {\n        if (i === 2) {\n            break;\n        }\n    }\n    throw new Error();\n}\n";
+    let js_ir = lower::lower_file(&parse_inline_jsts(js_source)).root;
+    assert!(ir::is_terminator(node_starting_at_line(&js_ir, 3))); // return 1;
+    assert!(ir::is_terminator(node_starting_at_line(&js_ir, 7))); // break;
+    assert!(ir::is_terminator(node_starting_at_line(&js_ir, 10))); // throw ...;
+    assert!(!ir::is_terminator(node_starting_at_line(&js_ir, 1))); // function m(a) {
+}
+
+/// D22 IR retarget: `*-EMPTY-CATCH` reads `IrNode::in_catch_body` (the IR's
+/// own catch-body-membership flag), not a `catch_clause` grammar string —
+/// a genuinely empty catch still fires, and a catch holding only a comment
+/// still declines, exactly as it did pre-retarget.
+#[test]
+fn test_empty_catch_is_detected_through_ir_catch_body_membership() {
+    let source = "class C {\n    void m() {\n        try {\n            doThing();\n        }\n        catch (Exception e) {\n        }\n        try {\n            doThing();\n        }\n        catch (Exception e) {\n            // ignored\n        }\n    }\n}\n";
+    let files = vec![parse_inline_java(source)];
+    let findings = rules::find_findings(&files);
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    let hit = &findings[0];
+    assert_eq!(hit.rule_id, rules::JAVA_EMPTY_CATCH);
+    assert_eq!(hit.start_line, 6, "{hit:?}");
+    assert_eq!(hit.end_line, 7, "{hit:?}");
+    assert_eq!(hit.flagged_lines, vec![6], "{hit:?}");
+}
+
+/// D22 IR retarget: the documented JS/TS-only exemption
+/// (`IrNode::is_hoisted_or_type_only`) survives the retarget and does not
+/// leak into Java — this is a plain regression test for the retarget, not
+/// a clearing of the `LanguageFamily::JsTs` guard row at
+/// `src/rules/mod.rs:339` (that stays open, deferred to M0c). A JS/TS
+/// hoisted function declaration after a `return` is exempt and produces no
+/// finding; the same shape in Java (whose lowering hardcodes
+/// `is_hoisted_or_type_only: false` for every kind) has no such exemption
+/// and must still fire.
+#[test]
+fn test_hoisted_and_type_only_exemption_stays_jsts_only() {
+    let java_source =
+        "class C {\n    void m() {\n        return;\n        class Local {\n        }\n    }\n}\n";
+    let js_source = "function m() {\n    return;\n    function helper() {\n    }\n}\n";
+    let files = vec![parse_inline_java(java_source), parse_inline_jsts(js_source)];
+    let findings = rules::find_findings(&files);
+
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    let hit = &findings[0];
+    assert_eq!(hit.rule_id, rules::JAVA_UNREACHABLE_AFTER_RETURN, "{hit:?}");
+    assert_eq!(hit.language, LanguageFamily::Java);
+    assert_eq!(hit.start_line, 4, "{hit:?}");
+    assert_eq!(hit.end_line, 5, "{hit:?}");
+    assert_eq!(hit.flagged_lines, vec![4], "{hit:?}");
+    assert!(
+        !findings
+            .iter()
+            .any(|finding| finding.rule_id == rules::JSTS_UNREACHABLE_AFTER_RETURN),
+        "the JS/TS hoisted-function exemption must still hold: {findings:?}"
     );
 }
 

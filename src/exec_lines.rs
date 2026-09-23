@@ -5,8 +5,6 @@
 //! definition. This is also the function M0b's IR lowers to as its single
 //! `executable` rule (`nsd-plan-final.md` M0a step 2).
 
-use std::collections::BTreeSet;
-
 use tree_sitter::Node;
 
 use crate::model::LanguageFamily;
@@ -39,29 +37,14 @@ pub(crate) fn is_executable_leaf(node: Node, language: LanguageFamily) -> bool {
     node.child_count() == 0 || is_bare_control_flow(node)
 }
 
-/// D11: every distinct 1-based source line within `node`'s span that has
-/// at least one leaf token belonging to a named, non-comment node — so
-/// `node`'s own closing-brace line, if it holds nothing else, is excluded.
-pub(crate) fn collect_executable_lines(
-    node: Node,
-    language: LanguageFamily,
-    lines: &mut BTreeSet<usize>,
-) {
-    for_each_descendant(node, |leaf| {
-        if is_executable_leaf(leaf, language) {
-            let start = leaf.start_position().row + 1;
-            let end = leaf.end_position().row + 1;
-            for line in start..=end {
-                lines.insert(line);
-            }
-        }
-    });
-}
-
 /// Iterative pre-order traversal via a single reused `TreeCursor` (no
 /// native call-stack growth): visits `root` and every descendant. Private
-/// to this module — `collect_executable_lines`'s own traversal, not shared
-/// with the other modules' independent traversal helpers.
+/// to this module and, now that `collect_executable_lines` (the production
+/// caller) has moved to `rules::collect_ir_executable_lines`, the IR-native
+/// retarget of the same D11 rule, used only by the test helpers below —
+/// `#[cfg(test)]` reflects that honestly rather than leaving a
+/// production-only dead-code warning for `-D warnings` to catch.
+#[cfg(test)]
 fn for_each_descendant<'tree>(root: Node<'tree>, mut visit: impl FnMut(Node<'tree>)) {
     let mut cursor = root.walk();
     loop {
