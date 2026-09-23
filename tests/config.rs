@@ -111,6 +111,7 @@ fn bad_severity_is_c102() {
 fn bad_globs_are_c102() {
     assert_is_c102(Config::parse(b"version: 1\ninclude: [\"src/[\"]\n"));
     assert_is_c102(Config::parse(b"version: 1\nexclude: [\"src/[\"]\n"));
+    assert_is_c102(Config::parse(b"version: 1\nexclude: [\"#vendor/**\"]\n"));
 }
 
 #[test]
@@ -138,6 +139,9 @@ fn non_positive_min_clone_lines_is_c102() {
 #[test]
 fn empty_include_is_c102() {
     assert_is_c102(Config::parse(b"version: 1\ninclude: []\n"));
+    assert_is_c102(Config::parse(b"version: 1\ninclude: [\"\"]\n"));
+    assert_is_c102(Config::parse(b"version: 1\ninclude: [\"   \"]\n"));
+    assert_is_c102(Config::parse(b"version: 1\ninclude: [\"#src/**\"]\n"));
 }
 
 #[test]
