@@ -7,6 +7,7 @@
 //! this module emits classifications, not diagnostics — turning
 //! `too_large`/`non_utf8_path` into `A102` is M3-M5.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use git2::Oid;
@@ -132,6 +133,11 @@ pub fn discover(entries: &[Entry], scope: &CompiledScope) -> DiscoveryResult {
     let builtins = builtin_override();
     let mut included = Vec::new();
     let mut skipped = Vec::new();
+    // One directory-verdict memo per matcher (D19's ancestor walk), so a
+    // directory shared by many sibling entries is matched at most once per
+    // matcher per `discover` call, not once per entry (perf, triage row 7).
+    let mut builtin_dir_verdicts: HashMap<&[u8], bool> = HashMap::new();
+    let mut exclude_dir_verdicts: HashMap<&[u8], bool> = HashMap::new();
 
     for entry in entries {
         match entry.kind {
@@ -157,7 +163,7 @@ pub fn discover(entries: &[Entry], scope: &CompiledScope) -> DiscoveryResult {
             skipped.push(skip(entry, SkipReason::Symlink));
             continue;
         }
-        if is_builtin_excluded(&entry.path, &builtins) {
+        if is_builtin_excluded(&entry.path, &builtins, &mut builtin_dir_verdicts) {
             skipped.push(skip(entry, SkipReason::BuiltinExclusion));
             continue;
         }
@@ -165,7 +171,7 @@ pub fn discover(entries: &[Entry], scope: &CompiledScope) -> DiscoveryResult {
             skipped.push(skip(entry, SkipReason::OutsideInclude));
             continue;
         }
-        if is_config_excluded(&entry.path, &scope.exclude) {
+        if is_config_excluded(&entry.path, &scope.exclude, &mut exclude_dir_verdicts) {
             skipped.push(skip(entry, SkipReason::ConfigExclude));
             continue;
         }
@@ -195,8 +201,12 @@ fn skip(entry: &Entry, reason: SkipReason) -> SkippedEntry {
 /// Whether `path` is a built-in exclusion (D19): any `.git` path
 /// component, or a match (direct or via an ancestor directory) against the
 /// dependency/build, generated or WebJar glob lists.
-fn is_builtin_excluded(path: &RepoPath, builtins: &Override) -> bool {
-    has_git_component(path.as_bytes()) || matches_including_ancestors(builtins, path)
+fn is_builtin_excluded<'e>(
+    path: &'e RepoPath,
+    builtins: &Override,
+    dir_verdicts: &mut HashMap<&'e [u8], bool>,
+) -> bool {
+    has_git_component(path.as_bytes()) || matches_including_ancestors(builtins, path, dir_verdicts)
 }
 
 /// Whether `path` falls outside `include` (D20's `outside_include`);
@@ -213,16 +223,33 @@ fn is_outside_include(path: &RepoPath, include: &Option<Override>) -> bool {
 /// Whether `path` is subtracted by `exclude` (D20's `config_exclude`); the
 /// same ancestor-directory walk as the built-in check applies here too,
 /// since a user's directory-anchored exclude pattern has the same
-/// single-entry-only matching limitation.
-fn is_config_excluded(path: &RepoPath, exclude: &Override) -> bool {
-    matches_including_ancestors(exclude, path)
+/// single-entry-only matching limitation. `exclude` is empty by default
+/// (no user `exclude:` entries), so that case returns before the allocation
+/// `matches_including_ancestors` would otherwise pay on every entry.
+fn is_config_excluded<'e>(
+    path: &'e RepoPath,
+    exclude: &Override,
+    dir_verdicts: &mut HashMap<&'e [u8], bool>,
+) -> bool {
+    if exclude.is_empty() {
+        return false;
+    }
+    matches_including_ancestors(exclude, path, dir_verdicts)
 }
 
-/// Checks `path` itself, then every ancestor directory, against `matcher`
-/// (D19: mirrors `src/discover.rs`'s private `is_ignored`,
+/// Checks `path` itself (unmemoised: each entry's own path is only ever
+/// checked once), then its parent directory's memoised verdict, against
+/// `matcher` (D19: mirrors `src/discover.rs`'s private `is_ignored`,
 /// `src/discover.rs:178-198`, since a directory-anchored override glob such
-/// as `node_modules/` only matches the directory entry itself).
-fn matches_including_ancestors(matcher: &Override, path: &RepoPath) -> bool {
+/// as `node_modules/` only matches the directory entry itself). `dir_verdicts`
+/// is shared across every entry `discover` classifies with this matcher, so
+/// a directory is matched against `matcher` at most once, however many
+/// sibling files it contains.
+fn matches_including_ancestors<'e>(
+    matcher: &Override,
+    path: &'e RepoPath,
+    dir_verdicts: &mut HashMap<&'e [u8], bool>,
+) -> bool {
     let bytes = path.as_bytes();
     if matcher
         .matched(path_for_matching(bytes), false)
@@ -230,27 +257,37 @@ fn matches_including_ancestors(matcher: &Override, path: &RepoPath) -> bool {
     {
         return true;
     }
-    for ancestor in ancestor_dirs(bytes) {
-        if matcher
-            .matched(path_for_matching(ancestor), true)
-            .is_whitelist()
-        {
-            return true;
-        }
-    }
-    false
+    let parent = match bytes.iter().rposition(|&byte| byte == b'/') {
+        Some(slash) => &bytes[..slash],
+        None => return false, // No parent directory at all.
+    };
+    dir_verdict(matcher, parent, dir_verdicts)
 }
 
-/// Every ancestor directory of `path`, deepest first, as raw byte slices
-/// (e.g. `a/b/c.ts` yields `a/b` then `a`).
-fn ancestor_dirs(path: &[u8]) -> Vec<&[u8]> {
-    let mut ancestors = Vec::new();
-    let mut remaining = path;
-    while let Some(slash) = remaining.iter().rposition(|&byte| byte == b'/') {
-        remaining = &remaining[..slash];
-        ancestors.push(remaining);
+/// The memoised verdict of directory `dir` against `matcher`: whether `dir`
+/// itself matches, or its parent's verdict does, recursing up to the root
+/// (whose parent, the empty prefix, is always `false`). Computed once per
+/// distinct directory per `dir_verdicts` map, then looked up by every later
+/// entry or ancestor that shares it.
+fn dir_verdict<'e>(
+    matcher: &Override,
+    dir: &'e [u8],
+    dir_verdicts: &mut HashMap<&'e [u8], bool>,
+) -> bool {
+    if dir.is_empty() {
+        return false;
     }
-    ancestors
+    if let Some(&verdict) = dir_verdicts.get(dir) {
+        return verdict;
+    }
+    let parent = match dir.iter().rposition(|&byte| byte == b'/') {
+        Some(slash) => &dir[..slash],
+        None => &[][..],
+    };
+    let verdict = matcher.matched(path_for_matching(dir), true).is_whitelist()
+        || dir_verdict(matcher, parent, dir_verdicts);
+    dir_verdicts.insert(dir, verdict);
+    verdict
 }
 
 /// Whether any `/`-separated component of `path` is literally `.git`
