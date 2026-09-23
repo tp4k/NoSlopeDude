@@ -8,7 +8,7 @@ mod common;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use git2::{IndexEntry, IndexTime, Oid, Repository};
+use git2::{IndexEntry, IndexTime, ObjectType, Oid, Repository, Signature};
 use tempfile::TempDir;
 
 use nsd::git::diff::{self, Change};
@@ -309,6 +309,41 @@ fn changes_sorted_by_raw_path_bytes() {
     assert_eq!(
         paths,
         vec![b"a-nested".to_vec(), b"m.ts".to_vec(), b"z-nested".to_vec(),]
+    );
+}
+
+#[test]
+fn nonstandard_tree_mode_is_normalized_not_panicking() {
+    let (_dir, repo) = common::init_repo();
+    let blob_oid = repo.blob(b"a\n").expect("write a.ts blob");
+
+    let mut tree_bytes = Vec::new();
+    tree_bytes.extend_from_slice(b"100600 a.ts\0");
+    tree_bytes.extend_from_slice(blob_oid.as_bytes());
+    let tree_oid = repo
+        .odb()
+        .expect("open odb")
+        .write(ObjectType::Tree, &tree_bytes)
+        .expect("write a tree with a nonstandard raw mode");
+    let tree = repo
+        .find_tree(tree_oid)
+        .expect("read back the nonstandard-mode tree");
+
+    let signature =
+        Signature::now("nsd test fixture", "fixture@example.invalid").expect("build a signature");
+    let candidate_oid = repo
+        .commit(None, &signature, &signature, "nonstandard mode", &tree, &[])
+        .expect("commit the nonstandard-mode tree");
+
+    let changes = diff::diff_commit_to_commit(&repo, None, candidate_oid)
+        .expect("diff commit to commit must not panic on a nonstandard raw tree mode");
+
+    assert_eq!(
+        changes,
+        vec![Change::Added {
+            path: RepoPath::from_bytes(b"a.ts".to_vec()),
+            kind: EntryKind::Regular,
+        }]
     );
 }
 
