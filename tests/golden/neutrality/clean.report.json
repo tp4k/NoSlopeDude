@@ -12,27 +12,27 @@
   },
   "scores": {
     "overall": {
-      "erosion": 0.3204595479773351,
+      "erosion": 0.3173652170244212,
       "verbosity": {
         "flagged_lines": 227,
-        "scanned_lines": 1008,
-        "ratio": 0.2251984126984127
+        "scanned_lines": 1018,
+        "ratio": 0.22298624754420432
       }
     },
     "java": {
-      "erosion": 0.39608172508205486,
+      "erosion": 0.392743515046639,
       "verbosity": {
         "flagged_lines": 154,
-        "scanned_lines": 630,
-        "ratio": 0.24444444444444444
+        "scanned_lines": 636,
+        "ratio": 0.24213836477987422
       }
     },
     "js_ts": {
-      "erosion": 0.21875136287677102,
+      "erosion": 0.21627892399648804,
       "verbosity": {
         "flagged_lines": 73,
-        "scanned_lines": 378,
-        "ratio": 0.1931216931216931
+        "scanned_lines": 382,
+        "ratio": 0.19109947643979058
       }
     }
   },

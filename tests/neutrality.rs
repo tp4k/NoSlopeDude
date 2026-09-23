@@ -35,29 +35,15 @@ use nsd::pipeline;
 /// mismatch, `scores.*.verbosity.scanned_lines` moved by files the baseline
 /// never saw), which `DECLARED_DELTAS` has no way to express as a per-field
 /// delta. `tests/fixtures/salvage/`'s own two fixtures deliberately do NOT
-/// join this list; see `CLEAN_CORPUS_ONLY_EXCLUSIONS` below.
+/// join this list -- per Decision 20 they join the *clean* corpus instead
+/// (`clean_corpus_sources()` below), with `clean.report.json` re-captured
+/// to account for them, exactly as WS-3 round 1's `tests/fixtures/parity/`
+/// did.
 const MALFORMED_CORPUS_SOURCES: &[&str] = &[
     "metrics/broken/Broken.ts",
     "rules/broken/Broken.java",
     "report/src/Broken.java",
 ];
-
-/// Paths relative to `tests/fixtures/`, excluded from the clean corpus's
-/// walk but deliberately kept OUT of `MALFORMED_CORPUS_SOURCES` (see that
-/// constant's own doc comment for why folding them in there would be
-/// wrong): `tests/salvage.rs`'s own `salvage/Mixed.java` and
-/// `salvage/Mixed.ts` fixtures. Both carry the exact same damage shape
-/// `rules/broken/Broken.java` already does (one clean callable, one
-/// intersecting a `MISSING`/`ERROR` node) and did not exist when
-/// `clean.report.json` was captured, so excluding them here keeps the rest
-/// of the clean-corpus comparison exactly as it was -- these two files
-/// simply never enter either scanned corpus.
-///
-/// `docs/ir-neutrality.md` originally anticipated a *clean*-corpus
-/// re-capture as the procedure for this addition; this list is the
-/// alternative that needs no re-capture at all, since a file this list
-/// excludes was never part of the corpus baseline had to account for.
-const CLEAN_CORPUS_ONLY_EXCLUSIONS: &[&str] = &["salvage/Mixed.java", "salvage/Mixed.ts"];
 
 const FIXTURES_ROOT: &str = "tests/fixtures";
 
@@ -152,19 +138,15 @@ fn malformed_corpus_sources() -> Vec<PathBuf> {
     MALFORMED_CORPUS_SOURCES.iter().map(PathBuf::from).collect()
 }
 
-/// All of `tests/fixtures/` minus the three malformed sources (decision 1)
-/// and minus `CLEAN_CORPUS_ONLY_EXCLUSIONS` (WS-6's own new fixtures, kept
-/// out of `malformed_corpus_sources()` deliberately -- see that list's own
-/// doc comment).
+/// All of `tests/fixtures/` minus the three malformed sources (decision 1).
+/// `tests/fixtures/salvage/`'s two fixtures (`Mixed.java`, `Mixed.ts`) join
+/// this corpus like any other fixture -- see `MALFORMED_CORPUS_SOURCES`'s
+/// own doc comment for why they don't belong there instead.
 fn clean_corpus_sources() -> Vec<PathBuf> {
     let malformed = malformed_corpus_sources();
-    let clean_only_exclusions: Vec<PathBuf> = CLEAN_CORPUS_ONLY_EXCLUSIONS
-        .iter()
-        .map(PathBuf::from)
-        .collect();
     all_fixture_relative_paths()
         .into_iter()
-        .filter(|path| !malformed.contains(path) && !clean_only_exclusions.contains(path))
+        .filter(|path| !malformed.contains(path))
         .collect()
 }
 
