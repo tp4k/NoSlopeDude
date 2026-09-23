@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-use nsd::ir::{self, DamageKind, DecisionKind, IrNode};
+use nsd::ir::{self, DamageKind, DecisionKind, IrNode, TerminatorKind};
 use nsd::lower;
 use nsd::metrics;
 use nsd::model::{DiscoveredFile, Grammar, LanguageFamily};
@@ -87,6 +87,25 @@ fn parse_damaged(path: &str, language: LanguageFamily) -> ParsedFile {
         relative_path: PathBuf::from(path),
         language,
         source,
+        tree,
+    }
+}
+
+/// `parse_damaged`, but for an inline source string rather than a fixture
+/// file on disk: `throw` has no fixture under `tests/fixtures/` to read (see
+/// `test_throw_is_a_return_or_throw_terminator` below), and adding one would
+/// move the neutrality baseline (see *Scope*'s no-new-fixture rule) -- an
+/// inline source adds no file under `tests/fixtures/`.
+fn parse_inline(source: &str, grammar: Grammar, language: LanguageFamily) -> ParsedFile {
+    let mut parser = tree_sitter::Parser::new();
+    parser
+        .set_language(&tree_sitter_language(grammar))
+        .expect("set_language");
+    let tree = parser.parse(source, None).expect("parse");
+    ParsedFile {
+        relative_path: PathBuf::from("inline"),
+        language,
+        source: source.to_string(),
         tree,
     }
 }
@@ -379,7 +398,8 @@ fn test_callable_table_matches_the_metrics_callables() {
         .collect();
 
     let mut actual: Vec<(String, usize)> = Vec::new();
-    let mut static_initializer_body_span = None;
+    let mut static_initializer: Option<(ir::Span, ir::Span, String)> = None;
+    let mut regular: Option<(ir::Span, ir::Span, String)> = None;
     for file in &files {
         let ir_file = lower::lower_file(file);
         for callable in &ir_file.callables {
@@ -387,16 +407,47 @@ fn test_callable_table_matches_the_metrics_callables() {
             if file.relative_path == Path::new("__tests__/CallableKinds.java")
                 && callable.span.start_line == 18
             {
-                static_initializer_body_span = Some(callable.body_span);
+                static_initializer = Some((callable.span, callable.body_span, file.source.clone()));
+            }
+            if file.relative_path == Path::new("__tests__/CallableKinds.ts")
+                && callable.span.start_line == 1
+            {
+                regular = Some((callable.span, callable.body_span, file.source.clone()));
             }
         }
     }
 
     assert_eq!(actual, expected);
 
-    let body_span = static_initializer_body_span.expect("the static_initializer callable");
+    let (callable_span, body_span, source) =
+        static_initializer.expect("the static_initializer callable");
     assert_eq!(body_span.start_line, 18, "{body_span:?}");
     assert_eq!(body_span.end_line, 20, "{body_span:?}");
+    // Discriminating: the `static_initializer` declaration node also spans
+    // lines 18-20 (`static { ... }`), so the line-only asserts above cannot
+    // separate the body span from the declaration span -- the byte span can.
+    assert!(
+        body_span.start_byte > callable_span.start_byte,
+        "{body_span:?} vs {callable_span:?}"
+    );
+    assert_eq!(
+        &source[body_span.start_byte as usize..=body_span.start_byte as usize],
+        "{",
+        "{body_span:?}"
+    );
+
+    let (regular_span, regular_body_span, regular_source) =
+        regular.expect("the CallableKinds.ts regular callable");
+    assert!(
+        regular_body_span.start_byte > regular_span.start_byte,
+        "{regular_body_span:?} vs {regular_span:?}"
+    );
+    assert_eq!(
+        &regular_source
+            [regular_body_span.start_byte as usize..=regular_body_span.start_byte as usize],
+        "{",
+        "{regular_body_span:?}"
+    );
 }
 
 /// `SyntaxBlock`'s three values, reproducible from the IR, in order:
@@ -408,7 +459,10 @@ fn test_callable_table_matches_the_metrics_callables() {
 fn test_block_table_matches_the_metrics_syntax_blocks() {
     let mut files = parsed_files_under(
         &metrics_fixture_root(),
-        &[("__tests__/TopLevelBlock.js", JS_TS)],
+        &[
+            ("__tests__/TopLevelBlock.js", JS_TS),
+            ("__tests__/CallableKinds.java", JAVA),
+        ],
     );
     files.extend(parsed_files(&[("StructuralPredicates.java", JAVA)]));
 
@@ -522,8 +576,11 @@ fn test_hoisted_and_type_only_flag_is_jsts_only() {
         .filter(|node| node.is_hoisted_or_type_only)
         .map(|node| node.span.start_line)
         .collect();
-    assert!(ts_flagged_lines.contains(&4), "{ts_flagged_lines:?}");
-    assert!(ts_flagged_lines.contains(&12), "{ts_flagged_lines:?}");
+    // Exact set, not just "contains" (which an over-broad flag -- e.g. every
+    // JS/TS node flagged -- would also satisfy): line 1 and 9's own
+    // `function` declarations, line 4's `interface Unused`, line 12's `type
+    // UnusedAlias`.
+    assert_eq!(ts_flagged_lines, vec![1, 4, 9, 12], "{ts_flagged_lines:?}");
 
     let js_files = parsed_files_under(&root, &[("__tests__/JsRulesFixture.js", JS_TS)]);
     let js_ir = lower::lower_file(&js_files[0]);
@@ -534,8 +591,12 @@ fn test_hoisted_and_type_only_flag_is_jsts_only() {
         .filter(|node| node.is_hoisted_or_type_only)
         .map(|node| node.span.start_line)
         .collect();
-    assert!(js_flagged_lines.contains(&27), "{js_flagged_lines:?}");
-    assert!(js_flagged_lines.contains(&30), "{js_flagged_lines:?}");
+    // Exact set: the seven `function` declarations, pre-order.
+    assert_eq!(
+        js_flagged_lines,
+        vec![1, 8, 15, 23, 25, 27, 30],
+        "{js_flagged_lines:?}"
+    );
 
     for (path, language) in [
         ("__tests__/JavaRulesFixture.java", JAVA),
@@ -605,4 +666,39 @@ fn test_terminator_subsets_split_break_and_continue() {
 fn test_ir_node_stays_within_56_bytes() {
     let size = std::mem::size_of::<IrNode>();
     assert!(size <= 56, "{size}");
+}
+
+/// `TerminatorKind::Throw` (D22/D7): no fixture under `tests/fixtures/`
+/// contains a `throw` at all, so both lowerings' `"throw_statement" =>
+/// Some(TerminatorKind::Throw)` arm is otherwise unasserted -- deleting it
+/// from either lowering would leave the whole suite green. Uses
+/// `parse_inline` rather than a new fixture file (see that helper's doc
+/// comment).
+#[test]
+fn test_throw_is_a_return_or_throw_terminator() {
+    let java_source = "class T { void m() { throw new RuntimeException(); } }";
+    let java_file = parse_inline(java_source, Grammar::Java, JAVA);
+    let java_ir = lower::lower_file(&java_file);
+    let mut java_nodes = Vec::new();
+    collect(&java_ir.root, &mut java_nodes);
+    let java_throw = java_nodes
+        .iter()
+        .find(|node| node.terminator == Some(TerminatorKind::Throw))
+        .expect("a throw_statement node");
+    assert!(ir::is_terminator(java_throw));
+    assert!(ir::is_unreachable_terminator(java_throw));
+    assert!(ir::is_return_or_throw(java_throw));
+
+    let js_source = "function m() { throw new Error(); }";
+    let js_file = parse_inline(js_source, Grammar::JavaScript, JS_TS);
+    let js_ir = lower::lower_file(&js_file);
+    let mut js_nodes = Vec::new();
+    collect(&js_ir.root, &mut js_nodes);
+    let js_throw = js_nodes
+        .iter()
+        .find(|node| node.terminator == Some(TerminatorKind::Throw))
+        .expect("a throw_statement node");
+    assert!(ir::is_terminator(js_throw));
+    assert!(ir::is_unreachable_terminator(js_throw));
+    assert!(ir::is_return_or_throw(js_throw));
 }
