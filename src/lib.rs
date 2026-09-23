@@ -3,6 +3,7 @@
 //! and the pipeline that sequences the stages).
 
 pub mod cli;
+pub mod config;
 pub mod discover;
 pub(crate) mod exec_lines;
 pub mod git;

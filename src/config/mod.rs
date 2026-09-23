@@ -1,0 +1,361 @@
+//! Strict repository-root `nsd.yml` parsing (WS-3): every invalid shape
+//! surfaces as `NSD-C102` (D12-D17); a missing file yields built-in
+//! defaults. `measurement.min_clone_lines` is parsed and exposed here but
+//! not wired into any fingerprint or cache key (that wiring is the
+//! `nsd-v1` freeze's job, out of this track's scope).
+
+use std::fmt;
+use std::path::Path;
+
+use git2::Repository;
+use ignore::overrides::{Override, OverrideBuilder};
+use serde::Deserialize;
+
+use crate::git::snapshot::{CommitSnapshot, Entry, SOURCE_CEILING_BYTES};
+use crate::git::GitError;
+use crate::model::DEFAULT_MIN_CLONE_LINES;
+
+/// The diagnostic code every invalid `nsd.yml` shape carries (D21): the
+/// twelve-code enum is M3's `src/policy/` and is not created here.
+pub const CODE_INVALID_CONFIG: &str = "NSD-C102";
+
+/// The repository-root file name the loader looks for (D17): matched by
+/// raw entry path bytes, never opened by filesystem name (APFS is
+/// case-insensitive, so an `open("nsd.yml")` could read `NSD.yml`).
+const CONFIG_FILE_NAME: &str = "nsd.yml";
+
+/// The only supported `nsd.yml` schema version (D12).
+const SUPPORTED_VERSION: u32 = 1;
+
+/// Default `output.max_terminal_diagnostics` (`nsd-plan-final.md` M6-M7).
+const DEFAULT_MAX_TERMINAL_DIAGNOSTICS: u32 = 50;
+/// Default `output.max_agent_diagnostics` (`nsd-plan-final.md` M6-M7).
+const DEFAULT_MAX_AGENT_DIAGNOSTICS: u32 = 30;
+
+/// Root passed to `OverrideBuilder` (D15): `Override::matched` strips a
+/// common prefix, or else assumes the matched path lives in the same
+/// directory as this root, so glob validation and matching depend only on
+/// the patterns themselves, never on this placeholder's value.
+const GLOB_VALIDATION_ROOT: &str = ".";
+
+/// A strictly parsed, defaulted `nsd.yml`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Config {
+    pub version: u32,
+    /// `None` means omitted (every supported source path); `Some` is
+    /// never empty (D14: an explicit `include: []` is `NSD-C102`).
+    pub include: Option<Vec<String>>,
+    pub exclude: Vec<String>,
+    pub measurement: MeasurementConfig,
+    pub policy: PolicyConfig,
+    pub output: OutputConfig,
+}
+
+impl Default for Config {
+    fn default() -> Config {
+        Config {
+            version: SUPPORTED_VERSION,
+            include: None,
+            exclude: Vec::new(),
+            measurement: MeasurementConfig::defaults(),
+            policy: PolicyConfig::defaults(),
+            output: OutputConfig::defaults(),
+        }
+    }
+}
+
+impl Config {
+    /// Parses repository-root `nsd.yml` bytes strictly (D12-D17): unknown
+    /// or duplicate fields, unsupported versions or codes, invalid globs,
+    /// invalid severities, and a non-positive `min_clone_lines` all
+    /// produce `NSD-C102`.
+    pub fn parse(bytes: &[u8]) -> Result<Config, ConfigError> {
+        let text = std::str::from_utf8(bytes)
+            .map_err(|err| ConfigError::new(format!("nsd.yml is not valid UTF-8: {err}")))?;
+        let raw: RawConfig = serde_yaml_ng::from_str(text)
+            .map_err(|err| ConfigError::new(format!("nsd.yml failed to parse: {err}")))?;
+        Config::try_from_raw(raw)
+    }
+
+    fn try_from_raw(raw: RawConfig) -> Result<Config, ConfigError> {
+        if raw.version != SUPPORTED_VERSION {
+            return Err(ConfigError::new(format!(
+                "unsupported nsd.yml version {}; only {SUPPORTED_VERSION} is supported",
+                raw.version
+            )));
+        }
+
+        if let Some(include) = &raw.include {
+            if include.is_empty() {
+                return Err(ConfigError::new(
+                    "include: [] is not allowed; omit `include` to select every supported path",
+                ));
+            }
+            build_override(include)?;
+        }
+        build_override(&raw.exclude)?;
+
+        let measurement = match raw.measurement {
+            Some(raw_measurement) => {
+                let min_clone_lines = raw_measurement
+                    .min_clone_lines
+                    .unwrap_or(DEFAULT_MIN_CLONE_LINES);
+                if min_clone_lines == 0 {
+                    return Err(ConfigError::new(format!(
+                        "measurement.min_clone_lines must be a positive integer, got {min_clone_lines}"
+                    )));
+                }
+                MeasurementConfig { min_clone_lines }
+            }
+            None => MeasurementConfig::defaults(),
+        };
+
+        let policy = match raw.policy {
+            Some(raw_policy) => PolicyConfig {
+                nsd_e101: raw_policy.nsd_e101.unwrap_or(Severity::Deny),
+                nsd_e102: raw_policy.nsd_e102.unwrap_or(Severity::Deny),
+                nsd_v101: raw_policy.nsd_v101.unwrap_or(Severity::Deny),
+                nsd_v102: raw_policy.nsd_v102.unwrap_or(Severity::Deny),
+                nsd_s102: raw_policy.nsd_s102.unwrap_or(Severity::Warn),
+            },
+            None => PolicyConfig::defaults(),
+        };
+
+        let output = match raw.output {
+            Some(raw_output) => OutputConfig {
+                max_terminal_diagnostics: raw_output
+                    .max_terminal_diagnostics
+                    .unwrap_or(DEFAULT_MAX_TERMINAL_DIAGNOSTICS),
+                max_agent_diagnostics: raw_output
+                    .max_agent_diagnostics
+                    .unwrap_or(DEFAULT_MAX_AGENT_DIAGNOSTICS),
+            },
+            None => OutputConfig::defaults(),
+        };
+
+        Ok(Config {
+            version: raw.version,
+            include: raw.include,
+            exclude: raw.exclude,
+            measurement,
+            policy,
+            output,
+        })
+    }
+
+    /// Compiles `include`/`exclude` into `ignore::overrides::Override`
+    /// matchers (D15), the scope WS-4 consumes. `Config` only ever holds
+    /// already-validated patterns (`parse`/`load_from_commit` reject an
+    /// invalid one as `NSD-C102`), so rebuilding here is deterministic.
+    pub fn compiled_scope(&self) -> Result<CompiledScope, ConfigError> {
+        let include = match &self.include {
+            Some(patterns) => Some(build_override(patterns)?),
+            None => None,
+        };
+        let exclude = build_override(&self.exclude)?;
+        Ok(CompiledScope { include, exclude })
+    }
+}
+
+/// `measurement.min_clone_lines` (A2): parsed and exposed, not yet wired
+/// into any fingerprint or cache key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MeasurementConfig {
+    pub min_clone_lines: u32,
+}
+
+impl MeasurementConfig {
+    fn defaults() -> MeasurementConfig {
+        MeasurementConfig {
+            min_clone_lines: DEFAULT_MIN_CLONE_LINES,
+        }
+    }
+}
+
+/// `deny`/`warn`/`off`, exactly as written (D13); any other spelling
+/// (including different casing) is an unsupported severity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Severity {
+    Deny,
+    Warn,
+    Off,
+}
+
+/// The five policy codes this track recognises (D13); any other code,
+/// including a short form such as `E101`, is unsupported.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PolicyConfig {
+    pub nsd_e101: Severity,
+    pub nsd_e102: Severity,
+    pub nsd_v101: Severity,
+    pub nsd_v102: Severity,
+    pub nsd_s102: Severity,
+}
+
+impl PolicyConfig {
+    fn defaults() -> PolicyConfig {
+        PolicyConfig {
+            nsd_e101: Severity::Deny,
+            nsd_e102: Severity::Deny,
+            nsd_v101: Severity::Deny,
+            nsd_v102: Severity::Deny,
+            nsd_s102: Severity::Warn,
+        }
+    }
+}
+
+/// `output.max_terminal_diagnostics`/`output.max_agent_diagnostics` (D16):
+/// any non-negative integer fitting `u32`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OutputConfig {
+    pub max_terminal_diagnostics: u32,
+    pub max_agent_diagnostics: u32,
+}
+
+impl OutputConfig {
+    fn defaults() -> OutputConfig {
+        OutputConfig {
+            max_terminal_diagnostics: DEFAULT_MAX_TERMINAL_DIAGNOSTICS,
+            max_agent_diagnostics: DEFAULT_MAX_AGENT_DIAGNOSTICS,
+        }
+    }
+}
+
+/// The compiled `include`/`exclude` glob matchers WS-4 consumes (D15),
+/// built with the same glob engine `src/discover.rs` uses.
+pub struct CompiledScope {
+    pub include: Option<Override>,
+    pub exclude: Override,
+}
+
+/// A Git-domain or shape error raised while loading `nsd.yml`, always
+/// under `NSD-C102` (D21).
+#[derive(Debug)]
+pub struct ConfigError {
+    message: String,
+}
+
+impl ConfigError {
+    fn new(message: impl Into<String>) -> ConfigError {
+        ConfigError {
+            message: message.into(),
+        }
+    }
+
+    fn from_git(err: GitError) -> ConfigError {
+        ConfigError::new(format!("cannot read {CONFIG_FILE_NAME}: {err}"))
+    }
+
+    /// The stable diagnostic code, always `"NSD-C102"` (D21).
+    pub fn code(&self) -> &'static str {
+        CODE_INVALID_CONFIG
+    }
+}
+
+impl fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "[{}] {}", CODE_INVALID_CONFIG, self.message)
+    }
+}
+
+impl std::error::Error for ConfigError {}
+
+/// Validates `patterns` (D15: no `!`-negated/re-inclusion pattern, and
+/// every pattern a syntactically valid glob) and compiles them into an
+/// `Override`.
+fn build_override(patterns: &[String]) -> Result<Override, ConfigError> {
+    let mut builder = OverrideBuilder::new(Path::new(GLOB_VALIDATION_ROOT));
+    for pattern in patterns {
+        if pattern.starts_with('!') {
+            return Err(ConfigError::new(format!(
+                "negated/re-inclusion glob pattern {pattern:?} is not supported"
+            )));
+        }
+        builder
+            .add(pattern)
+            .map_err(|err| ConfigError::new(format!("invalid glob pattern {pattern:?}: {err}")))?;
+    }
+    builder
+        .build()
+        .map_err(|err| ConfigError::new(format!("failed to compile glob patterns: {err}")))
+}
+
+/// Finds the snapshot entry whose raw path is exactly `nsd.yml` (D17): no
+/// `sub/nsd.yml`, no `NSD.yml`.
+fn find_root_entry(entries: &[Entry]) -> Option<&Entry> {
+    entries
+        .iter()
+        .find(|entry| entry.path.as_bytes() == CONFIG_FILE_NAME.as_bytes())
+}
+
+/// Loads `nsd.yml` from a `Commit` snapshot (D17): built-in defaults when
+/// no repository-root entry exists, `NSD-C102` for an invalid one.
+pub fn load_from_commit(
+    repo: &Repository,
+    snapshot: &CommitSnapshot,
+) -> Result<Config, ConfigError> {
+    let Some(entry) = find_root_entry(&snapshot.entries) else {
+        return Ok(Config::default());
+    };
+    let bytes = snapshot
+        .read(repo, entry)
+        .map_err(ConfigError::from_git)?
+        .ok_or_else(|| {
+            ConfigError::new(format!(
+                "{CONFIG_FILE_NAME} exceeds the {SOURCE_CEILING_BYTES}-byte read ceiling or is \
+                 not a regular file"
+            ))
+        })?;
+    Config::parse(&bytes)
+}
+
+/// The raw, unvalidated shape `serde_yaml_ng` deserializes `nsd.yml`
+/// into: strict at every level (`deny_unknown_fields`), so an unknown or
+/// duplicate field at any depth fails before semantic validation runs.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawConfig {
+    version: u32,
+    #[serde(default)]
+    include: Option<Vec<String>>,
+    #[serde(default)]
+    exclude: Vec<String>,
+    #[serde(default)]
+    measurement: Option<RawMeasurement>,
+    #[serde(default)]
+    policy: Option<RawPolicy>,
+    #[serde(default)]
+    output: Option<RawOutput>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawMeasurement {
+    #[serde(default)]
+    min_clone_lines: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawPolicy {
+    #[serde(rename = "NSD-E101", default)]
+    nsd_e101: Option<Severity>,
+    #[serde(rename = "NSD-E102", default)]
+    nsd_e102: Option<Severity>,
+    #[serde(rename = "NSD-V101", default)]
+    nsd_v101: Option<Severity>,
+    #[serde(rename = "NSD-V102", default)]
+    nsd_v102: Option<Severity>,
+    #[serde(rename = "NSD-S102", default)]
+    nsd_s102: Option<Severity>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawOutput {
+    #[serde(default)]
+    max_terminal_diagnostics: Option<u32>,
+    #[serde(default)]
+    max_agent_diagnostics: Option<u32>,
+}

@@ -159,7 +159,11 @@ fn root_nsd_yml_only() {
     common::commit_entries(
         &repo,
         &[
-            (b"sub/nsd.yml".to_vec(), MODE_REGULAR, b"version: 1\n".to_vec()),
+            (
+                b"sub/nsd.yml".to_vec(),
+                MODE_REGULAR,
+                b"version: 1\n".to_vec(),
+            ),
             (b"NSD.yml".to_vec(), MODE_REGULAR, b"version: 1\n".to_vec()),
         ],
     );
@@ -171,7 +175,11 @@ fn root_nsd_yml_only() {
     common::commit_entries(
         &repo,
         &[
-            (b"sub/nsd.yml".to_vec(), MODE_REGULAR, b"version: 1\n".to_vec()),
+            (
+                b"sub/nsd.yml".to_vec(),
+                MODE_REGULAR,
+                b"version: 1\n".to_vec(),
+            ),
             (b"NSD.yml".to_vec(), MODE_REGULAR, b"version: 1\n".to_vec()),
             (
                 b"nsd.yml".to_vec(),
