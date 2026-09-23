@@ -1,43 +1,27 @@
-//! Stage 2 (WS-2): CC and erosion metrics. Walks each parsed file's tree,
-//! in parallel across files (D21), to find callables (D8), computes each
-//! callable's CC from the documented decision constructs (D7,
-//! `docs/cc-rules.md`) and its SLOC from grammar-derived named tokens
-//! (D11), publishes mass and erosion (D13), and ranks the top 25 callables
-//! by CC descending. Every tree walk here is an iterative `TreeCursor`
-//! traversal (`walk_excluding`) rather than per-AST-depth recursion, so an
+//! Stage 2 (WS-2/WS-3): CC and erosion metrics. Each parsed file is lowered
+//! once (`lower::lower_file`), and every callable (D8), block (`SyntaxBlock`)
+//! and SLOC count (D11/D12) comes off that `IrFile` rather than a
+//! tree-sitter node: `IrFile::callables` already carries D8's declaration/
+//! body boundaries and D10's resolved name, `IrFile::blocks` already carries
+//! the self-is-block classification, and every `IrNode` already carries its
+//! own `executable`/`decision` flags. Computes each callable's CC from the
+//! documented decision constructs (D7, `docs/cc-rules.md`) and its SLOC from
+//! the IR's `executable` flag, publishes mass and erosion (D13), and ranks
+//! the top 25 callables by CC descending. Every IR walk here
+//! (`walk_ir_excluding`) is iterative, not per-AST-depth recursion, so an
 //! arbitrarily deep source tree degrades in time, not by aborting (D18).
 
 use std::cmp::Ordering;
 
 use rayon::prelude::*;
-use tree_sitter::{Node, TreeCursor};
 
-use crate::exec_lines::is_executable_leaf;
-use crate::ir::{DecisionKind, IrNode, Span};
+use crate::ir::{DecisionKind, IrCallable, IrNode, Span};
 use crate::lower;
-use crate::model::{
-    Callable, FileScanSummary, LanguageFamily, MetricsResult, SyntaxBlock, CC_EROSION_THRESHOLD,
-};
+use crate::model::{Callable, FileScanSummary, MetricsResult, SyntaxBlock, CC_EROSION_THRESHOLD};
 use crate::parse::ParsedFile;
 
 /// How many rows the top-callables ranking keeps.
 const TOP_CALLABLES: usize = 25;
-
-const JAVA_CALLABLE_KINDS: &[&str] = &[
-    "method_declaration",
-    "constructor_declaration",
-    "compact_constructor_declaration",
-    "static_initializer",
-    "lambda_expression",
-];
-
-const JSTS_CALLABLE_KINDS: &[&str] = &[
-    "function_declaration",
-    "generator_function_declaration",
-    "function_expression",
-    "arrow_function",
-    "method_definition",
-];
 
 /// Runs the metrics stage over every successfully parsed file, one rayon
 /// task per file (D21) since `parse_all` already fans out the same way and
@@ -119,80 +103,53 @@ pub fn rank_top_callables(callables: &[Callable]) -> Vec<Callable> {
     top.iter().map(|callable| (**callable).clone()).collect()
 }
 
-fn callable_kinds(language: LanguageFamily) -> &'static [&'static str] {
-    match language {
-        LanguageFamily::Java => JAVA_CALLABLE_KINDS,
-        LanguageFamily::JsTs => JSTS_CALLABLE_KINDS,
-    }
-}
-
-/// D8: a callable-kind node that has a body. `function_signature`,
-/// `abstract_method_signature` and similar bodyless kinds are never in
-/// `callable_kinds`, so they are excluded by the kind check alone; a
-/// bodyless Java `method_declaration` (interface or abstract method) is
-/// excluded by the body check.
-fn is_callable_node(node: Node, language: LanguageFamily) -> bool {
-    callable_kinds(language).contains(&node.kind()) && callable_body(node, language).is_some()
-}
-
-/// The callable's body node. Every callable kind exposes it through the
-/// `body` field, except Java's `static_initializer`, whose direct `block`
-/// child carries no field name.
-fn callable_body<'tree>(node: Node<'tree>, _language: LanguageFamily) -> Option<Node<'tree>> {
-    node.child_by_field_name("body")
-        .or_else(|| first_child_of_kind(node, "block"))
-}
-
-/// One pass over `file`'s whole tree: finds every callable (spawning
-/// `scan_callable_body`'s own pass for its cc/SLOC, D9), collects every
-/// block-kind node as a `SyntaxBlock` — at module level and inside
-/// callables alike, so a module-level block is no longer silently
-/// dropped — and accumulates the file's D12 scanned-line count, all from
-/// the same `TreeCursor`.
+/// One pass over `file`'s lowered IR: turns `IrFile::callables` into
+/// `Callable`s (spawning `scan_callable_body`'s own walk for each one's
+/// cc/SLOC, D9) and `IrFile::blocks` into `SyntaxBlock`s — at module level
+/// and inside callables alike, both tables already in document order — and
+/// accumulates the file's D12 scanned-line count over the whole IR tree,
+/// unexcluded.
 fn scan_file(file: &ParsedFile) -> (Vec<Callable>, Vec<SyntaxBlock>, FileScanSummary) {
-    // Lowered once per file: every callable's own cc/SLOC walk below reads
-    // its subtree off this same tree instead of tree-sitter nodes.
+    // Lowered once per file: every callable's own cc/SLOC walk, the block
+    // table and the D12 line count below all read off this same IR tree.
     let ir_file = lower::lower_file(file);
 
-    let mut callables = Vec::new();
-    let mut syntax_blocks = Vec::new();
     let mut scanned_lines = 0usize;
     let mut last_counted_line = 0usize;
+    walk_ir_excluding(&ir_file.root, &[], |node| {
+        if node.executable {
+            accumulate_ir_line(node.span, &mut scanned_lines, &mut last_counted_line);
+        }
+    });
 
-    walk_excluding(
-        file.tree.root_node(),
-        |_node| false,
-        |node| {
-            if is_executable_leaf(node, file.language) {
-                accumulate_line(node, &mut scanned_lines, &mut last_counted_line);
+    let syntax_blocks = ir_file
+        .blocks
+        .iter()
+        .map(|block| SyntaxBlock {
+            relative_path: file.relative_path.clone(),
+            language: file.language,
+            kind: block.kind,
+            start_line: block.span.start_line as usize,
+            end_line: block.span.end_line as usize,
+        })
+        .collect();
+
+    let callables = ir_file
+        .callables
+        .iter()
+        .map(|callable| {
+            let CallableMetrics { cc, sloc } = scan_callable_body(callable.body_span, &ir_file);
+            Callable {
+                relative_path: file.relative_path.clone(),
+                language: file.language,
+                name: callable.name.clone(),
+                start_line: callable.span.start_line as usize,
+                cc,
+                sloc,
+                mass: mass(cc, sloc),
             }
-            if is_block_kind(node.kind(), file.language) {
-                syntax_blocks.push(SyntaxBlock {
-                    relative_path: file.relative_path.clone(),
-                    language: file.language,
-                    kind: node.kind(),
-                    start_line: node.start_position().row + 1,
-                    end_line: node.end_position().row + 1,
-                });
-            }
-            if is_callable_node(node, file.language) {
-                // `is_callable_node` already confirmed a body is present.
-                if let Some(body) = callable_body(node, file.language) {
-                    let CallableMetrics { cc, sloc } =
-                        scan_callable_body(body, file.language, &ir_file.root);
-                    callables.push(Callable {
-                        relative_path: file.relative_path.clone(),
-                        language: file.language,
-                        name: resolve_name(node, &file.source),
-                        start_line: node.start_position().row + 1,
-                        cc,
-                        sloc,
-                        mass: mass(cc, sloc),
-                    });
-                }
-            }
-        },
-    );
+        })
+        .collect();
 
     let summary = FileScanSummary {
         relative_path: file.relative_path.clone(),
@@ -206,23 +163,22 @@ struct CallableMetrics {
     sloc: usize,
 }
 
-/// One callable body's cc/SLOC, walking `body`'s own `IrNode` subtree
-/// (found in `ir_root`, the whole file's lowered tree) rather than
-/// tree-sitter nodes directly -- `is_callable_node`/`callable_body` stay the
-/// tree-sitter-based D8 boundary finders they always were; only the
-/// decision/executable accumulation they hand off to is retargeted.
-fn scan_callable_body(body: Node, language: LanguageFamily, ir_root: &IrNode) -> CallableMetrics {
-    if is_callable_node(body, language) {
+/// One callable body's cc/SLOC, walking `body_span`'s own `IrNode` subtree
+/// (found in `ir_file.root`) rather than tree-sitter nodes -- D8's
+/// declaration/body boundaries and D10's name now come off
+/// `IrFile::callables` (`scan_file` iterates it directly), not a
+/// tree-sitter descent from this function.
+fn scan_callable_body(body_span: Span, ir_file: &lower::IrFile) -> CallableMetrics {
+    if body_is_nested_callable(body_span, &ir_file.callables) {
         // The callable's own body is itself a callable (e.g. a curried
         // `(a) => (b) => …`): D9 excludes it entirely, matching
-        // `walk_excluding`'s own `exclude(root)` check.
+        // `walk_ir_excluding`'s own exclusion of a nested callable's span.
         return CallableMetrics { cc: 1, sloc: 0 };
     }
 
-    let body_span = Span::from_node(body);
     let fallback = fallback_ir_body(body_span);
-    let body_ir = find_ir_subtree(ir_root, body_span).unwrap_or(&fallback);
-    let excluded = collect_nested_callable_spans(body, language);
+    let body_ir = find_ir_subtree(&ir_file.root, body_span).unwrap_or(&fallback);
+    let excluded = nested_callable_spans(body_span, &ir_file.callables);
 
     let mut cc = 1u32;
     let mut sloc = 0usize;
@@ -240,32 +196,34 @@ fn scan_callable_body(body: Node, language: LanguageFamily, ir_root: &IrNode) ->
     CallableMetrics { cc, sloc }
 }
 
-/// The byte spans of every top-level nested callable inside `body` (D9):
-/// found via `is_callable_node`, the same tree-sitter predicate `scan_file`
-/// itself uses -- the descent stops the moment one is found, since anything
-/// further inside it is already covered by its own span. Iterative (an
-/// explicit work-list, no recursion), so a body nested deep inside a
-/// pathological source tree cannot overflow the stack.
-fn collect_nested_callable_spans(body: Node, language: LanguageFamily) -> Vec<Span> {
-    let mut spans = Vec::new();
-    let mut pending = vec![body];
-    while let Some(node) = pending.pop() {
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if is_callable_node(child, language) {
-                spans.push(Span::from_node(child));
-            } else {
-                pending.push(child);
-            }
-        }
-    }
-    spans
+/// D9's curried-body special case: the callable's own body node is itself
+/// another callable's declaration (e.g. `(a) => (b) => …`, no wrapping
+/// block), true exactly when some callable in the same file's
+/// `IrFile::callables` declares itself at `body_span`.
+fn body_is_nested_callable(body_span: Span, callables: &[IrCallable]) -> bool {
+    callables.iter().any(|callable| callable.span == body_span)
 }
 
-/// D9's own exclusion, over the IR: visits every `IrNode` under `root` in
-/// document order, skipping any subtree whose span falls inside one of
-/// `excluded` (a nested callable's own span). Iterative -- see
-/// `collect_nested_callable_spans`'s own doc comment for why.
+/// D9's own exclusion set for one callable's body: every other callable in
+/// the same file (`IrFile::callables`) whose own declaration span sits
+/// inside `body_span` -- in place of the tree-sitter descent
+/// `collect_nested_callable_spans` used to perform for the same purpose.
+fn nested_callable_spans(body_span: Span, callables: &[IrCallable]) -> Vec<Span> {
+    callables
+        .iter()
+        .filter(|callable| {
+            callable.span != body_span
+                && body_span.start_byte <= callable.span.start_byte
+                && callable.span.end_byte <= body_span.end_byte
+        })
+        .map(|callable| callable.span)
+        .collect()
+}
+
+/// Iterative pre-order traversal via an explicit work-list (no native
+/// call-stack growth, unlike per-AST-depth-level recursion): visits `root`
+/// and every descendant, except a subtree whose span falls inside one of
+/// `excluded` is skipped entirely (used for D9: a nested callable's span).
 fn walk_ir_excluding<'a>(root: &'a IrNode, excluded: &[Span], mut visit: impl FnMut(&'a IrNode)) {
     let mut pending = vec![root];
     while let Some(node) = pending.pop() {
@@ -310,10 +268,10 @@ fn fallback_ir_body(span: Span) -> IrNode {
     IrNode::empty(span)
 }
 
-/// `accumulate_line`'s own logic (see its doc comment), re-derived for a
-/// `Span` (the IR) instead of a tree-sitter `Node` -- `accumulate_line`
-/// itself is unchanged, still used by `scan_file`'s own tree-sitter-only D12
-/// count.
+/// Adds the leaf's not-yet-counted lines to `count`, relying on
+/// `walk_ir_excluding` visiting nodes in non-decreasing source-line order —
+/// so a running "highest line already counted" replaces a per-callable/
+/// per-file `HashSet<usize>` of every line seen.
 fn accumulate_ir_line(span: Span, count: &mut usize, last_counted_line: &mut usize) {
     let start = span.start_line as usize;
     let end = span.end_line as usize;
@@ -322,110 +280,6 @@ fn accumulate_ir_line(span: Span, count: &mut usize, last_counted_line: &mut usi
         *count += end - from + 1;
         *last_counted_line = end;
     }
-}
-
-/// Iterative pre-order traversal via a single reused `TreeCursor` (no
-/// native call-stack growth, unlike per-AST-depth-level recursion): visits
-/// `root` and every descendant, except a subtree rooted at a node `exclude`
-/// accepts is skipped entirely (used for D9: a nested callable's span).
-fn walk_excluding<'tree>(
-    root: Node<'tree>,
-    mut exclude: impl FnMut(Node<'tree>) -> bool,
-    mut visit: impl FnMut(Node<'tree>),
-) {
-    if exclude(root) {
-        return;
-    }
-    let mut cursor = root.walk();
-    loop {
-        visit(cursor.node());
-        if descend_to_included_child(&mut cursor, &mut exclude) {
-            continue;
-        }
-        if !advance_to_included_sibling(&mut cursor, &mut exclude) {
-            return;
-        }
-    }
-}
-
-/// Moves `cursor` to its first child `exclude` accepts, skipping past any
-/// excluded children (and their subtrees) entirely. Restores `cursor` to
-/// the parent node if no child qualifies.
-fn descend_to_included_child<'tree>(
-    cursor: &mut TreeCursor<'tree>,
-    exclude: &mut impl FnMut(Node<'tree>) -> bool,
-) -> bool {
-    if !cursor.goto_first_child() {
-        return false;
-    }
-    loop {
-        if !exclude(cursor.node()) {
-            return true;
-        }
-        if !cursor.goto_next_sibling() {
-            cursor.goto_parent();
-            return false;
-        }
-    }
-}
-
-/// Moves `cursor` to the next sibling `exclude` accepts, walking up through
-/// parents as each level is exhausted. A `TreeCursor` refuses to walk above
-/// the node it was constructed with, so this naturally stops at `root`.
-fn advance_to_included_sibling<'tree>(
-    cursor: &mut TreeCursor<'tree>,
-    exclude: &mut impl FnMut(Node<'tree>) -> bool,
-) -> bool {
-    loop {
-        if cursor.goto_next_sibling() {
-            if !exclude(cursor.node()) {
-                return true;
-            }
-            continue;
-        }
-        if !cursor.goto_parent() {
-            return false;
-        }
-    }
-}
-
-/// Adds the leaf's not-yet-counted lines to `count`, relying on
-/// `walk_excluding` visiting leaves in non-decreasing source-line order —
-/// so a running "highest line already counted" replaces a per-callable/
-/// per-file `HashSet<usize>` of every line seen.
-fn accumulate_line(node: Node, count: &mut usize, last_counted_line: &mut usize) {
-    let start = node.start_position().row + 1;
-    let end = node.end_position().row + 1;
-    let from = start.max(*last_counted_line + 1);
-    if from <= end {
-        *count += end - from + 1;
-        *last_counted_line = end;
-    }
-}
-
-/// D10: the node's own `name` field; else the name from an enclosing
-/// `variable_declarator`, `pair` or `assignment_expression`; else
-/// `<anonymous>@<line>`.
-fn resolve_name(node: Node, source: &str) -> String {
-    if let Some(name_node) = node.child_by_field_name("name") {
-        return node_text(name_node, source);
-    }
-    if let Some(parent) = node.parent() {
-        let field = match parent.kind() {
-            "variable_declarator" => Some("name"),
-            "pair" => Some("key"),
-            "assignment_expression" => Some("left"),
-            _ => None,
-        };
-        if let Some(name_node) = field.and_then(|field| parent.child_by_field_name(field)) {
-            return node_text(name_node, source);
-        }
-    }
-    format!("<anonymous>@{}", node.start_position().row + 1)
-}
-
-fn node_text(node: Node, source: &str) -> String {
-    node.utf8_text(source.as_bytes()).unwrap_or("").to_string()
 }
 
 /// `cc`'s weight table (*What the IR must carry*), keyed on the IR's
@@ -442,22 +296,5 @@ fn decision_weight(kind: DecisionKind) -> u32 {
         | DecisionKind::Ternary
         | DecisionKind::And
         | DecisionKind::Or => 1,
-    }
-}
-
-fn first_child_of_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
-    let mut cursor = node.walk();
-    let found = node
-        .children(&mut cursor)
-        .find(|child| child.kind() == kind);
-    found
-}
-
-/// Every `{ … }` scope block in a file — module level and inside a
-/// callable alike — kept for WS-3's duplicate-block detection.
-fn is_block_kind(kind: &str, language: LanguageFamily) -> bool {
-    match language {
-        LanguageFamily::Java => matches!(kind, "block" | "constructor_body"),
-        LanguageFamily::JsTs => kind == "statement_block",
     }
 }
