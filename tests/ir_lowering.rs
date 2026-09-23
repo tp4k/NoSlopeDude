@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 
-use nsd::ir::{DamageKind, DecisionKind, IrNode};
+use nsd::ir::{self, DamageKind, DecisionKind, IrNode};
 use nsd::lower;
 use nsd::model::{DiscoveredFile, Grammar, LanguageFamily};
 use nsd::parse::{self, ParsedFile};
@@ -104,6 +104,30 @@ fn test_version_constants_are_exported() {
     assert_eq!(lower::JSTS_LOWERING_VERSION, 1);
 }
 
+/// Iterative pre-order traversal via a single reused `TreeCursor`: the same
+/// shape as `src/lower/mod.rs:148-164`'s `for_each_descendant`, a fresh copy
+/// here since that one is private to the `lower` module.
+fn for_each_descendant<'tree>(
+    root: tree_sitter::Node<'tree>,
+    mut visit: impl FnMut(tree_sitter::Node<'tree>),
+) {
+    let mut cursor = root.walk();
+    loop {
+        visit(cursor.node());
+        if cursor.goto_first_child() {
+            continue;
+        }
+        loop {
+            if cursor.goto_next_sibling() {
+                break;
+            }
+            if !cursor.goto_parent() {
+                return;
+            }
+        }
+    }
+}
+
 #[test]
 fn test_every_ir_node_carries_a_byte_and_line_span() {
     let files = parsed_files(&[("Decisions.java", JAVA)]);
@@ -119,9 +143,27 @@ fn test_every_ir_node_carries_a_byte_and_line_span() {
         assert!(node.span.end_line >= node.span.start_line);
     }
 
+    // Per-node parity against the tree-sitter tree the IR was built from,
+    // not just internal self-consistency: `build_ir` visits the same
+    // TreeCursor shape in the same pre-order, so `nodes[i]` and
+    // `ts_nodes[i]` name the same source node, one node per the lowering's
+    // 1:1 correspondence.
+    let mut ts_nodes = Vec::new();
+    for_each_descendant(files[0].tree.root_node(), |node| ts_nodes.push(node));
+    assert_eq!(nodes.len(), ts_nodes.len());
+    for (ir_node, ts_node) in nodes.iter().zip(ts_nodes.iter()) {
+        assert_eq!(ir_node.span.start_byte, ts_node.start_byte() as u32);
+        assert_eq!(ir_node.span.end_byte, ts_node.end_byte() as u32);
+        assert_eq!(
+            ir_node.span.start_line,
+            ts_node.start_position().row as u32 + 1
+        );
+        assert_eq!(ir_node.span.end_line, ts_node.end_position().row as u32 + 1);
+    }
+
     let root_span = ir_file.root.span;
     assert_eq!(root_span.start_byte, 0);
-    assert_eq!(root_span.end_byte, files[0].source.len());
+    assert_eq!(root_span.end_byte, files[0].source.len() as u32);
     assert_eq!(root_span.start_line, 1);
 }
 
@@ -159,12 +201,15 @@ fn test_structural_predicates_answer_terminator_block_membership_and_catch_body(
         let mut nodes = Vec::new();
         collect(&ir_file.root, &mut nodes);
 
-        let terminators: Vec<&&IrNode> = nodes.iter().filter(|node| node.is_terminator).collect();
+        let terminators: Vec<&&IrNode> = nodes
+            .iter()
+            .filter(|node| ir::is_terminator(node))
+            .collect();
         assert_eq!(terminators.len(), 2, "{path}: {terminators:#?}");
 
         let in_catch: Vec<_> = terminators
             .iter()
-            .filter(|node| node.in_catch_body)
+            .filter(|node| ir::is_in_catch_body(node))
             .collect();
         assert_eq!(
             in_catch.len(),
@@ -174,7 +219,7 @@ fn test_structural_predicates_answer_terminator_block_membership_and_catch_body(
 
         let outside_catch: Vec<_> = terminators
             .iter()
-            .filter(|node| !node.in_catch_body)
+            .filter(|node| !ir::is_in_catch_body(node))
             .collect();
         assert_eq!(
             outside_catch.len(),
@@ -182,8 +227,26 @@ fn test_structural_predicates_answer_terminator_block_membership_and_catch_body(
             "{path}: expected exactly one non-catch-body terminator"
         );
         assert!(
-            outside_catch[0].in_block,
+            ir::is_block_member(outside_catch[0]),
             "{path}: the plain `return` sits directly in the method's block"
+        );
+
+        // Negative block-membership case: a `catch_clause` node itself (the
+        // one IrNode with `decision == Some(DecisionKind::Catch)`) sits
+        // directly inside a `try_statement`, never a block, so it must read
+        // as not-a-block-member -- and neither does the file root, which has
+        // no parent at all.
+        let catch_clause = nodes
+            .iter()
+            .find(|node| node.decision == Some(DecisionKind::Catch))
+            .expect("a catch_clause decision node");
+        assert!(
+            !ir::is_block_member(catch_clause),
+            "{path}: a catch_clause's own parent is a try_statement, not a block"
+        );
+        assert!(
+            !ir::is_block_member(&ir_file.root),
+            "{path}: the file root has no parent"
         );
     }
 }

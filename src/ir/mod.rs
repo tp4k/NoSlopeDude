@@ -21,22 +21,23 @@ pub const IR_VERSION: u32 = 1;
 /// text extraction, and a 1-based line range, for display.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
-    pub start_byte: usize,
-    pub end_byte: usize,
-    pub start_line: usize,
-    pub end_line: usize,
+    pub start_byte: u32,
+    pub end_byte: u32,
+    pub start_line: u32,
+    pub end_line: u32,
 }
 
 impl Span {
     /// Reads a tree-sitter node's own span directly; the one place `Span`
     /// touches a tree-sitter type, since that is exactly what it is meant to
-    /// mirror, not a grammar-string match.
+    /// mirror, not a grammar-string match. `as u32` is lossless here: the
+    /// underlying tree-sitter C fields these wrap are themselves `uint32_t`.
     pub fn from_node(node: Node) -> Span {
         Span {
-            start_byte: node.start_byte(),
-            end_byte: node.end_byte(),
-            start_line: node.start_position().row + 1,
-            end_line: node.end_position().row + 1,
+            start_byte: node.start_byte() as u32,
+            end_byte: node.end_byte() as u32,
+            start_line: node.start_position().row as u32 + 1,
+            end_line: node.end_position().row as u32 + 1,
         }
     }
 }
