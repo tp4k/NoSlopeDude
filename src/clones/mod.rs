@@ -8,20 +8,27 @@
 //! algorithm; this module implements it.
 //!
 //! D11's per-line "named, non-comment leaf" rule that measures a block's
-//! source lines is shared: `is_executable_leaf` and `is_comment_kind` are
-//! imported from `src/exec_lines.rs`. `accumulate_line` stays
-//! independently implemented here — it counts a run's total lines with a
+//! source lines now comes from the IR's own `executable` flag
+//! (`accumulate_line` below); `accumulate_line` stays independently
+//! implemented here — it counts a run's total lines with a
 //! `last_counted_line` watermark, a different contract from
-//! `exec_lines`'s distinct-line `BTreeSet`.
+//! `exec_lines`'s distinct-line `BTreeSet`. `is_comment_kind` (from
+//! `src/exec_lines.rs`) and `tree_sitter::Node` are only reachable from the
+//! `#[cfg(test)]` pre-IR reference implementation kept below for WS-1's
+//! pinned floor test; the retargeted production path uses neither.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 use rayon::prelude::*;
+#[cfg(test)]
 use tree_sitter::Node;
 
-use crate::exec_lines::{is_comment_kind, is_executable_leaf};
+#[cfg(test)]
+use crate::exec_lines::is_comment_kind;
 use crate::hashing::Digest;
+use crate::ir::IrNode;
+use crate::lower;
 use crate::model::{CloneGroup, CloneLocation, ClonesResult, LanguageFamily};
 use crate::parse::ParsedFile;
 
@@ -248,17 +255,31 @@ fn is_subsumed(candidate: &GroupBuilder, other: &GroupBuilder) -> bool {
 }
 
 /// D15: every candidate block in `file` that passes the ≥2-statement and
-/// ≥`min_clone_lines` filters, as `(fingerprint, candidate)` pairs.
+/// ≥`min_clone_lines` filters, as `(fingerprint, candidate)` pairs. Walks
+/// `lower::lower_file`'s `IrNode` tree rather than `file.tree`'s
+/// tree-sitter nodes: every `IrNode` whose direct children include at
+/// least one `is_clone_statement` node is a clone-candidate container
+/// (D15's six kinds, all now expressed as that one IR flag — see
+/// `ir::IrNode::is_clone_statement`'s own doc comment), so no
+/// `(language, "<grammar kind>")` match is needed to find them. Most
+/// nodes contribute no `is_clone_statement` children at all, and
+/// `enumerate_container_candidates` itself returns immediately on a list
+/// shorter than `MIN_CANDIDATE_STATEMENTS`, so calling it unconditionally
+/// costs one cheap length check per node rather than a container-kind
+/// dispatch.
 fn enumerate_candidates(
     file: &ParsedFile,
     file_index: u32,
     min_clone_lines: u32,
 ) -> Vec<(u128, Candidate)> {
+    let ir_file = lower::lower_file(file);
     let mut candidates = Vec::new();
-    for_each_descendant(file.tree.root_node(), |node| {
-        let Some(statements) = statement_children(node, file.language) else {
-            return;
-        };
+    for_each_ir_node(&ir_file.root, &mut |node| {
+        let statements: Vec<&IrNode> = node
+            .children
+            .iter()
+            .filter(|child| child.is_clone_statement)
+            .collect();
         enumerate_container_candidates(
             &statements,
             file.language,
@@ -284,7 +305,7 @@ fn enumerate_candidates(
 /// line count, which cannot itself be cached the same way (its running
 /// `last_counted_line` state depends on the previous statement in the run).
 fn enumerate_container_candidates(
-    statements: &[Node],
+    statements: &[&IrNode],
     language: LanguageFamily,
     file_index: u32,
     min_clone_lines: u32,
@@ -297,7 +318,7 @@ fn enumerate_container_candidates(
     }
     let statement_tokens: Vec<String> = statements
         .iter()
-        .map(|&statement| normalized_statement_tokens(statement, language, source))
+        .map(|&statement| ir_statement_tokens(statement, source))
         .collect();
     let prefix = family_prefix(language);
 
@@ -308,8 +329,8 @@ fn enumerate_container_candidates(
         for end in (start + 1)..=statement_count {
             let statement = statements[end - 1];
             fingerprint.push(&statement_tokens[end - 1]);
-            for_each_descendant(statement, |node| {
-                if is_executable_leaf(node, language) {
+            for_each_ir_node(statement, &mut |node| {
+                if node.executable {
                     accumulate_line(node, &mut source_lines, &mut last_counted_line);
                 }
             });
@@ -321,8 +342,8 @@ fn enumerate_container_candidates(
                 continue;
             }
 
-            let start_line = statements[start].start_position().row + 1;
-            let end_line = statement.end_position().row + 1;
+            let start_line = statements[start].span.start_line as usize;
+            let end_line = statement.span.end_line as usize;
             out.push((
                 fingerprint.finish(),
                 Candidate {
@@ -337,60 +358,55 @@ fn enumerate_container_candidates(
     }
 }
 
-/// D15's candidate containers: Java `block`, `constructor_body` and
-/// `switch_block_statement_group`; JS/TS `statement_block`, the top-level
-/// `program`, and the `body` field of a `switch_case`/`switch_default`.
-/// Returns the container's direct statement children (comments and, for
-/// the Java switch group, its `switch_label`s dropped), or `None` for
-/// every other node kind. Not `(Java, "program")`: Java's `program` holds
-/// type declarations, not statements.
-fn statement_children<'tree>(
-    node: Node<'tree>,
-    language: LanguageFamily,
-) -> Option<Vec<Node<'tree>>> {
-    match (language, node.kind()) {
-        (LanguageFamily::Java, "block") => Some(named_non_comment_children(node, language)),
-        (LanguageFamily::Java, "constructor_body") => {
-            Some(named_non_comment_children(node, language))
+/// D14: one statement's own contribution to the normalized token stream,
+/// derived from its `IrNode` subtree rather than a tree-sitter walk: every
+/// leaf descendant (`node.children.is_empty()`), in order, with a comment
+/// leaf (`ir::IrNode::is_comment`) dropped and every other leaf's own
+/// source text (`node.span`) preserved verbatim. `ir::IrNode::is_named`
+/// needs no separate branch here: once comments are excluded, a named
+/// leaf's text and an anonymous leaf's own literal (its `node.kind()`
+/// string, which for every anonymous grammar token *is* that token's exact
+/// source text) read the same way — "the source text at this leaf's own
+/// span" — so both collapse to the one `leaf_text` call below. Cached once
+/// per container, per perf row 1, so a multi-statement run's fingerprint
+/// is built by feeding these in sequence, never by re-walking the
+/// statements it already covers.
+fn ir_statement_tokens(statement: &IrNode, source: &str) -> String {
+    let mut tokens = String::new();
+    for_each_ir_node(statement, &mut |node| {
+        if !node.children.is_empty() || node.is_comment {
+            return;
         }
-        (LanguageFamily::Java, "switch_block_statement_group") => Some(
-            named_non_comment_children(node, language)
-                .into_iter()
-                .filter(|child| child.kind() != "switch_label")
-                .collect(),
-        ),
-        (LanguageFamily::JsTs, "statement_block") => {
-            Some(named_non_comment_children(node, language))
-        }
-        (LanguageFamily::JsTs, "program") => Some(named_non_comment_children(node, language)),
-        (LanguageFamily::JsTs, "switch_case" | "switch_default") => {
-            let mut cursor = node.walk();
-            Some(
-                node.children_by_field_name("body", &mut cursor)
-                    .filter(|child| !is_comment_kind(child.kind(), language))
-                    .collect(),
-            )
-        }
-        _ => None,
-    }
+        tokens.push(TOKEN_SEPARATOR);
+        tokens.push_str(leaf_text(node, source));
+    });
+    tokens
 }
 
-fn named_non_comment_children<'tree>(
-    node: Node<'tree>,
-    language: LanguageFamily,
-) -> Vec<Node<'tree>> {
-    let mut cursor = node.walk();
-    node.named_children(&mut cursor)
-        .filter(|child| !is_comment_kind(child.kind(), language))
-        .collect()
+/// The source text at one `IrNode`'s own span — a byte slice, not a
+/// tree-sitter `utf8_text` call, since `IrNode` carries no reference back
+/// to a tree-sitter node.
+fn leaf_text<'a>(node: &IrNode, source: &'a str) -> &'a str {
+    source
+        .get(node.span.start_byte as usize..node.span.end_byte as usize)
+        .unwrap_or("")
 }
 
-/// D14: one statement's own contribution to the normalized token stream —
-/// every leaf descendant, in order, with comments dropped, an anonymous
-/// leaf reduced to its `node.kind()`, and a named leaf's (identifier or
-/// literal) text preserved verbatim. Cached once per container, per perf
-/// row 1, so a multi-statement run's fingerprint is built by feeding these
-/// in sequence, never by re-walking the statements it already covers.
+/// The pre-IR reference implementation, kept verbatim: `nsd-plan-final.md`
+/// M0b item 4's floor test (`src/lower/mod.rs::tests::
+/// test_ir_tokens_reproduce_the_pre_ir_stream_on_every_fixture`, WS-1's,
+/// out of this stream's file scope) calls this exact function, by this
+/// exact name, with a tree-sitter `Node` argument -- so its signature
+/// cannot change without breaking that pinned, unmodifiable call site (see
+/// this round's Open questions). The retargeted production path above
+/// (`ir_statement_tokens`) is what `enumerate_container_candidates` now
+/// calls; this function is unreachable from `clones::run` after the
+/// retarget. `#[cfg(test)]`, not `#[allow(dead_code)]`: its one caller is
+/// itself a `#[cfg(test)]` item (WS-1's), so outside a test build it is not
+/// suppressed dead code, it genuinely does not exist -- and both vanish
+/// together, so the same `#[cfg(test)]` build that omits this omits the
+/// caller too.
+#[cfg(test)]
 pub(crate) fn normalized_statement_tokens(
     statement: Node,
     language: LanguageFamily,
@@ -448,11 +464,11 @@ fn family_prefix(language: LanguageFamily) -> &'static str {
 }
 
 /// Adds a leaf's not-yet-counted lines to `count`, relying on
-/// `for_each_descendant` visiting leaves in non-decreasing source-line
-/// order, the same technique WS-2's callable SLOC uses.
-fn accumulate_line(node: Node, count: &mut usize, last_counted_line: &mut usize) {
-    let start = node.start_position().row + 1;
-    let end = node.end_position().row + 1;
+/// `for_each_ir_node` visiting leaves in non-decreasing source-line order,
+/// the same technique WS-2's callable SLOC uses.
+fn accumulate_line(node: &IrNode, count: &mut usize, last_counted_line: &mut usize) {
+    let start = node.span.start_line as usize;
+    let end = node.span.end_line as usize;
     let from = start.max(*last_counted_line + 1);
     if from <= end {
         *count += end - from + 1;
@@ -460,10 +476,28 @@ fn accumulate_line(node: Node, count: &mut usize, last_counted_line: &mut usize)
     }
 }
 
+/// Iterative pre-order traversal of one already-built `IrNode` tree: visits
+/// `root`, then each child in document order (`build_ir` assembles
+/// `IrNode::children` in the same order its own `TreeCursor` walked them).
+/// A stack of `&IrNode` refs, not recursion (D18: no per-AST-depth
+/// recursion) -- the same reason `ir::IrNode`'s own `Drop` impl is
+/// iterative.
+fn for_each_ir_node<'a>(root: &'a IrNode, visit: &mut impl FnMut(&'a IrNode)) {
+    let mut stack: Vec<&'a IrNode> = vec![root];
+    while let Some(node) = stack.pop() {
+        visit(node);
+        stack.extend(node.children.iter().rev());
+    }
+}
+
 /// Iterative pre-order traversal via a single reused `TreeCursor`: visits
 /// `root` and every descendant. Unlike WS-2's `walk_excluding`, this stream
 /// never needs to skip a subtree (no nested-callable exclusion applies to
 /// measuring one clone span), so it carries no exclusion predicate.
+/// Kept solely for `normalized_statement_tokens` above -- the retargeted
+/// production path uses `for_each_ir_node` instead. `#[cfg(test)]` for the
+/// same reason: its only caller is.
+#[cfg(test)]
 fn for_each_descendant<'tree>(root: Node<'tree>, mut visit: impl FnMut(Node<'tree>)) {
     let mut cursor = root.walk();
     loop {
