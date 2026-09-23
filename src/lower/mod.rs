@@ -12,6 +12,7 @@
 mod java;
 mod jsts;
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use tree_sitter::Node;
@@ -19,9 +20,10 @@ use tree_sitter::Node;
 #[cfg(test)]
 use crate::exec_lines::is_comment_kind;
 use crate::exec_lines::is_executable_leaf;
+#[cfg(test)]
+use crate::ir::is_clear_of_damage;
 use crate::ir::{
-    is_clear_of_damage, DamageKind, DamageSpan, DecisionKind, IrBlock, IrCallable, IrNode, Span,
-    TerminatorKind,
+    DamageKind, DamageSpan, DecisionKind, IrBlock, IrCallable, IrNode, Span, TerminatorKind,
 };
 use crate::model::LanguageFamily;
 use crate::parse::ParsedFile;
@@ -74,76 +76,189 @@ pub fn lower_all(parsed_files: &[ParsedFile]) -> Vec<IrFile> {
 /// WS-6 salvage (*Architecture* -> salvage row): `parse::parse_one` no
 /// longer rejects a whole file for `tree.root_node().has_error()`, so
 /// `build_ir` above may run over a damaged tree. This function is the one
-/// place that turns typed damage spans into fail-closed exclusions, at
-/// *entity* granularity (a callable, a block) rather than a generic
-/// "any span overlapping damage" sweep over every node: the latter would
-/// reproduce the exact whole-file-drop bug being fixed one layer down,
-/// since the tree's own root (and every other container node) always spans
-/// the entire file and therefore always "overlaps" any damage found
-/// anywhere in it. A callable/block whose own span intersects any damage
-/// span at all -- even only partially -- is dropped from its side table
-/// entirely (`is_clear_of_damage`), and `prune_damage` replaces exactly
-/// those excluded entities' own `IrNode` subtrees (matched by span, an
-/// entity's span uniquely identifies the one tree-sitter node it was built
-/// from) with a span-only empty node, so every analyzer's own unconditional
-/// whole-tree walk (D12's file-level scanned-line count in
-/// `metrics::scan_file`, the clone and wasteful-rule walks in
-/// `clones`/`rules`, none of which know about damage) never counts or flags
-/// content inside a damaged entity either. Everything else in the tree --
-/// including stray damage that sits outside every callable/block -- is left
-/// exactly as `build_ir` produced it.
+/// place that turns typed damage spans into fail-closed exclusions.
+///
+/// WS-6 round 3 redesign (security HIGH+MEDIUM+MEDIUM, perf HIGH+LOW, all
+/// traced to this one function): `build_ir` already folds, for free during
+/// its single tree walk, each callable's and block's own bottom-up "does
+/// this entity's subtree touch damage anywhere" bit (`callable_dirty` /
+/// `block_dirty`, mirroring the `catch_flags` inheritance it already does).
+/// `cascade_exclusions` turns that into a final exclusion decision per
+/// entity via one document-order interval-nesting sweep: an entity is
+/// excluded if it is itself dirty *or* its nearest enclosing entity is
+/// excluded -- the cascade a bottom-up fold alone cannot express, since a
+/// damaged sibling region elsewhere in the same outer entity must still
+/// exclude an inner clean entity regardless of whether the damage sits
+/// before or after it in document order (this fixes (a): a clean callable
+/// nested inside a damaged one no longer survives in `callables`/`blocks`
+/// once its subtree is wiped). The rebuild target set is every bare damage
+/// span (fixing (c): stray damage outside any callable/block is now always
+/// redacted, not just entity-shaped damage) unioned with every excluded
+/// entity's own span, held in a `HashSet` so `prune_damage`'s per-node
+/// membership test is O(1) average instead of a linear `Vec` scan (fixing
+/// (d): no per-node or per-entity work now scales with `damage.len()` or
+/// the pruned-entity count). Each entity's own dirty bit is read exactly
+/// once here (fixing (e): the old double `is_clear_of_damage` evaluation
+/// -- once to build the prune list, once again in `retain` -- is gone).
 pub fn lower_file(file: &ParsedFile) -> IrFile {
     let mut damage = Vec::new();
     let mut callables = Vec::new();
     let mut blocks = Vec::new();
+    let mut callable_dirty = Vec::new();
+    let mut block_dirty = Vec::new();
+    let mut tables = IrTables {
+        damage: &mut damage,
+        callables: &mut callables,
+        blocks: &mut blocks,
+        callable_dirty: &mut callable_dirty,
+        block_dirty: &mut block_dirty,
+    };
     let root = build_ir(
         file.tree.root_node(),
         file.language,
         &file.source,
-        &mut damage,
-        &mut callables,
-        &mut blocks,
+        &mut tables,
     );
 
-    let mut prune_targets: Vec<Span> = callables
-        .iter()
-        .filter(|callable| !is_clear_of_damage(callable.span, &damage))
-        .map(|callable| callable.span)
-        .collect();
-    prune_targets.extend(
-        blocks
-            .iter()
-            .filter(|block| !is_clear_of_damage(block.span, &damage))
-            .map(|block| block.span),
-    );
+    let exclusions = cascade_exclusions(&callables, &callable_dirty, &blocks, &block_dirty);
 
-    callables.retain(|callable| is_clear_of_damage(callable.span, &damage));
-    blocks.retain(|block| is_clear_of_damage(block.span, &damage));
-    let root = prune_damage(root, &prune_targets);
+    let mut redact_targets: HashSet<Span> = damage.iter().map(|entry| entry.span).collect();
+    for (index, callable) in callables.iter().enumerate() {
+        if exclusions.callables[index] {
+            redact_targets.insert(callable.span);
+        }
+    }
+    for (index, block) in blocks.iter().enumerate() {
+        if exclusions.blocks[index] {
+            redact_targets.insert(block.span);
+        }
+    }
+
+    let mut kept_callables = Vec::with_capacity(callables.len());
+    for (index, callable) in callables.into_iter().enumerate() {
+        if !exclusions.callables[index] {
+            kept_callables.push(callable);
+        }
+    }
+    let mut kept_blocks = Vec::with_capacity(blocks.len());
+    for (index, block) in blocks.into_iter().enumerate() {
+        if !exclusions.blocks[index] {
+            kept_blocks.push(block);
+        }
+    }
+
+    let root = prune_damage(root, &redact_targets);
 
     IrFile {
         relative_path: file.relative_path.clone(),
         language: file.language,
         root,
         damage,
-        callables,
-        blocks,
+        callables: kept_callables,
+        blocks: kept_blocks,
     }
 }
 
-/// Damage-pruned rebuild of `root` (WS-6 salvage, see `lower_file`'s own
+/// One (callable, block) entity table's final inclusion decision, aligned
+/// by index with the `callables`/`blocks` slices `cascade_exclusions` was
+/// given -- `true` means excluded (fail-closed: dropped from the IR's side
+/// tables and redacted from the tree).
+struct Exclusions {
+    callables: Vec<bool>,
+    blocks: Vec<bool>,
+}
+
+/// Which entity table (and index into it) one sweep entry refers back to.
+#[derive(Clone, Copy)]
+enum EntityRef {
+    Callable(usize),
+    Block(usize),
+}
+
+/// The cascade sweep `lower_file`'s own doc comment describes: callables and
+/// blocks are both just spans of the same tree, so "does entity B sit
+/// inside excluded entity A" is answerable purely from `(start_byte,
+/// end_byte)` ordering, with no dependency on `damage.len()` or the tree's
+/// own node count. Sorts every entity into document order, outer before
+/// inner (ascending `start_byte`; ties broken by descending `end_byte`, so
+/// a wider outer span that opens at the same byte as an inner one -- e.g. a
+/// callable whose single-statement body is itself the next entity -- sorts
+/// first), then sweeps once with a stack of currently-open ancestors: an
+/// entity closes the moment the sweep reaches a span starting at or past
+/// its own `end_byte` (two entity spans, both tree-sitter node spans, are
+/// always either nested or disjoint, never partially overlapping, so this
+/// is exact, not a heuristic). `Θ(n log n)` for the sort, `Θ(n)` for the
+/// sweep, `n = callables.len() + blocks.len()`.
+fn cascade_exclusions(
+    callables: &[IrCallable],
+    callable_dirty: &[bool],
+    blocks: &[IrBlock],
+    block_dirty: &[bool],
+) -> Exclusions {
+    let mut entries: Vec<(Span, bool, EntityRef)> =
+        Vec::with_capacity(callables.len() + blocks.len());
+    for (index, callable) in callables.iter().enumerate() {
+        entries.push((
+            callable.span,
+            callable_dirty[index],
+            EntityRef::Callable(index),
+        ));
+    }
+    for (index, block) in blocks.iter().enumerate() {
+        entries.push((block.span, block_dirty[index], EntityRef::Block(index)));
+    }
+    entries.sort_by(|(a_span, ..), (b_span, ..)| {
+        a_span
+            .start_byte
+            .cmp(&b_span.start_byte)
+            .then_with(|| b_span.end_byte.cmp(&a_span.end_byte))
+    });
+
+    let mut callable_excluded = vec![false; callables.len()];
+    let mut block_excluded = vec![false; blocks.len()];
+    // One entry per still-open ancestor entity: its own `end_byte` (so the
+    // sweep knows when it has moved past it) and whether it is itself
+    // excluded.
+    let mut open_ancestors: Vec<(u32, bool)> = Vec::new();
+    for (span, own_dirty, entity_ref) in entries {
+        while let Some(&(end_byte, _)) = open_ancestors.last() {
+            if end_byte <= span.start_byte {
+                open_ancestors.pop();
+            } else {
+                break;
+            }
+        }
+        let ancestor_excluded = open_ancestors.last().is_some_and(|&(_, excluded)| excluded);
+        let excluded = own_dirty || ancestor_excluded;
+        match entity_ref {
+            EntityRef::Callable(index) => callable_excluded[index] = excluded,
+            EntityRef::Block(index) => block_excluded[index] = excluded,
+        }
+        open_ancestors.push((span.end_byte, excluded));
+    }
+
+    Exclusions {
+        callables: callable_excluded,
+        blocks: block_excluded,
+    }
+}
+
+/// Damage-redacted rebuild of `root` (WS-6 salvage, see `lower_file`'s own
 /// doc comment): a node is replaced by a span-only `IrNode::empty` the
-/// moment its own span exactly matches one of `targets` (an excluded
-/// callable's or block's own span -- unique to the one tree-sitter node it
-/// was built from), otherwise every child is rebuilt the same way. Matching
-/// by exact span rather than damage-overlap is deliberate: a container
-/// node's span always contains its damaged descendant's span too, so an
-/// overlap check here would prune the whole file, not just the damaged
-/// entity. An explicit work-list of frames, not recursion, for the same
+/// moment its own span is exactly one of `targets` -- every bare damage
+/// span plus every excluded callable's/block's own span (unique to the one
+/// tree-sitter node it was built from) -- otherwise every child is rebuilt
+/// the same way. Matching by exact span rather than damage-overlap is
+/// deliberate: a container node's span always contains its damaged
+/// descendant's span too, so an overlap check here would redact the whole
+/// file, not just the damaged region. `targets` is a `HashSet` (WS-6 round
+/// 3, perf HIGH): O(1) average membership per node, so this whole rebuild
+/// stays `Θ(nodes)` regardless of how much damage or how many entities are
+/// excluded. An explicit work-list of frames, not recursion, for the same
 /// D18 stack-safety reason `build_ir` itself is iterative: a single-child
 /// chain thousands of levels deep must not grow the native call stack by
 /// one frame per level.
-fn prune_damage(root: IrNode, targets: &[Span]) -> IrNode {
+fn prune_damage(root: IrNode, targets: &HashSet<Span>) -> IrNode {
     if targets.is_empty() {
         return root;
     }
@@ -386,6 +501,22 @@ fn fallback_node(root: Node) -> IrNode {
     IrNode::empty(Span::from_node(root))
 }
 
+/// `build_ir`'s five out-params, bundled into one struct so the function
+/// itself stays under clippy's `too_many_arguments` threshold (WS-6 round
+/// 3 added the last two fields; five separate `&mut Vec<_>` parameters
+/// alongside `root`/`language`/`source` would have pushed it to eight).
+struct IrTables<'a> {
+    damage: &'a mut Vec<DamageSpan>,
+    callables: &'a mut Vec<IrCallable>,
+    blocks: &'a mut Vec<IrBlock>,
+    /// Index-aligned with `callables`: `callable_dirty[i]` is `callables[i]`'s
+    /// own bottom-up "does this subtree touch damage anywhere" bit.
+    callable_dirty: &'a mut Vec<bool>,
+    /// Index-aligned with `blocks`, the same way `callable_dirty` is with
+    /// `callables`.
+    block_dirty: &'a mut Vec<bool>,
+}
+
 /// Builds `root`'s whole `IrNode` tree in one iterative pass: a single
 /// `TreeCursor` walks the tree exactly as `metrics::walk_excluding` does
 /// (D18: no per-AST-depth recursion), but this traversal also assembles a
@@ -395,14 +526,7 @@ fn fallback_node(root: Node) -> IrNode {
 /// has no more children and no more siblings to explore under it, which is
 /// exactly when `metrics::walk_excluding`'s own traversal would have moved
 /// on past that subtree.
-fn build_ir(
-    root: Node,
-    language: LanguageFamily,
-    source: &str,
-    damage_out: &mut Vec<DamageSpan>,
-    callables_out: &mut Vec<IrCallable>,
-    blocks_out: &mut Vec<IrBlock>,
-) -> IrNode {
+fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrTables) -> IrNode {
     // `parent_in_catch_body` is the already-computed `in_catch_body` flag of
     // this node's own parent (or `false` for `root`), inherited rather than
     // re-derived -- see `Classification::is_catch_body_root`'s doc comment.
@@ -411,31 +535,43 @@ fn build_ir(
     // `node.parent()` call restarts at the tree root and descends in
     // tree-sitter 0.25.10, so re-deriving it per node would turn this
     // otherwise-linear tree build into `Θ(n·depth)` work.
+    //
+    // WS-6 round 3: this same closure also seeds each opened node's own
+    // "does my own span carry damage" bit (`self_damage`) and, if the node
+    // is itself a callable or block, reserves its slot in
+    // `callable_dirty_out`/`block_dirty_out` (index-aligned with
+    // `callables_out`/`blocks_out`) up front, at `false`, for the main
+    // traversal loop's finish-site step to later fold the bottom-up bit
+    // into -- see `EntitySlot` and the finish-site comment below.
     let open = |node: Node,
                 parent: Option<Node>,
                 parent_in_catch_body: bool,
                 field_name: Option<&'static str>,
-                damage_out: &mut Vec<DamageSpan>,
-                callables_out: &mut Vec<IrCallable>,
-                blocks_out: &mut Vec<IrBlock>|
-     -> (IrNode, bool) {
+                tables: &mut IrTables|
+     -> (IrNode, bool, bool, Option<EntitySlot>) {
         let span = Span::from_node(node);
         let classification = classify(node, language, source, parent, field_name);
+        let self_damage = classification.damage.is_some();
         if let Some(kind) = classification.damage {
-            damage_out.push(DamageSpan { kind, span });
+            tables.damage.push(DamageSpan { kind, span });
         }
+        let mut entity_slot = None;
         if classification.is_block {
-            blocks_out.push(IrBlock {
+            tables.blocks.push(IrBlock {
                 span,
                 kind: node.kind(),
             });
+            tables.block_dirty.push(false);
+            entity_slot = Some(EntitySlot::Block(tables.block_dirty.len() - 1));
         }
         if let Some(callable) = classification.callable {
-            callables_out.push(IrCallable {
+            tables.callables.push(IrCallable {
                 span,
                 body_span: callable.body_span,
                 name: callable.name,
             });
+            tables.callable_dirty.push(false);
+            entity_slot = Some(EntitySlot::Callable(tables.callable_dirty.len() - 1));
         }
         let in_catch_body = classification.is_catch_body_root || parent_in_catch_body;
         let ir_node = IrNode {
@@ -451,19 +587,12 @@ fn build_ir(
             is_hoisted_or_type_only: classification.is_hoisted_or_type_only,
             children: Vec::with_capacity(node.child_count()),
         };
-        (ir_node, in_catch_body)
+        (ir_node, in_catch_body, self_damage, entity_slot)
     };
 
     let mut cursor = root.walk();
-    let (root_node, root_in_catch_body) = open(
-        root,
-        None,
-        false,
-        None,
-        damage_out,
-        callables_out,
-        blocks_out,
-    );
+    let (root_node, root_in_catch_body, root_self_damage, root_entity_slot) =
+        open(root, None, false, None, tables);
     let mut stack: Vec<IrNode> = vec![root_node];
     // Mirrors `stack`'s depth exactly: `catch_flags[i]` is `stack[i]`'s own
     // `in_catch_body` flag, so a child node reads its parent's flag in O(1)
@@ -474,23 +603,32 @@ fn build_ir(
     // its parent's `Node` in O(1) via `parents.last()` instead of via
     // `node.parent()`.
     let mut parents: Vec<Node> = vec![root];
+    // WS-6 round 3: `dirty[i]` is `stack[i]`'s own "does this subtree touch
+    // damage anywhere so far" bit, seeded from that node's own
+    // `self_damage` and OR'd with every child's own folded-in bit at the
+    // finish site below, exactly mirroring how `catch_flags` inherits down
+    // -- except this one folds bottom-up. `entity_slots[i]` is `Some` iff
+    // `stack[i]` is itself a callable or block, naming which of
+    // `callable_dirty_out`/`block_dirty_out` its own final bit belongs in.
+    let mut dirty: Vec<bool> = vec![root_self_damage];
+    let mut entity_slots: Vec<Option<EntitySlot>> = vec![root_entity_slot];
     loop {
         if cursor.goto_first_child() {
             let parent_in_catch_body = *catch_flags.last().unwrap_or(&false);
             let parent = *parents.last().unwrap_or(&root);
             let field_name = cursor.field_name();
-            let (node, in_catch_body) = open(
+            let (node, in_catch_body, self_damage, entity_slot) = open(
                 cursor.node(),
                 Some(parent),
                 parent_in_catch_body,
                 field_name,
-                damage_out,
-                callables_out,
-                blocks_out,
+                tables,
             );
             stack.push(node);
             catch_flags.push(in_catch_body);
             parents.push(cursor.node());
+            dirty.push(self_damage);
+            entity_slots.push(entity_slot);
             continue;
         }
         loop {
@@ -499,26 +637,36 @@ fn build_ir(
             };
             catch_flags.pop();
             parents.pop();
+            let own_dirty = dirty.pop().unwrap_or(false);
+            if let Some(slot) = entity_slots.pop().unwrap_or(None) {
+                match slot {
+                    EntitySlot::Callable(index) => tables.callable_dirty[index] = own_dirty,
+                    EntitySlot::Block(index) => tables.block_dirty[index] = own_dirty,
+                }
+            }
             let Some(parent) = stack.last_mut() else {
                 return finished;
             };
             parent.children.push(finished);
+            if let Some(parent_dirty) = dirty.last_mut() {
+                *parent_dirty |= own_dirty;
+            }
             if cursor.goto_next_sibling() {
                 let parent_in_catch_body = *catch_flags.last().unwrap_or(&false);
                 let parent_node = *parents.last().unwrap_or(&root);
                 let field_name = cursor.field_name();
-                let (node, in_catch_body) = open(
+                let (node, in_catch_body, self_damage, entity_slot) = open(
                     cursor.node(),
                     Some(parent_node),
                     parent_in_catch_body,
                     field_name,
-                    damage_out,
-                    callables_out,
-                    blocks_out,
+                    tables,
                 );
                 stack.push(node);
                 catch_flags.push(in_catch_body);
                 parents.push(cursor.node());
+                dirty.push(self_damage);
+                entity_slots.push(entity_slot);
                 break;
             }
             if !cursor.goto_parent() {
@@ -526,6 +674,15 @@ fn build_ir(
             }
         }
     }
+}
+
+/// Which of `callable_dirty_out`/`block_dirty_out` (see `build_ir`) one
+/// stack frame's own bottom-up dirty bit is destined for, if it is a
+/// callable/block entity at all -- `None` for every other node.
+#[derive(Clone, Copy)]
+enum EntitySlot {
+    Callable(usize),
+    Block(usize),
 }
 
 #[cfg(test)]
@@ -583,11 +740,17 @@ mod tests {
     }
 
     /// The IR carries the clone floor (`nsd-plan-final.md` M0b item 4): for
-    /// every clone-candidate statement in every in-repo fixture that parses
-    /// without error -- the only trees `clones::run` ever sees in
-    /// production, via `parse::parse_all`'s own `has_error` filter -- the
-    /// lowering's independently-derived token stream is byte-identical to
-    /// `clones::normalized_statement_tokens`'s.
+    /// every damage-clear clone-candidate statement in every in-repo
+    /// fixture -- including a fixture whose tree carries damage elsewhere,
+    /// since WS-6 salvage means `clones::run` now sees exactly those
+    /// statements in production too (`parse::parse_all` no longer drops a
+    /// whole file for `has_error`; only a damaged entity's own statements
+    /// are excluded, via `lower_file`'s salvage pruning) -- the lowering's
+    /// independently-derived token stream is byte-identical to
+    /// `clones::normalized_statement_tokens`'s. A statement inside damage is
+    /// skipped here, not compared: its own tokens are meaningless (an ERROR
+    /// node has no stable lexical shape), and `clones::run` never sees it in
+    /// production either, since `prune_damage` has already redacted it.
     #[test]
     fn test_ir_tokens_reproduce_the_pre_ir_stream_on_every_fixture() {
         let mut files = Vec::new();
@@ -609,9 +772,20 @@ mod tests {
             let Some(tree) = parser.parse(&source, None) else {
                 continue;
             };
-            if tree.root_node().has_error() {
-                continue;
-            }
+
+            let mut damage = Vec::new();
+            let mut callables = Vec::new();
+            let mut blocks = Vec::new();
+            let mut callable_dirty = Vec::new();
+            let mut block_dirty = Vec::new();
+            let mut tables = IrTables {
+                damage: &mut damage,
+                callables: &mut callables,
+                blocks: &mut blocks,
+                callable_dirty: &mut callable_dirty,
+                block_dirty: &mut block_dirty,
+            };
+            build_ir(tree.root_node(), language, &source, &mut tables);
 
             let mut statements = Vec::new();
             for_each_descendant(tree.root_node(), |node| {
@@ -621,6 +795,9 @@ mod tests {
             });
 
             for statement in statements {
+                if !is_clear_of_damage(Span::from_node(statement), &damage) {
+                    continue;
+                }
                 let ir_tokens = statement_token_stream(statement, language, &source);
                 let reference = clones::normalized_statement_tokens(statement, language, &source);
                 assert_eq!(
@@ -637,8 +814,14 @@ mod tests {
     }
 
     /// The D11/SLOC requirement: the IR `executable` flag agrees with
-    /// `exec_lines::is_executable_leaf` for every node the lowering
-    /// produces, across every fixture that parses without error.
+    /// `exec_lines::is_executable_leaf` for every damage-clear node the
+    /// lowering produces, across every fixture -- including a fixture whose
+    /// tree carries damage elsewhere, since WS-6 salvage means
+    /// `metrics::run` now sees exactly those nodes in production too (see
+    /// the sibling test's own doc comment for why a damaged node itself is
+    /// skipped here rather than compared: `is_executable_leaf` has no
+    /// defined answer for an ERROR/MISSING node, and `metrics::run` never
+    /// sees one in production either, once `prune_damage` has redacted it).
     #[test]
     fn test_executable_flag_matches_the_d11_predicate() {
         let mut files = Vec::new();
@@ -659,21 +842,20 @@ mod tests {
             let Some(tree) = parser.parse(&source, None) else {
                 continue;
             };
-            if tree.root_node().has_error() {
-                continue;
-            }
 
             let mut damage = Vec::new();
             let mut callables = Vec::new();
             let mut blocks = Vec::new();
-            let root = build_ir(
-                tree.root_node(),
-                language,
-                &source,
-                &mut damage,
-                &mut callables,
-                &mut blocks,
-            );
+            let mut callable_dirty = Vec::new();
+            let mut block_dirty = Vec::new();
+            let mut tables = IrTables {
+                damage: &mut damage,
+                callables: &mut callables,
+                blocks: &mut blocks,
+                callable_dirty: &mut callable_dirty,
+                block_dirty: &mut block_dirty,
+            };
+            let root = build_ir(tree.root_node(), language, &source, &mut tables);
 
             let mut ir_nodes = Vec::new();
             collect_ir_nodes(&root, &mut ir_nodes);
@@ -682,6 +864,9 @@ mod tests {
 
             assert_eq!(ir_nodes.len(), ts_nodes.len(), "{}", path.display());
             for (ir_node, ts_node) in ir_nodes.iter().zip(ts_nodes.iter()) {
+                if !is_clear_of_damage(Span::from_node(*ts_node), &damage) {
+                    continue;
+                }
                 let expected = is_executable_leaf(*ts_node, language);
                 assert_eq!(
                     ir_node.executable,
@@ -788,6 +973,7 @@ mod tests {
         assert_eq!(a_tokens[0], b_tokens[0]);
         assert_ne!(a_tokens[1], b_tokens[1]);
     }
+
     /// WS-6 round 3 (security MEDIUM: bare/stray damage escaping pruning
     /// entirely, finding (c)): a damage span that sits outside every
     /// callable and block -- `build_ir`'s classifier never calls it a
@@ -821,7 +1007,10 @@ mod tests {
             "expected at least one damage span from the trailing `)));`"
         );
         assert!(
-            ir_file.callables.iter().any(|callable| callable.name.contains("safe")),
+            ir_file
+                .callables
+                .iter()
+                .any(|callable| callable.name.contains("safe")),
             "expected the clean `safe` callable to survive: {:?}",
             ir_file.callables
         );

@@ -19,7 +19,7 @@ pub const IR_VERSION: u32 = 2;
 /// A byte-and-line span back into the original source text a `ParsedFile`
 /// holds (D11/SLOC's requirement on the IR): both a byte range, for exact
 /// text extraction, and a 1-based line range, for display.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span {
     pub start_byte: u32,
     pub end_byte: u32,
@@ -45,7 +45,25 @@ impl Span {
     /// query's primitive: a callable "intersects damage" the moment its own
     /// span overlaps a damage span at all, not only when one fully contains
     /// the other, so a partially-damaged declaration still counts.
+    ///
+    /// WS-6 round 3 (security MEDIUM: boundary damage): a zero-width span
+    /// (`start_byte == end_byte`, tree-sitter's usual shape for an inserted
+    /// `MISSING` node -- a truncated file's `MISSING "}"` sits exactly at
+    /// its enclosing callable's own `end_byte`) can never satisfy the
+    /// strict `<` test below on its own side, so it is checked first and
+    /// inclusively on both boundaries: a zero-width `other` intersects
+    /// `self` iff `self` contains that one byte position,
+    /// `self.start_byte <= other.start_byte <= self.end_byte` (and
+    /// symmetrically for a zero-width `self`). Two non-empty spans keep the
+    /// original strict two-sided test unchanged: merely touching at one
+    /// boundary byte is not an overlap for either.
     pub fn intersects(self, other: Span) -> bool {
+        if other.start_byte == other.end_byte {
+            return self.start_byte <= other.start_byte && other.start_byte <= self.end_byte;
+        }
+        if self.start_byte == self.end_byte {
+            return other.start_byte <= self.start_byte && self.start_byte <= other.end_byte;
+        }
         self.start_byte < other.end_byte && other.start_byte < self.end_byte
     }
 }
@@ -250,6 +268,7 @@ pub fn is_in_catch_body(node: &IrNode) -> bool {
 pub fn is_clear_of_damage(span: Span, damage: &[DamageSpan]) -> bool {
     !damage.iter().any(|entry| span.intersects(entry.span))
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
