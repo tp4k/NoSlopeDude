@@ -6,7 +6,7 @@
 //! attribution" (`nsd-plan-final.md` *M1-M2*).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use git2::{
     Delta, Diff, DiffDelta, DiffFile, DiffFindOptions, DiffLineType, DiffOptions, ErrorCode, Index,
@@ -14,7 +14,7 @@ use git2::{
 };
 
 use super::path::RepoPath;
-use super::snapshot::{repo_path_to_fs, EntryKind, WorktreeSnapshot};
+use super::snapshot::{repo_path_to_fs, Entry, EntryKind, WorktreeSnapshot};
 use super::{wrap_git_error, GitError, CODE_SNAPSHOT_UNAVAILABLE};
 
 const MODE_REGULAR: u32 = 0o100644;
@@ -130,16 +130,35 @@ pub fn diff_commit_to_index(repo: &Repository, base: Option<Oid>) -> Result<Vec<
 /// D24: never a libgit2 workdir diff (`diff_tree_to_workdir_with_index`
 /// applies clean/CRLF filters, contradicting D5, and knows nothing of the
 /// WS-1 nested-checkout entry, D7). Instead this opens a second
-/// `Repository` handle on the same repository, attaches an in-memory
-/// mempack object backend to it, writes each regular/executable entry's
-/// source bytes and each symlink's target bytes there, builds an in-memory
-/// `Index` holding one entry per snapshot entry, and diffs the base tree
-/// against that index. Nothing reaches the repository's on-disk ODB, index
-/// or refs (D2); the mempack dies with the second handle when this
-/// function returns. A regular/executable entry over `SOURCE_CEILING_BYTES`
-/// is never read into memory or written to the mempack; it is represented
-/// by a raw fd hash of its real on-disk bytes instead (D2/D5), so it still
-/// diffs correctly against its real content.
+/// `Repository` handle on the same repository and attaches an in-memory
+/// mempack object backend to it. Nothing reaches the repository's on-disk
+/// ODB, index or refs (D2); the mempack dies with the second handle when
+/// this function returns. A regular/executable entry over
+/// `SOURCE_CEILING_BYTES` is never read into memory or written to the
+/// mempack; it is represented by a raw fd hash of its real on-disk bytes
+/// instead (D2/D5), so it still diffs correctly against its real content.
+///
+/// Two phases keep the ODB write (and its `git_odb__freshen` readdir/utime
+/// cost, perf HIGH) proportional to what rename detection actually needs,
+/// not to the worktree's total size:
+/// - **Phase 1** computes every entry's real object id with no ODB write at
+///   all (`Oid::hash_object`/`hash_file`, or a submodule's own gitlink oid),
+///   builds an in-memory `Index` from those ids, and diffs the base tree
+///   against it. A real, matching id already makes an unchanged path
+///   produce no delta, so Added/Deleted/Modified/Typechange are all correct
+///   from this phase alone — only rename *detection* needs blob content.
+/// - **Gate**: rename detection can only ever match an Added/Typechange
+///   blob against a Deleted/Typechange delta's *old*-side blob. With no
+///   such deleted blob anywhere in the diff, `find_similar` cannot produce
+///   a rename no matter what the new side holds, so Phase 2 is skipped
+///   entirely and the ODB is never touched.
+/// - **Phase 2** (only when the gate fires) re-reads just the Added /
+///   blob-Typechange worktree entries (`binary_search_by` on
+///   `worktree.entries`, sorted by path) and writes their content to the
+///   mempack, skipping any over-ceiling entry exactly as Phase 1 did. The
+///   corresponding old-side blobs need no write: they are already in the
+///   real repository's own ODB, which the mempack-backed handle still
+///   reads through.
 pub fn diff_commit_to_worktree(
     repo: &Repository,
     base: Option<Oid>,
@@ -161,6 +180,7 @@ pub fn diff_commit_to_worktree(
         )
     })?;
 
+    // Phase 1: every entry's real object id, with no ODB write anywhere.
     let mut index =
         Index::new().map_err(|err| wrap_git_error("cannot create an in-memory index", &err))?;
     let mut nested_checkouts = Vec::new();
@@ -191,7 +211,10 @@ pub fn diff_commit_to_worktree(
                 // (`WorktreeSnapshot::link_target`), never for this arm, so
                 // an over-ceiling symlink target is unreachable: a symlink's
                 // target is its own on-disk read, bounded by the OS, not by
-                // SOURCE_CEILING_BYTES.
+                // SOURCE_CEILING_BYTES. `similarity_measure`'s `GIT_MODE_ISBLOB`
+                // filter (`diff_tform.c`) excludes a symlink from ever being a
+                // rename source/target by content anyway, so hashing it here
+                // (never writing it, even in Phase 2) is enough either way.
                 let target = worktree.link_target(repo, entry)?.ok_or_else(|| {
                     GitError::new(
                         CODE_SNAPSHOT_UNAVAILABLE,
@@ -201,37 +224,12 @@ pub fn diff_commit_to_worktree(
                         ),
                     )
                 })?;
-                let oid = candidate_repo.blob(&target).map_err(|err| {
-                    wrap_git_error(
-                        "cannot write a symlink target to the in-memory object store",
-                        &err,
-                    )
-                })?;
+                let oid = Oid::hash_object(ObjectType::Blob, &target)
+                    .map_err(|err| wrap_git_error("cannot hash a symlink target", &err))?;
                 insert_index_entry(&mut index, &entry.path, MODE_SYMLINK, entry.size, oid)?;
             }
             EntryKind::Regular | EntryKind::Executable => {
-                let oid = match worktree.read(repo, entry)? {
-                    Some(content) => candidate_repo.blob(&content).map_err(|err| {
-                        wrap_git_error(
-                            "cannot write worktree file content to the in-memory object store",
-                            &err,
-                        )
-                    })?,
-                    // Over SOURCE_CEILING_BYTES: hash the real on-disk bytes
-                    // with a raw fd hash (no filters, D5; no ODB write, D2),
-                    // so the diff reports a genuine change against the real
-                    // content instead of colliding with every other
-                    // over-ceiling or empty file on the shared empty-blob
-                    // OID. libgit2 skips a blob it cannot look up during
-                    // similarity scoring (`diff_tform.c:507`), so this entry
-                    // is simply never a rename source or target by content.
-                    None => {
-                        let fs_path = repo_path_to_fs(workdir, entry.path.as_bytes());
-                        Oid::hash_file(ObjectType::Blob, &fs_path).map_err(|err| {
-                            wrap_git_error("cannot hash an over-ceiling worktree file", &err)
-                        })?
-                    }
-                };
+                let oid = worktree_blob_oid(repo, workdir, worktree, entry)?;
                 let mode = if entry.kind == EntryKind::Executable {
                     MODE_EXECUTABLE
                 } else {
@@ -248,11 +246,78 @@ pub fn diff_commit_to_worktree(
         .diff_tree_to_index(base_tree.as_ref(), Some(&index), Some(&mut opts))
         .map_err(|err| wrap_git_error("cannot diff commit to worktree", &err))?;
 
+    // Gate: any Deleted/Typechange delta whose *old* side is a blob is a
+    // possible rename source, so Phase 2 must run.
+    let mut needs_phase_two = false;
+    for delta in diff.deltas() {
+        if !matches!(delta.status(), Delta::Deleted | Delta::Typechange) {
+            continue;
+        }
+        let path = repo_path_from_file(&delta.old_file())?;
+        let kind = old_side_kind(base_tree.as_ref(), path.as_bytes())?;
+        if matches!(kind, EntryKind::Regular | EntryKind::Executable) {
+            needs_phase_two = true;
+            break;
+        }
+    }
+
+    if needs_phase_two {
+        // Phase 2: write only the Added / blob-Typechange worktree entries'
+        // content, so `find_similar` can inflate them against the old-side
+        // blobs already sitting in the real repository's own ODB.
+        for delta in diff.deltas() {
+            if !matches!(delta.status(), Delta::Added | Delta::Typechange) {
+                continue;
+            }
+            let path = repo_path_from_file(&delta.new_file())?;
+            let kind = new_side_kind(&NewFileSource::Index(&index), path.as_bytes())?;
+            if !matches!(kind, EntryKind::Regular | EntryKind::Executable) {
+                continue;
+            }
+            let Ok(entry_idx) = worktree.entries.binary_search_by(|e| e.path.cmp(&path)) else {
+                continue;
+            };
+            let entry = &worktree.entries[entry_idx];
+            // `worktree.read` itself reports `None` for an over-ceiling
+            // entry (row 1's guarantee): skip it exactly as Phase 1 did,
+            // relying on the same already-inserted real, unwritten oid.
+            if let Some(content) = worktree.read(repo, entry)? {
+                candidate_repo.blob(&content).map_err(|err| {
+                    wrap_git_error(
+                        "cannot write worktree file content to the in-memory object store",
+                        &err,
+                    )
+                })?;
+            }
+        }
+    }
+
     let mut changes =
         changes_from_diff(&mut diff, base_tree.as_ref(), NewFileSource::Index(&index))?;
     changes.append(&mut nested_checkouts);
     changes.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
     Ok(changes)
+}
+
+/// Phase 1's real object id for a Regular/Executable worktree entry, with no
+/// ODB write: `Oid::hash_object` on its bytes when they read within
+/// `SOURCE_CEILING_BYTES`, or, over that ceiling, row 1's raw fd hash of the
+/// real on-disk bytes (no filters, D5; no ODB write, D2).
+fn worktree_blob_oid(
+    repo: &Repository,
+    workdir: &Path,
+    worktree: &WorktreeSnapshot,
+    entry: &Entry,
+) -> Result<Oid, GitError> {
+    match worktree.read(repo, entry)? {
+        Some(content) => Oid::hash_object(ObjectType::Blob, &content)
+            .map_err(|err| wrap_git_error("cannot hash worktree file content", &err)),
+        None => {
+            let fs_path = repo_path_to_fs(workdir, entry.path.as_bytes());
+            Oid::hash_file(ObjectType::Blob, &fs_path)
+                .map_err(|err| wrap_git_error("cannot hash an over-ceiling worktree file", &err))
+        }
+    }
 }
 
 /// A complete mapping between a base and a candidate byte buffer (D11:
