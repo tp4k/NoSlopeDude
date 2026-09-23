@@ -272,6 +272,11 @@ fn build_override(patterns: &[String]) -> Result<Override, ConfigError> {
                 "negated/re-inclusion glob pattern {pattern:?} is not supported"
             )));
         }
+        if pattern.trim().is_empty() || pattern.starts_with('#') {
+            return Err(ConfigError::new(format!(
+                "empty or comment-only glob pattern {pattern:?} is not supported"
+            )));
+        }
         builder
             .add(pattern)
             .map_err(|err| ConfigError::new(format!("invalid glob pattern {pattern:?}: {err}")))?;
