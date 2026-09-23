@@ -6,10 +6,11 @@
 //! attribution" (`nsd-plan-final.md` *M1-M2*).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 
 use git2::{
     Delta, Diff, DiffDelta, DiffFile, DiffFindOptions, DiffLineType, DiffOptions, ErrorCode,
-    FileMode, Index, IndexEntry, IndexTime, ObjectType, Oid, Patch, Repository, Tree,
+    Index, IndexEntry, IndexTime, ObjectType, Oid, Patch, Repository, Tree,
 };
 
 use super::path::RepoPath;
@@ -100,7 +101,7 @@ pub fn diff_commit_to_commit(
     let mut diff = repo
         .diff_tree_to_tree(base_tree.as_ref(), Some(&candidate_tree), Some(&mut opts))
         .map_err(|err| wrap_git_error("cannot diff commit to commit", &err))?;
-    changes_from_diff(&mut diff)
+    changes_from_diff(&mut diff, base_tree.as_ref(), NewFileSource::Tree(&candidate_tree))
 }
 
 /// Diffs a base commit (`None` for an unborn `HEAD`'s empty tree, D2) to the
@@ -115,7 +116,7 @@ pub fn diff_commit_to_index(repo: &Repository, base: Option<Oid>) -> Result<Vec<
     let mut diff = repo
         .diff_tree_to_index(base_tree.as_ref(), Some(&index), Some(&mut opts))
         .map_err(|err| wrap_git_error("cannot diff commit to index", &err))?;
-    changes_from_diff(&mut diff)
+    changes_from_diff(&mut diff, base_tree.as_ref(), NewFileSource::Index(&index))
 }
 
 /// Diffs a base commit (`None` for an unborn `HEAD`'s empty tree, D2) to the
@@ -242,7 +243,7 @@ pub fn diff_commit_to_worktree(
         .diff_tree_to_index(base_tree.as_ref(), Some(&index), Some(&mut opts))
         .map_err(|err| wrap_git_error("cannot diff commit to worktree", &err))?;
 
-    let mut changes = changes_from_diff(&mut diff)?;
+    let mut changes = changes_from_diff(&mut diff, base_tree.as_ref(), NewFileSource::Index(&index))?;
     changes.append(&mut nested_checkouts);
     changes.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
     Ok(changes)
@@ -363,9 +364,22 @@ fn resolve_tree<'repo>(
     Ok(Some(tree))
 }
 
+/// Where a diff's new-side file mode is read from: a candidate commit's
+/// tree (`diff_commit_to_commit`), or a Git index (`diff_commit_to_index`,
+/// `diff_commit_to_worktree`). The old side is always a tree (or "no tree"
+/// for an unborn `HEAD`, D2), so it needs no such distinction.
+enum NewFileSource<'a, 'repo> {
+    Tree(&'a Tree<'repo>),
+    Index(&'a Index),
+}
+
 /// Runs rename detection at `RENAME_THRESHOLD` (D8) and converts every
 /// resulting delta to a `Change`, sorted by raw path bytes (D10).
-fn changes_from_diff(diff: &mut Diff<'_>) -> Result<Vec<Change>, GitError> {
+fn changes_from_diff(
+    diff: &mut Diff<'_>,
+    base_tree: Option<&Tree<'_>>,
+    new_source: NewFileSource<'_, '_>,
+) -> Result<Vec<Change>, GitError> {
     let mut find_opts = DiffFindOptions::new();
     find_opts.renames(true).rename_threshold(RENAME_THRESHOLD);
     if let Err(err) = diff.find_similar(Some(&mut find_opts)) {
@@ -398,36 +412,49 @@ fn changes_from_diff(diff: &mut Diff<'_>) -> Result<Vec<Change>, GitError> {
 
     let mut changes = Vec::new();
     for delta in diff.deltas() {
-        changes.push(change_from_delta(&delta)?);
+        changes.push(change_from_delta(&delta, base_tree, &new_source)?);
     }
     changes.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
     Ok(changes)
 }
 
-fn change_from_delta(delta: &DiffDelta<'_>) -> Result<Change, GitError> {
+fn change_from_delta(
+    delta: &DiffDelta<'_>,
+    base_tree: Option<&Tree<'_>>,
+    new_source: &NewFileSource<'_, '_>,
+) -> Result<Change, GitError> {
     match delta.status() {
-        Delta::Added => Ok(Change::Added {
-            path: repo_path_from_file(&delta.new_file())?,
-            kind: entry_kind_from_file_mode(delta.new_file().mode())?,
-        }),
-        Delta::Deleted => Ok(Change::Deleted {
-            path: repo_path_from_file(&delta.old_file())?,
-            kind: entry_kind_from_file_mode(delta.old_file().mode())?,
-        }),
-        Delta::Modified => Ok(Change::Modified {
-            path: repo_path_from_file(&delta.new_file())?,
-            kind: entry_kind_from_file_mode(delta.new_file().mode())?,
-        }),
-        Delta::Renamed => Ok(Change::Renamed {
-            from: repo_path_from_file(&delta.old_file())?,
-            to: repo_path_from_file(&delta.new_file())?,
-            kind: entry_kind_from_file_mode(delta.new_file().mode())?,
-        }),
-        Delta::Typechange => Ok(Change::Typechange {
-            path: repo_path_from_file(&delta.new_file())?,
-            old_kind: entry_kind_from_file_mode(delta.old_file().mode())?,
-            new_kind: entry_kind_from_file_mode(delta.new_file().mode())?,
-        }),
+        Delta::Added => {
+            let path = repo_path_from_file(&delta.new_file())?;
+            let kind = new_side_kind(new_source, path.as_bytes())?;
+            Ok(Change::Added { path, kind })
+        }
+        Delta::Deleted => {
+            let path = repo_path_from_file(&delta.old_file())?;
+            let kind = old_side_kind(base_tree, path.as_bytes())?;
+            Ok(Change::Deleted { path, kind })
+        }
+        Delta::Modified => {
+            let path = repo_path_from_file(&delta.new_file())?;
+            let kind = new_side_kind(new_source, path.as_bytes())?;
+            Ok(Change::Modified { path, kind })
+        }
+        Delta::Renamed => {
+            let from = repo_path_from_file(&delta.old_file())?;
+            let to = repo_path_from_file(&delta.new_file())?;
+            let kind = new_side_kind(new_source, to.as_bytes())?;
+            Ok(Change::Renamed { from, to, kind })
+        }
+        Delta::Typechange => {
+            let path = repo_path_from_file(&delta.new_file())?;
+            let old_kind = old_side_kind(base_tree, path.as_bytes())?;
+            let new_kind = new_side_kind(new_source, path.as_bytes())?;
+            Ok(Change::Typechange {
+                path,
+                old_kind,
+                new_kind,
+            })
+        }
         other => Err(GitError::new(
             CODE_SNAPSHOT_UNAVAILABLE,
             format!("diff produced an unexpected delta status: {other:?}"),
@@ -441,17 +468,76 @@ fn repo_path_from_file(file: &DiffFile<'_>) -> Result<RepoPath, GitError> {
         .ok_or_else(|| GitError::new(CODE_SNAPSHOT_UNAVAILABLE, "a diff delta file has no path"))
 }
 
-fn entry_kind_from_file_mode(mode: FileMode) -> Result<EntryKind, GitError> {
-    match mode {
-        FileMode::Blob | FileMode::BlobGroupWritable => Ok(EntryKind::Regular),
-        FileMode::BlobExecutable => Ok(EntryKind::Executable),
-        FileMode::Link => Ok(EntryKind::Symlink),
-        FileMode::Commit => Ok(EntryKind::Submodule),
-        FileMode::Tree | FileMode::Unreadable => Err(GitError::new(
+/// An old-side file's kind, read from `base_tree` with the normalized,
+/// non-panicking `TreeEntry::filemode()` accessor (never git2's
+/// `DiffFile::mode()`, which panics on a raw tree mode libgit2 has not
+/// squashed to a recognized value; row 3).
+fn old_side_kind(base_tree: Option<&Tree<'_>>, path_bytes: &[u8]) -> Result<EntryKind, GitError> {
+    let tree = base_tree.ok_or_else(|| {
+        GitError::new(
             CODE_SNAPSHOT_UNAVAILABLE,
-            format!("diff delta file has an unexpected mode: {mode:?}"),
+            "diff delta references an old-side file with no base tree",
+        )
+    })?;
+    let entry = tree
+        .get_path(&bytes_to_path(path_bytes))
+        .map_err(|err| wrap_git_error("cannot read a base tree entry", &err))?;
+    entry_kind_from_raw_mode(entry.filemode())
+}
+
+/// A new-side file's kind, read from `new_source` with the same
+/// normalized, non-panicking accessor as `old_side_kind` (`TreeEntry::filemode()`
+/// for a tree, an index entry's own `.mode` for an index; row 3).
+fn new_side_kind(
+    new_source: &NewFileSource<'_, '_>,
+    path_bytes: &[u8],
+) -> Result<EntryKind, GitError> {
+    match new_source {
+        NewFileSource::Tree(tree) => {
+            let entry = tree
+                .get_path(&bytes_to_path(path_bytes))
+                .map_err(|err| wrap_git_error("cannot read a candidate tree entry", &err))?;
+            entry_kind_from_raw_mode(entry.filemode())
+        }
+        NewFileSource::Index(index) => {
+            let entry = index.get_path(&bytes_to_path(path_bytes), 0).ok_or_else(|| {
+                GitError::new(
+                    CODE_SNAPSHOT_UNAVAILABLE,
+                    "diff delta references a new-side file missing from the index",
+                )
+            })?;
+            entry_kind_from_raw_mode(entry.mode as i32)
+        }
+    }
+}
+
+fn entry_kind_from_raw_mode(mode: i32) -> Result<EntryKind, GitError> {
+    match mode as u32 {
+        MODE_REGULAR => Ok(EntryKind::Regular),
+        MODE_EXECUTABLE => Ok(EntryKind::Executable),
+        MODE_SYMLINK => Ok(EntryKind::Symlink),
+        MODE_SUBMODULE => Ok(EntryKind::Submodule),
+        other => Err(GitError::new(
+            CODE_SNAPSHOT_UNAVAILABLE,
+            format!("diff delta file has an unexpected mode: {other:o}"),
         )),
     }
+}
+
+/// Joins raw repository-relative path bytes into a `Path` for a git2 tree
+/// or index lookup (never a filesystem access: contrast `repo_path_to_fs`
+/// in `snapshot.rs`). Unix rebuilds the exact bytes via `OsStr::from_bytes`,
+/// so no byte is ever substituted; only a platform without a byte-oriented
+/// `OsStr` falls back to a lossy conversion.
+#[cfg(unix)]
+fn bytes_to_path(path: &[u8]) -> PathBuf {
+    use std::os::unix::ffi::OsStrExt;
+    PathBuf::from(std::ffi::OsStr::from_bytes(path))
+}
+
+#[cfg(not(unix))]
+fn bytes_to_path(path: &[u8]) -> PathBuf {
+    PathBuf::from(String::from_utf8_lossy(path).as_ref())
 }
 
 fn insert_index_entry(
