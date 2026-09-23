@@ -229,33 +229,42 @@ pub struct CompiledScope {
     pub exclude: Override,
 }
 
-/// A Git-domain or shape error raised while loading `nsd.yml`, always
-/// under `NSD-C102` (D21).
+/// A Git-domain or shape error raised while loading `nsd.yml` (D21, 3a): an
+/// invalid shape carries `NSD-C102`, but a Git-domain failure (the
+/// repository-root blob missing from the ODB, e.g. a partial clone or a
+/// corrupted object store) keeps the `GitError`'s own code so it is never
+/// reported as an invalid configuration.
 #[derive(Debug)]
 pub struct ConfigError {
+    code: &'static str,
     message: String,
 }
 
 impl ConfigError {
     fn new(message: impl Into<String>) -> ConfigError {
         ConfigError {
+            code: CODE_INVALID_CONFIG,
             message: message.into(),
         }
     }
 
     fn from_git(err: GitError) -> ConfigError {
-        ConfigError::new(format!("cannot read {CONFIG_FILE_NAME}: {err}"))
+        ConfigError {
+            code: err.code(),
+            message: format!("cannot read {CONFIG_FILE_NAME}: {err}"),
+        }
     }
 
-    /// The stable diagnostic code, always `"NSD-C102"` (D21).
+    /// The stable diagnostic code: `"NSD-C102"` for an invalid shape, or the
+    /// wrapped `GitError`'s own code (3a).
     pub fn code(&self) -> &'static str {
-        CODE_INVALID_CONFIG
+        self.code
     }
 }
 
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[{}] {}", CODE_INVALID_CONFIG, self.message)
+        write!(f, "[{}] {}", self.code, self.message)
     }
 }
 
