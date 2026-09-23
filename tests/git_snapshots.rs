@@ -10,7 +10,7 @@ use git2::{IndexEntry, IndexTime, Oid, Repository, Signature};
 
 use nsd::git::mergebase;
 use nsd::git::snapshot::{
-    CommitSnapshot, EntryKind, IndexSnapshot, SOURCE_CEILING_BYTES, WorktreeSnapshot,
+    CommitSnapshot, EntryKind, IndexSnapshot, WorktreeSnapshot, SOURCE_CEILING_BYTES,
 };
 
 const MODE_REGULAR: i32 = 0o100644;
@@ -40,8 +40,9 @@ fn staged_reads_index_not_worktree() {
         Some(b"A".to_vec())
     );
     assert_eq!(
-        find_content(&worktree_snapshot.entries, b"a.ts", |entry| worktree_snapshot
-            .read(&repo, entry)),
+        find_content(&worktree_snapshot.entries, b"a.ts", |entry| {
+            worktree_snapshot.read(&repo, entry)
+        }),
         Some(b"B".to_vec())
     );
 }
@@ -171,11 +172,13 @@ fn worktree_overlays_modified_deleted_and_untracked() {
     let snapshot = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
 
     assert_eq!(
-        find_content(&snapshot.entries, b"kept.ts", |entry| snapshot.read(&repo, entry)),
+        find_content(&snapshot.entries, b"kept.ts", |entry| snapshot
+            .read(&repo, entry)),
         Some(b"kept".to_vec())
     );
     assert_eq!(
-        find_content(&snapshot.entries, b"modified.ts", |entry| snapshot.read(&repo, entry)),
+        find_content(&snapshot.entries, b"modified.ts", |entry| snapshot
+            .read(&repo, entry)),
         Some(b"after".to_vec()),
         "worktree bytes come from disk (D5), overlaying the index"
     );
@@ -187,7 +190,8 @@ fn worktree_overlays_modified_deleted_and_untracked() {
         "an on-disk deletion is removed from the overlay"
     );
     assert_eq!(
-        find_content(&snapshot.entries, b"untracked.ts", |entry| snapshot.read(&repo, entry)),
+        find_content(&snapshot.entries, b"untracked.ts", |entry| snapshot
+            .read(&repo, entry)),
         Some(b"new".to_vec()),
         "an untracked file is added even when the candidate .gitignore matches it (D6)"
     );

@@ -4,9 +4,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
-use git2::{ErrorCode, Oid, Repository, Tree};
+use git2::{ErrorCode, Odb, Oid, Repository, Tree};
 
 use super::path::RepoPath;
 use super::{wrap_git_error, GitError, CODE_SNAPSHOT_UNAVAILABLE};
@@ -16,6 +17,11 @@ const MODE_REGULAR: i32 = 0o100644;
 const MODE_EXECUTABLE: i32 = 0o100755;
 const MODE_SYMLINK: i32 = 0o120000;
 const MODE_SUBMODULE: i32 = 0o160000;
+
+/// The largest source blob/file this crate will read into memory (perf
+/// HIGH: an attacker-controlled blob must not OOM the check). A `read`
+/// past this ceiling reports `Ok(None)` instead; `size` is still exact.
+pub const SOURCE_CEILING_BYTES: u64 = 1_048_576;
 
 /// A repository-relative entry's shape (D5: "Handle additions, deletions,
 /// modifications, renames, symlinks, submodules ... deterministically").
@@ -30,7 +36,11 @@ pub enum EntryKind {
     NestedCheckout,
 }
 
-/// One entry in a snapshot.
+/// One entry in a snapshot. Carries no source bytes itself (perf HIGH: an
+/// eagerly loaded `content` field made every snapshot proportional to the
+/// repository's total blob size, and let an attacker-controlled blob OOM
+/// the check); call `read`/`link_target` on the owning snapshot to fetch
+/// bytes for one entry, bounded by `SOURCE_CEILING_BYTES`.
 #[derive(Debug, Clone)]
 pub struct Entry {
     pub path: RepoPath,
@@ -39,10 +49,6 @@ pub struct Entry {
     /// for a worktree entry, which git2 never wrote to the ODB (D2).
     pub oid: Option<Oid>,
     pub size: u64,
-    /// Raw bytes with no smudge/clean/CRLF filters (D5). `None` for kinds
-    /// that carry no source bytes (`Symlink`, `Submodule`,
-    /// `NestedCheckout`).
-    pub content: Option<Vec<u8>>,
 }
 
 /// A snapshot of one Git commit's tree.
@@ -78,10 +84,22 @@ impl CommitSnapshot {
         let tree = commit
             .tree()
             .map_err(|err| wrap_git_error("cannot read commit tree", &err))?;
+        // Opened once per snapshot (not per entry): `size` comes from the
+        // ODB header, never a full blob inflate (perf HIGH).
+        let odb = repo
+            .odb()
+            .map_err(|err| wrap_git_error("cannot open the object database", &err))?;
         let mut entries = Vec::new();
-        walk_tree(repo, &tree, &[], &mut entries)?;
+        walk_tree(repo, &odb, &tree, &[], &mut entries)?;
         entries.sort_by(|a, b| a.path.cmp(&b.path));
         Ok(CommitSnapshot { entries })
+    }
+
+    /// Source bytes for a `Regular`/`Executable` entry, bounded by
+    /// `SOURCE_CEILING_BYTES`; `Ok(None)` for any other kind or for an
+    /// entry whose `size` exceeds the ceiling.
+    pub fn read(&self, repo: &Repository, entry: &Entry) -> Result<Option<Vec<u8>>, GitError> {
+        read_blob_source(repo, entry)
     }
 }
 
@@ -107,6 +125,12 @@ impl IndexSnapshot {
             ));
         }
 
+        // Opened once per snapshot (not per entry): `size` comes from the
+        // ODB header, never a full blob inflate (perf HIGH). Never
+        // `IndexEntry::file_size`, which is the stat size, not the blob's.
+        let odb = repo
+            .odb()
+            .map_err(|err| wrap_git_error("cannot open the object database", &err))?;
         let mut entries = Vec::with_capacity(index.len());
         for index_entry in index.iter() {
             let kind = match entry_kind(index_entry.mode as i32) {
@@ -115,17 +139,23 @@ impl IndexSnapshot {
                 // to blob/gitlink rows. An unrecognised mode is skipped.
                 None => continue,
             };
-            let fields = read_blob_entry(repo, kind, index_entry.id)?;
+            let (oid, size) = entry_fields(&odb, kind, index_entry.id)?;
             entries.push(Entry {
                 path: RepoPath::from_bytes(index_entry.path),
                 kind,
-                oid: fields.oid,
-                size: fields.size,
-                content: fields.content,
+                oid,
+                size,
             });
         }
         entries.sort_by(|a, b| a.path.cmp(&b.path));
         Ok(IndexSnapshot { entries })
+    }
+
+    /// Source bytes for a `Regular`/`Executable` entry, bounded by
+    /// `SOURCE_CEILING_BYTES`; `Ok(None)` for any other kind or for an
+    /// entry whose `size` exceeds the ceiling.
+    pub fn read(&self, repo: &Repository, entry: &Entry) -> Result<Option<Vec<u8>>, GitError> {
+        read_blob_source(repo, entry)
     }
 }
 
@@ -143,15 +173,7 @@ const GIT_DIR_NAME: &str = ".git";
 
 impl WorktreeSnapshot {
     pub fn open(repo: &Repository) -> Result<WorktreeSnapshot, GitError> {
-        let workdir = repo
-            .workdir()
-            .ok_or_else(|| {
-                GitError::new(
-                    CODE_SNAPSHOT_UNAVAILABLE,
-                    "repository has no worktree (bare repository)",
-                )
-            })?
-            .to_path_buf();
+        let workdir = worktree_dir(repo)?;
 
         let index_snapshot = IndexSnapshot::open(repo)?;
         let tracked: BTreeSet<RepoPath> = index_snapshot
@@ -165,8 +187,7 @@ impl WorktreeSnapshot {
             let full_path = repo_path_to_fs(&workdir, entry.path.as_bytes());
             match fs::symlink_metadata(&full_path) {
                 Ok(metadata) => {
-                    if let Some(refreshed) =
-                        refresh_from_disk(&entry.path, &full_path, &metadata, entry.kind)?
+                    if let Some(refreshed) = refresh_from_disk(&entry.path, &metadata, entry.kind)?
                     {
                         by_path.insert(entry.path.clone(), refreshed);
                     }
@@ -183,6 +204,54 @@ impl WorktreeSnapshot {
         entries.sort_by(|a, b| a.path.cmp(&b.path));
         Ok(WorktreeSnapshot { entries })
     }
+
+    /// Source bytes for a `Regular`/`Executable` entry, bounded by
+    /// `SOURCE_CEILING_BYTES`: reads at most one byte past the ceiling
+    /// (`File::take`) so memory stays bounded even if the file grew on
+    /// disk after enumeration, then reports `Ok(None)` if it did.
+    pub fn read(&self, repo: &Repository, entry: &Entry) -> Result<Option<Vec<u8>>, GitError> {
+        if !matches!(entry.kind, EntryKind::Regular | EntryKind::Executable) {
+            return Ok(None);
+        }
+        if entry.size > SOURCE_CEILING_BYTES {
+            return Ok(None);
+        }
+        let workdir = worktree_dir(repo)?;
+        let full_path = repo_path_to_fs(&workdir, entry.path.as_bytes());
+        let file = fs::File::open(&full_path).map_err(|err| {
+            GitError::new(
+                CODE_SNAPSHOT_UNAVAILABLE,
+                format!("cannot read worktree file {}: {err}", entry.path.render()),
+            )
+        })?;
+        let mut buf = Vec::new();
+        file.take(SOURCE_CEILING_BYTES + 1)
+            .read_to_end(&mut buf)
+            .map_err(|err| {
+                GitError::new(
+                    CODE_SNAPSHOT_UNAVAILABLE,
+                    format!("cannot read worktree file {}: {err}", entry.path.render()),
+                )
+            })?;
+        if buf.len() as u64 > SOURCE_CEILING_BYTES {
+            return Ok(None);
+        }
+        Ok(Some(buf))
+    }
+}
+
+/// The repository's worktree directory, or `NSD-G101` for a bare
+/// repository.
+fn worktree_dir(repo: &Repository) -> Result<PathBuf, GitError> {
+    Ok(repo
+        .workdir()
+        .ok_or_else(|| {
+            GitError::new(
+                CODE_SNAPSHOT_UNAVAILABLE,
+                "repository has no worktree (bare repository)",
+            )
+        })?
+        .to_path_buf())
 }
 
 fn entry_kind(mode: i32) -> Option<EntryKind> {
@@ -195,43 +264,47 @@ fn entry_kind(mode: i32) -> Option<EntryKind> {
     }
 }
 
-/// The `oid`/`size`/`content` fields a tree or index blob entry contributes
-/// to an `Entry` (factored out of a plain tuple return per
-/// `clippy::type_complexity`).
-struct BlobFields {
-    oid: Option<Oid>,
-    size: u64,
-    content: Option<Vec<u8>>,
-}
-
-/// Reads a blob's content for a `Regular`/`Executable` entry; a `Symlink`
-/// or `Submodule` entry carries no source bytes.
-fn read_blob_entry(repo: &Repository, kind: EntryKind, id: Oid) -> Result<BlobFields, GitError> {
+/// The `oid`/`size` an tree or index blob entry contributes to an `Entry`.
+/// `size` comes from the ODB header (no inflate, perf HIGH) for
+/// `Regular`/`Executable`; a `Symlink`/`Submodule`/`NestedCheckout` entry
+/// carries no source bytes, so its `size` is `0`.
+fn entry_fields(odb: &Odb<'_>, kind: EntryKind, id: Oid) -> Result<(Option<Oid>, u64), GitError> {
     match kind {
         EntryKind::Regular | EntryKind::Executable => {
-            let blob = repo
-                .find_blob(id)
-                .map_err(|err| wrap_git_error("cannot read blob", &err))?;
-            let content = blob.content().to_vec();
-            let size = content.len() as u64;
-            Ok(BlobFields {
-                oid: Some(blob.id()),
-                size,
-                content: Some(content),
-            })
+            let (size, _object_type) = odb
+                .read_header(id)
+                .map_err(|err| wrap_git_error("cannot read blob header", &err))?;
+            Ok((Some(id), size as u64))
         }
-        EntryKind::Symlink | EntryKind::Submodule | EntryKind::NestedCheckout => Ok(BlobFields {
-            oid: Some(id),
-            size: 0,
-            content: None,
-        }),
+        EntryKind::Symlink | EntryKind::Submodule | EntryKind::NestedCheckout => Ok((Some(id), 0)),
     }
 }
 
+/// Source bytes for a `Regular`/`Executable` `Commit`/`Index` entry,
+/// bounded by `SOURCE_CEILING_BYTES`; `Ok(None)` for any other kind or for
+/// an entry whose `size` exceeds the ceiling.
+fn read_blob_source(repo: &Repository, entry: &Entry) -> Result<Option<Vec<u8>>, GitError> {
+    if !matches!(entry.kind, EntryKind::Regular | EntryKind::Executable) {
+        return Ok(None);
+    }
+    if entry.size > SOURCE_CEILING_BYTES {
+        return Ok(None);
+    }
+    let Some(oid) = entry.oid else {
+        return Ok(None);
+    };
+    let blob = repo
+        .find_blob(oid)
+        .map_err(|err| wrap_git_error("cannot read blob", &err))?;
+    Ok(Some(blob.content().to_vec()))
+}
+
 /// Recursively walks `tree`, accumulating every blob/symlink/gitlink entry
-/// under `prefix` (raw bytes, `/`-joined) into `entries`.
+/// under `prefix` (raw bytes, `/`-joined) into `entries`. `odb` is opened
+/// once by the caller and passed down, not reopened per entry.
 fn walk_tree(
     repo: &Repository,
+    odb: &Odb<'_>,
     tree: &Tree,
     prefix: &[u8],
     entries: &mut Vec<Entry>,
@@ -249,19 +322,18 @@ fn walk_tree(
                 .to_object(repo)
                 .and_then(|object| object.peel_to_tree())
                 .map_err(|err| wrap_git_error("cannot read tree entry", &err))?;
-            walk_tree(repo, &subtree, &path_bytes, entries)?;
+            walk_tree(repo, odb, &subtree, &path_bytes, entries)?;
             continue;
         }
         let Some(kind) = entry_kind(mode) else {
             continue; // Unrecognised mode: skip (git itself only writes the five above).
         };
-        let fields = read_blob_entry(repo, kind, tree_entry.id())?;
+        let (oid, size) = entry_fields(odb, kind, tree_entry.id())?;
         entries.push(Entry {
             path: RepoPath::from_bytes(path_bytes),
             kind,
-            oid: fields.oid,
-            size: fields.size,
-            content: fields.content,
+            oid,
+            size,
         });
     }
     Ok(())
@@ -294,7 +366,6 @@ fn is_executable(_metadata: &fs::Metadata) -> bool {
 /// represented as source (e.g. a plain directory replaced a tracked blob).
 fn refresh_from_disk(
     path: &RepoPath,
-    full_path: &Path,
     metadata: &fs::Metadata,
     original_kind: EntryKind,
 ) -> Result<Option<Entry>, GitError> {
@@ -305,7 +376,6 @@ fn refresh_from_disk(
                 kind: EntryKind::Submodule,
                 oid: None,
                 size: 0,
-                content: None,
             }));
         }
         return Ok(None);
@@ -316,15 +386,8 @@ fn refresh_from_disk(
             kind: EntryKind::Symlink,
             oid: None,
             size: 0,
-            content: None,
         }));
     }
-    let bytes = fs::read(full_path).map_err(|err| {
-        GitError::new(
-            CODE_SNAPSHOT_UNAVAILABLE,
-            format!("cannot read worktree file {}: {err}", path.render()),
-        )
-    })?;
     let kind = if is_executable(metadata) {
         EntryKind::Executable
     } else {
@@ -334,8 +397,7 @@ fn refresh_from_disk(
         path: path.clone(),
         kind,
         oid: None,
-        size: bytes.len() as u64,
-        content: Some(bytes),
+        size: metadata.len(),
     }))
 }
 
@@ -405,7 +467,6 @@ fn walk_worktree(
                         kind: EntryKind::NestedCheckout,
                         oid: None,
                         size: 0,
-                        content: None,
                     },
                 );
                 continue; // D7: surfaced, not descended.
@@ -425,18 +486,10 @@ fn walk_worktree(
                     kind: EntryKind::Symlink,
                     oid: None,
                     size: 0,
-                    content: None,
                 },
             );
             continue;
         }
-        let full_path = repo_path_to_fs(workdir, &child_bytes);
-        let bytes = fs::read(&full_path).map_err(|err| {
-            GitError::new(
-                CODE_SNAPSHOT_UNAVAILABLE,
-                format!("cannot read untracked file {}: {err}", relative.render()),
-            )
-        })?;
         let kind = if is_executable(&metadata) {
             EntryKind::Executable
         } else {
@@ -448,8 +501,7 @@ fn walk_worktree(
                 path: relative,
                 kind,
                 oid: None,
-                size: bytes.len() as u64,
-                content: Some(bytes),
+                size: metadata.len(),
             },
         );
     }
