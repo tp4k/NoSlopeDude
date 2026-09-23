@@ -96,6 +96,40 @@ impl SkipReason {
             SkipReason::Unreadable => "unreadable",
         }
     }
+
+    /// The WS-6 `SkipReason` split: whether this discovery-time skip is
+    /// deliberate policy (never contributes to `incomplete`) or an
+    /// attempted-and-failed read (`Unreadable` -- the walk tried this path
+    /// and could not read it, the same "we tried and failed" condition a
+    /// parse failure records).
+    pub fn category(self) -> SkipCategory {
+        match self {
+            SkipReason::Gitignore
+            | SkipReason::DependencyOrBuildOutput
+            | SkipReason::GeneratedCode
+            | SkipReason::Test
+            | SkipReason::UserExclude => SkipCategory::PolicyExclusion,
+            SkipReason::Unreadable => SkipCategory::AnalysisFailure,
+        }
+    }
+
+    /// Convenience for `report::aggregate`'s `incomplete` computation:
+    /// `true` exactly when `category()` is `AnalysisFailure`.
+    pub fn is_analysis_failure(self) -> bool {
+        self.category() == SkipCategory::AnalysisFailure
+    }
+}
+
+/// `SkipReason::category`'s two buckets (WS-6 item 8's `SkipReason` split):
+/// a policy exclusion (D16, gitignore, a user `--exclude`) never marks a
+/// scan `incomplete` -- the scan behaved exactly as configured -- while an
+/// analysis failure (an unreadable path) means a file that should have been
+/// measured was not, the same condition `ParseFailureReason` records at
+/// parse time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkipCategory {
+    PolicyExclusion,
+    AnalysisFailure,
 }
 
 /// A file that was walked but not selected for scanning.

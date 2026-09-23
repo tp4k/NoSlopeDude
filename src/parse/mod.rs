@@ -21,72 +21,107 @@ pub struct ParsedFile {
 
 /// Parses every file in `files` (relative to `root`), in parallel with one
 /// `Parser` per task (D21). A file that cannot be read, whose extension is
-/// not one of the seven scanned extensions, or that tree-sitter reports a
-/// syntax error for, is returned as a `ParseFailure` instead (D18): the
-/// scan continues past it rather than failing.
+/// not one of the seven scanned extensions, or that tree-sitter could not
+/// build a tree for at all, produces no `ParsedFile` and one `ParseFailure`
+/// (D18): the scan continues past it rather than failing. A file
+/// tree-sitter *did* build a tree for but reports a syntax error on (WS-6
+/// salvage) produces both: a `ParsedFile` (so the lowering/analyzer stages
+/// still see it -- IR-level typed damage spans drive fail-closed exclusion
+/// at entity granularity from there, not this whole-file granularity) and a
+/// `ParseFailure{reason: SyntaxError}` alongside it, so `parse_failures`
+/// stays non-empty -- and `pipeline.rs`'s own untouched `!parse_failures
+/// .is_empty()` plumbing keeps marking the scan incomplete -- for exactly
+/// as long as the file carries residual damage.
 pub fn parse_all(root: &Path, files: &[DiscoveredFile]) -> (Vec<ParsedFile>, Vec<ParseFailure>) {
-    let results: Vec<Result<ParsedFile, ParseFailure>> =
+    let results: Vec<(Option<ParsedFile>, Option<ParseFailure>)> =
         files.par_iter().map(|file| parse_one(root, file)).collect();
 
     let mut parsed = Vec::with_capacity(results.len());
     let mut failures = Vec::new();
-    for result in results {
-        match result {
-            Ok(file) => parsed.push(file),
-            Err(failure) => failures.push(failure),
+    for (file, failure) in results {
+        if let Some(file) = file {
+            parsed.push(file);
+        }
+        if let Some(failure) = failure {
+            failures.push(failure);
         }
     }
     (parsed, failures)
 }
 
-fn parse_one(root: &Path, file: &DiscoveredFile) -> Result<ParsedFile, ParseFailure> {
+fn parse_one(root: &Path, file: &DiscoveredFile) -> (Option<ParsedFile>, Option<ParseFailure>) {
     let full_path = root.join(&file.relative_path);
-    let source = std::fs::read_to_string(&full_path).map_err(|error| ParseFailure {
-        relative_path: file.relative_path.clone(),
-        reason: ParseFailureReason::Unreadable,
-        detail: Some(format!("cannot read file: {error}")),
-    })?;
+    let source = match std::fs::read_to_string(&full_path) {
+        Ok(source) => source,
+        Err(error) => {
+            return (
+                None,
+                Some(ParseFailure {
+                    relative_path: file.relative_path.clone(),
+                    reason: ParseFailureReason::Unreadable,
+                    detail: Some(format!("cannot read file: {error}")),
+                }),
+            );
+        }
+    };
 
     let extension = file
         .relative_path
         .extension()
         .and_then(|extension| extension.to_str())
         .unwrap_or("");
-    let grammar = Grammar::for_extension(extension).ok_or_else(|| ParseFailure {
-        relative_path: file.relative_path.clone(),
-        reason: ParseFailureReason::UnsupportedExtension,
-        detail: Some(format!("unrecognized extension {extension:?}")),
-    })?;
+    let Some(grammar) = Grammar::for_extension(extension) else {
+        return (
+            None,
+            Some(ParseFailure {
+                relative_path: file.relative_path.clone(),
+                reason: ParseFailureReason::UnsupportedExtension,
+                detail: Some(format!("unrecognized extension {extension:?}")),
+            }),
+        );
+    };
 
     let mut parser = Parser::new();
-    parser
-        .set_language(&language_for(grammar))
-        .map_err(|error| ParseFailure {
-            relative_path: file.relative_path.clone(),
-            reason: ParseFailureReason::GrammarSetup,
-            detail: Some(format!("failed to set grammar: {error}")),
-        })?;
-
-    let tree = parser.parse(&source, None).ok_or_else(|| ParseFailure {
-        relative_path: file.relative_path.clone(),
-        reason: ParseFailureReason::GrammarSetup,
-        detail: Some("tree-sitter returned no tree".to_string()),
-    })?;
-
-    if tree.root_node().has_error() {
-        return Err(ParseFailure {
-            relative_path: file.relative_path.clone(),
-            reason: ParseFailureReason::SyntaxError,
-            detail: None,
-        });
+    if let Err(error) = parser.set_language(&language_for(grammar)) {
+        return (
+            None,
+            Some(ParseFailure {
+                relative_path: file.relative_path.clone(),
+                reason: ParseFailureReason::GrammarSetup,
+                detail: Some(format!("failed to set grammar: {error}")),
+            }),
+        );
     }
 
-    Ok(ParsedFile {
+    let Some(tree) = parser.parse(&source, None) else {
+        return (
+            None,
+            Some(ParseFailure {
+                relative_path: file.relative_path.clone(),
+                reason: ParseFailureReason::GrammarSetup,
+                detail: Some("tree-sitter returned no tree".to_string()),
+            }),
+        );
+    };
+
+    let has_error = tree.root_node().has_error();
+    let parsed_file = ParsedFile {
         relative_path: file.relative_path.clone(),
         language: file.language,
         source,
         tree,
-    })
+    };
+
+    if has_error {
+        let failure = ParseFailure {
+            relative_path: file.relative_path.clone(),
+            reason: ParseFailureReason::SyntaxError,
+            detail: None,
+        };
+        return (Some(parsed_file), Some(failure));
+    }
+
+    (Some(parsed_file), None)
 }
 
 fn language_for(grammar: Grammar) -> Language {

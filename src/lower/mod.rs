@@ -20,7 +20,8 @@ use tree_sitter::Node;
 use crate::exec_lines::is_comment_kind;
 use crate::exec_lines::is_executable_leaf;
 use crate::ir::{
-    DamageKind, DamageSpan, DecisionKind, IrBlock, IrCallable, IrNode, Span, TerminatorKind,
+    is_clear_of_damage, DamageKind, DamageSpan, DecisionKind, IrBlock, IrCallable, IrNode, Span,
+    TerminatorKind,
 };
 use crate::model::LanguageFamily;
 use crate::parse::ParsedFile;
@@ -69,6 +70,28 @@ pub fn lower_all(parsed_files: &[ParsedFile]) -> Vec<IrFile> {
 }
 
 /// Lowers one parsed file's whole tree into its `IrNode` root.
+///
+/// WS-6 salvage (*Architecture* -> salvage row): `parse::parse_one` no
+/// longer rejects a whole file for `tree.root_node().has_error()`, so
+/// `build_ir` above may run over a damaged tree. This function is the one
+/// place that turns typed damage spans into fail-closed exclusions, at
+/// *entity* granularity (a callable, a block) rather than a generic
+/// "any span overlapping damage" sweep over every node: the latter would
+/// reproduce the exact whole-file-drop bug being fixed one layer down,
+/// since the tree's own root (and every other container node) always spans
+/// the entire file and therefore always "overlaps" any damage found
+/// anywhere in it. A callable/block whose own span intersects any damage
+/// span at all -- even only partially -- is dropped from its side table
+/// entirely (`is_clear_of_damage`), and `prune_damage` replaces exactly
+/// those excluded entities' own `IrNode` subtrees (matched by span, an
+/// entity's span uniquely identifies the one tree-sitter node it was built
+/// from) with a span-only empty node, so every analyzer's own unconditional
+/// whole-tree walk (D12's file-level scanned-line count in
+/// `metrics::scan_file`, the clone and wasteful-rule walks in
+/// `clones`/`rules`, none of which know about damage) never counts or flags
+/// content inside a damaged entity either. Everything else in the tree --
+/// including stray damage that sits outside every callable/block -- is left
+/// exactly as `build_ir` produced it.
 pub fn lower_file(file: &ParsedFile) -> IrFile {
     let mut damage = Vec::new();
     let mut callables = Vec::new();
@@ -81,6 +104,23 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
         &mut callables,
         &mut blocks,
     );
+
+    let mut prune_targets: Vec<Span> = callables
+        .iter()
+        .filter(|callable| !is_clear_of_damage(callable.span, &damage))
+        .map(|callable| callable.span)
+        .collect();
+    prune_targets.extend(
+        blocks
+            .iter()
+            .filter(|block| !is_clear_of_damage(block.span, &damage))
+            .map(|block| block.span),
+    );
+
+    callables.retain(|callable| is_clear_of_damage(callable.span, &damage));
+    blocks.retain(|block| is_clear_of_damage(block.span, &damage));
+    let root = prune_damage(root, &prune_targets);
+
     IrFile {
         relative_path: file.relative_path.clone(),
         language: file.language,
@@ -88,6 +128,102 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
         damage,
         callables,
         blocks,
+    }
+}
+
+/// Damage-pruned rebuild of `root` (WS-6 salvage, see `lower_file`'s own
+/// doc comment): a node is replaced by a span-only `IrNode::empty` the
+/// moment its own span exactly matches one of `targets` (an excluded
+/// callable's or block's own span -- unique to the one tree-sitter node it
+/// was built from), otherwise every child is rebuilt the same way. Matching
+/// by exact span rather than damage-overlap is deliberate: a container
+/// node's span always contains its damaged descendant's span too, so an
+/// overlap check here would prune the whole file, not just the damaged
+/// entity. An explicit work-list of frames, not recursion, for the same
+/// D18 stack-safety reason `build_ir` itself is iterative: a single-child
+/// chain thousands of levels deep must not grow the native call stack by
+/// one frame per level.
+fn prune_damage(root: IrNode, targets: &[Span]) -> IrNode {
+    if targets.is_empty() {
+        return root;
+    }
+    if targets.contains(&root.span) {
+        return IrNode::empty(root.span);
+    }
+
+    struct Frame {
+        span: Span,
+        executable: bool,
+        decision: Option<DecisionKind>,
+        terminator: Option<TerminatorKind>,
+        in_block: bool,
+        in_catch_body: bool,
+        is_comment: bool,
+        is_named: bool,
+        is_clone_statement: bool,
+        is_hoisted_or_type_only: bool,
+        pending_children: std::vec::IntoIter<IrNode>,
+        rebuilt: Vec<IrNode>,
+    }
+
+    fn open_frame(mut node: IrNode) -> Frame {
+        // `IrNode` has a custom `Drop` impl (for its own stack-safe
+        // teardown), so its fields cannot be moved out by destructuring --
+        // every scalar field is `Copy`, read off `&node` first, and
+        // `children` is lifted out via `mem::take` before `node` itself
+        // (now holding only a dropped-cheap empty `Vec`) goes out of scope.
+        let children = std::mem::take(&mut node.children);
+        let pending_count = children.len();
+        Frame {
+            span: node.span,
+            executable: node.executable,
+            decision: node.decision,
+            terminator: node.terminator,
+            in_block: node.in_block,
+            in_catch_body: node.in_catch_body,
+            is_comment: node.is_comment,
+            is_named: node.is_named,
+            is_clone_statement: node.is_clone_statement,
+            is_hoisted_or_type_only: node.is_hoisted_or_type_only,
+            pending_children: children.into_iter(),
+            rebuilt: Vec::with_capacity(pending_count),
+        }
+    }
+
+    fn finish(frame: Frame) -> IrNode {
+        IrNode {
+            span: frame.span,
+            executable: frame.executable,
+            decision: frame.decision,
+            terminator: frame.terminator,
+            in_block: frame.in_block,
+            in_catch_body: frame.in_catch_body,
+            is_comment: frame.is_comment,
+            is_named: frame.is_named,
+            is_clone_statement: frame.is_clone_statement,
+            is_hoisted_or_type_only: frame.is_hoisted_or_type_only,
+            children: frame.rebuilt,
+        }
+    }
+
+    let mut stack = vec![open_frame(root)];
+    loop {
+        let next_child = stack.last_mut().unwrap().pending_children.next();
+        let Some(child) = next_child else {
+            let frame = stack.pop().unwrap();
+            let finished = finish(frame);
+            let Some(parent) = stack.last_mut() else {
+                return finished;
+            };
+            parent.rebuilt.push(finished);
+            continue;
+        };
+        if targets.contains(&child.span) {
+            let empty = IrNode::empty(child.span);
+            stack.last_mut().unwrap().rebuilt.push(empty);
+        } else {
+            stack.push(open_frame(child));
+        }
     }
 }
 

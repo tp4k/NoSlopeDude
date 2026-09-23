@@ -40,6 +40,14 @@ impl Span {
             end_line: node.end_position().row as u32 + 1,
         }
     }
+
+    /// Whether `self` and `other` share at least one byte -- the salvage
+    /// query's primitive: a callable "intersects damage" the moment its own
+    /// span overlaps a damage span at all, not only when one fully contains
+    /// the other, so a partially-damaged declaration still counts.
+    pub fn intersects(self, other: Span) -> bool {
+        self.start_byte < other.end_byte && other.start_byte < self.end_byte
+    }
 }
 
 /// The `cc` consumer's uniform decision-node kind (*What the IR must carry*):
@@ -232,4 +240,13 @@ pub fn is_block_member(node: &IrNode) -> bool {
 /// The six rules' catch-body query.
 pub fn is_in_catch_body(node: &IrNode) -> bool {
     node.in_catch_body
+}
+
+/// The salvage query (WS-6 item 8, *Architecture* -> salvage row): whether
+/// `span` is provably clear of every typed damage span in `damage` -- `true`
+/// means the entity at `span` shares no byte with any damage and is safe to
+/// measure; `false` (including a merely partial overlap) is fail-closed: any
+/// residual damage keeps the whole entity out.
+pub fn is_clear_of_damage(span: Span, damage: &[DamageSpan]) -> bool {
+    !damage.iter().any(|entry| span.intersects(entry.span))
 }

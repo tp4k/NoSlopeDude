@@ -20,8 +20,8 @@ use serde::Serialize;
 use crate::discover::DiscoverResult;
 use crate::metrics;
 use crate::model::{
-    Callable, CloneGroup, ClonesResult, LanguageFamily, MetricsResult, ParseFailure, RuleFinding,
-    RuleId, RulesResult, ScanSettings, Target, VerbosityScore,
+    Callable, CloneGroup, ClonesResult, LanguageFamily, MetricsResult, ParseFailure,
+    ParseFailureReason, RuleFinding, RuleId, RulesResult, ScanSettings, Target, VerbosityScore,
 };
 
 pub use html::render_html;
@@ -214,7 +214,18 @@ pub fn aggregate(input: &ReportInput) -> Report {
             .map(|c| build_callable(input, c))
             .collect(),
         skipped_files: build_skipped_files(input),
-        incomplete: input.metrics.incomplete || input.rules.incomplete,
+        // WS-6's `SkipReason` split: a discovery-time skip only marks the
+        // scan incomplete when it is an analysis failure (`Unreadable` --
+        // the walk tried this path and could not read it), never a policy
+        // exclusion (D16, a user `--exclude`) the scan behaved exactly as
+        // configured against.
+        incomplete: input.metrics.incomplete
+            || input.rules.incomplete
+            || input
+                .discover
+                .skipped
+                .iter()
+                .any(|file| file.reason.is_analysis_failure()),
         adaptation: ReportAdaptation::default(),
     }
 }
@@ -364,6 +375,15 @@ fn build_skipped_files(input: &ReportInput) -> Vec<ReportSkippedFile> {
         input
             .parse_failures
             .iter()
+            // WS-6 salvage: a `SyntaxError` parse failure no longer means
+            // the whole file was dropped -- `parse::parse_one` keeps it
+            // alongside a `ParsedFile` purely so `parse_failures` stays
+            // non-empty for `incomplete`'s sake (see that module's own doc
+            // comment). It is never itself a skipped file any more, so it
+            // does not render here; every other parse-failure reason
+            // (`Unreadable`, `UnsupportedExtension`, `GrammarSetup`) still
+            // means no `ParsedFile` at all and renders exactly as before.
+            .filter(|failure| failure.reason != ParseFailureReason::SyntaxError)
             .map(|failure| ReportSkippedFile {
                 relative_path: failure.relative_path.clone(),
                 reason: format!("parse_{}", failure.reason.label()),
