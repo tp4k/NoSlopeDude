@@ -14,7 +14,7 @@ use git2::{
 };
 
 use super::path::RepoPath;
-use super::snapshot::{repo_path_to_fs, Entry, EntryKind, WorktreeSnapshot};
+use super::snapshot::{repo_path_to_fs, Entry, EntryKind, WorktreeSnapshot, SOURCE_CEILING_BYTES};
 use super::{wrap_git_error, GitError, CODE_SNAPSHOT_UNAVAILABLE};
 
 const MODE_REGULAR: u32 = 0o100644;
@@ -489,10 +489,14 @@ fn count_lines(buffer: &[u8]) -> usize {
 /// Shared `DiffOptions` for every file-level Change listing: a type change
 /// (e.g. symlink -> regular file at the same path) is one `Typechange`
 /// delta, never a delete+add pair that would feed unrelated content into
-/// rename-similarity scoring.
+/// rename-similarity scoring. `max_size` caps both sides at
+/// `SOURCE_CEILING_BYTES` so a non-exact renamed delta's `Patch::to_buf`
+/// (`rename_similarity`) never inflates an over-ceiling blob to build the
+/// diff text it discards.
 fn diff_options() -> DiffOptions {
     let mut opts = DiffOptions::new();
     opts.include_typechange(true);
+    opts.max_size(SOURCE_CEILING_BYTES as i64);
     opts
 }
 
