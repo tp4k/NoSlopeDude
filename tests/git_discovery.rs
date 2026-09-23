@@ -291,11 +291,7 @@ fn config_exclude_directory_pattern_covers_nested_files() {
                 MODE_REGULAR,
                 b"export {};\n".to_vec(),
             ),
-            (
-                b"pkg/z.ts".to_vec(),
-                MODE_REGULAR,
-                b"export {};\n".to_vec(),
-            ),
+            (b"pkg/z.ts".to_vec(), MODE_REGULAR, b"export {};\n".to_vec()),
         ],
     );
     let snapshot = CommitSnapshot::head_or_empty(&repo).expect("snapshot HEAD");
