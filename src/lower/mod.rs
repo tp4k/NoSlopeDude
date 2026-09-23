@@ -120,7 +120,8 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
         &mut tables,
     );
 
-    let exclusions = cascade_exclusions(&callables, &callable_dirty, &blocks, &block_dirty);
+    let exclusions =
+        cascade_exclusions(&damage, &callables, &callable_dirty, &blocks, &block_dirty);
 
     let mut redact_targets: HashSet<Span> = damage.iter().map(|entry| entry.span).collect();
     for (index, callable) in callables.iter().enumerate() {
@@ -175,37 +176,75 @@ enum EntityRef {
     Block(usize),
 }
 
-/// The cascade sweep `lower_file`'s own doc comment describes: callables and
-/// blocks are both just spans of the same tree, so "does entity B sit
-/// inside excluded entity A" is answerable purely from `(start_byte,
-/// end_byte)` ordering, with no dependency on `damage.len()` or the tree's
-/// own node count. Sorts every entity into document order, outer before
-/// inner (ascending `start_byte`; ties broken by descending `end_byte`, so
-/// a wider outer span that opens at the same byte as an inner one -- e.g. a
-/// callable whose single-statement body is itself the next entity -- sorts
-/// first), then sweeps once with a stack of currently-open ancestors: an
-/// entity closes the moment the sweep reaches a span starting at or past
-/// its own `end_byte` (two entity spans, both tree-sitter node spans, are
-/// always either nested or disjoint, never partially overlapping, so this
-/// is exact, not a heuristic). `Θ(n log n)` for the sort, `Θ(n)` for the
-/// sweep, `n = callables.len() + blocks.len()`.
+/// The cascade sweep `lower_file`'s own doc comment describes: callables,
+/// blocks and bare damage spans are all just spans of the same tree, so
+/// "does entity B sit inside excluded/damaged ancestor A" is answerable
+/// purely from `(start_byte, end_byte)` ordering, with no dependency on the
+/// tree's own node count. Sorts every entry into document order, outer
+/// before inner (ascending `start_byte`; ties broken by descending
+/// `end_byte`, so a wider outer span that opens at the same byte as an
+/// inner one -- e.g. a callable whose single-statement body is itself the
+/// next entity -- sorts first), then sweeps once with a stack of
+/// currently-open ancestors: an entry closes the moment the sweep reaches a
+/// span starting at or past its own `end_byte` (two entity spans, both
+/// tree-sitter node spans, are always either nested or disjoint, never
+/// partially overlapping, so this is exact, not a heuristic). `Θ(n log n)`
+/// for the sort, `Θ(n)` for the sweep, `n = damage.len() + callables.len() +
+/// blocks.len()`.
+///
+/// WS-6 round 4 (security HIGH regression from round 3's `35508d9`): a bare
+/// damage span -- one with no enclosing damaged callable/block entry of its
+/// own, since `build_ir`'s classifier never calls it a callable or block --
+/// used to be entirely absent from `entries`, so the sweep's
+/// `open_ancestors` stack never opened an excluded ancestor for it. An
+/// entity nested directly inside such a span (no callable/block ancestor
+/// between them) therefore swept past with `ancestor_excluded == false` and
+/// its own `dirty` bit `false` too (nothing walked *into* the damage span
+/// to mark it), surviving as measured -- while `redact_targets` (built from
+/// `damage` directly, independent of this cascade) still unconditionally
+/// wiped the same span's `IrNode` subtree, so `find_ir_subtree` came back
+/// empty and `metrics::fallback_ir_body` published a fabricated `cc:1
+/// sloc:0` measurement instead of dropping the entity. The fix: every bare
+/// damage span now joins `entries` too, as `(span, true, None)`, pushed
+/// ahead of the callable/block entries below so a tie at the same
+/// `start_byte` still opens the damage entry first (its own `end_byte` is
+/// what should win the ancestor race in that case, per the same tie-break
+/// this function's own doc comment above already establishes for
+/// same-start entity spans). A damage entry always has `own_dirty == true`
+/// by construction and carries no entity index (`EntityRef` is `None`), so
+/// the sweep's exclusion-write step below only writes into
+/// `callable_excluded`/`block_excluded` when the entry's `EntityRef` is
+/// `Some` -- a damage entry still opens (and later closes) an ancestor
+/// frame on `open_ancestors` exactly like every other entry, it simply has
+/// no side table of its own to write `excluded` into. This is a purely
+/// additive change to the sweep's entry set and tie-break; the cascade
+/// mechanism itself (bottom-up dirty fold, document-order interval
+/// nesting) is unchanged from round 3.
 fn cascade_exclusions(
+    damage: &[DamageSpan],
     callables: &[IrCallable],
     callable_dirty: &[bool],
     blocks: &[IrBlock],
     block_dirty: &[bool],
 ) -> Exclusions {
-    let mut entries: Vec<(Span, bool, EntityRef)> =
-        Vec::with_capacity(callables.len() + blocks.len());
+    let mut entries: Vec<(Span, bool, Option<EntityRef>)> =
+        Vec::with_capacity(damage.len() + callables.len() + blocks.len());
+    for entry in damage {
+        entries.push((entry.span, true, None));
+    }
     for (index, callable) in callables.iter().enumerate() {
         entries.push((
             callable.span,
             callable_dirty[index],
-            EntityRef::Callable(index),
+            Some(EntityRef::Callable(index)),
         ));
     }
     for (index, block) in blocks.iter().enumerate() {
-        entries.push((block.span, block_dirty[index], EntityRef::Block(index)));
+        entries.push((
+            block.span,
+            block_dirty[index],
+            Some(EntityRef::Block(index)),
+        ));
     }
     entries.sort_by(|(a_span, ..), (b_span, ..)| {
         a_span
@@ -230,9 +269,11 @@ fn cascade_exclusions(
         }
         let ancestor_excluded = open_ancestors.last().is_some_and(|&(_, excluded)| excluded);
         let excluded = own_dirty || ancestor_excluded;
-        match entity_ref {
-            EntityRef::Callable(index) => callable_excluded[index] = excluded,
-            EntityRef::Block(index) => block_excluded[index] = excluded,
+        if let Some(entity_ref) = entity_ref {
+            match entity_ref {
+                EntityRef::Callable(index) => callable_excluded[index] = excluded,
+                EntityRef::Block(index) => block_excluded[index] = excluded,
+            }
         }
         open_ancestors.push((span.end_byte, excluded));
     }
