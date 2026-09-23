@@ -260,6 +260,38 @@ fn unborn_empty_tree_to_index_all_added() {
 }
 
 #[test]
+fn exact_rename_reports_full_similarity() {
+    let (_dir, repo) = common::init_repo();
+    let base_oid = common::commit_entries(
+        &repo,
+        &[(b"a.ts".to_vec(), MODE_REGULAR, filler_lines(b'Q', 40))],
+    );
+    let candidate_oid = common::commit_entries(
+        &repo,
+        &[(b"b.ts".to_vec(), MODE_REGULAR, filler_lines(b'Q', 40))],
+    );
+
+    let changes = diff::diff_commit_to_commit(&repo, Some(base_oid), candidate_oid)
+        .expect("diff commit to commit");
+
+    assert_eq!(changes.len(), 1, "expected exactly one change: {changes:?}");
+    match &changes[0] {
+        Change::Renamed {
+            from,
+            to,
+            kind,
+            similarity,
+        } => {
+            assert_eq!(from.as_bytes(), b"a.ts");
+            assert_eq!(to.as_bytes(), b"b.ts");
+            assert_eq!(*kind, EntryKind::Regular);
+            assert_eq!(*similarity, 100, "an exact-content rename must score 100");
+        }
+        other => panic!("expected a Renamed change, got {other:?}"),
+    }
+}
+
+#[test]
 fn commit_to_commit_reports_changes() {
     let (_dir, repo) = common::init_repo();
     let base_oid =
