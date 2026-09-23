@@ -170,6 +170,44 @@ fn clear_non_rename_is_delete_plus_add() {
         .any(|c| matches!(c, Change::Added { path, .. } if path.as_bytes() == b"src/B.ts")));
 }
 
+/// A renamed text file whose content is text-classified by libgit2 but not
+/// valid UTF-8 must still report a similarity, not fail the whole diff.
+#[test]
+fn renamed_non_utf8_text_file_reports_similarity() {
+    let (_dir, repo) = common::init_repo();
+    let base_oid = common::commit_entries(
+        &repo,
+        &[(b"a.js".to_vec(), MODE_REGULAR, non_utf8_lines(false))],
+    );
+    let candidate_oid = common::commit_entries(
+        &repo,
+        &[(b"b.js".to_vec(), MODE_REGULAR, non_utf8_lines(true))],
+    );
+
+    let changes = diff::diff_commit_to_commit(&repo, Some(base_oid), candidate_oid)
+        .expect("diff commit to commit must not fail on non-UTF-8 renamed content");
+
+    assert_eq!(changes.len(), 1, "expected exactly one change: {changes:?}");
+    match &changes[0] {
+        Change::Renamed {
+            from,
+            to,
+            kind,
+            similarity,
+        } => {
+            assert_eq!(from.as_bytes(), b"a.js");
+            assert_eq!(to.as_bytes(), b"b.js");
+            assert_eq!(*kind, EntryKind::Regular);
+            assert!(
+                *similarity >= diff::RENAME_THRESHOLD,
+                "expected similarity >= {}, got {similarity}",
+                diff::RENAME_THRESHOLD
+            );
+        }
+        other => panic!("expected a Renamed change, got {other:?}"),
+    }
+}
+
 #[test]
 fn staged_add_delete_modify_statuses() {
     let (_dir, repo) = common::init_repo();
@@ -677,6 +715,24 @@ fn filler_lines(byte: u8, count: usize) -> Vec<u8> {
     for _ in 0..count {
         buf.extend(std::iter::repeat_n(byte, 20));
         buf.push(b'\n');
+    }
+    buf
+}
+
+/// Forty lines, one of which (`line 1`) holds a raw `0xE9` byte followed by
+/// a non-continuation byte, so the buffer as a whole is not valid UTF-8, yet
+/// stays small enough for libgit2's `git_str_is_binary` to still classify
+/// it as text.
+fn non_utf8_lines(edit_line0: bool) -> Vec<u8> {
+    let mut buf = Vec::new();
+    if edit_line0 {
+        buf.extend_from_slice(b"line 0 EDITED\n");
+    } else {
+        buf.extend_from_slice(b"line 0\n");
+    }
+    buf.extend_from_slice(b"var s = '\xe9';\n");
+    for i in 2..40 {
+        buf.extend_from_slice(format!("line {i}\n").as_bytes());
     }
     buf
 }
