@@ -7,6 +7,7 @@ mod common;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use std::process::Command;
 
 use git2::{IndexEntry, IndexTime, ObjectType, Oid, Repository, Signature};
 use tempfile::TempDir;
@@ -652,6 +653,81 @@ fn worktree_over_ceiling_typechange_stays_typechange() {
             },
         ],
         "an over-ceiling typechange must stay one Typechange, not split into Deleted+Added: {changes:?}"
+    );
+}
+
+/// D33: runs `f` on a detached, `'static` thread and waits at most 5s for
+/// its result. A hang inside `f` (the defect this guards against, e.g. an
+/// `open(2)` on a FIFO with no writer) leaves the thread running forever,
+/// but the test process still exits: nothing here ever joins it.
+#[cfg(unix)]
+fn with_timeout<T: Send + 'static>(label: &str, f: impl FnOnce() -> T + Send + 'static) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+        Ok(value) => value,
+        Err(_) => panic!("{label} did not complete within the 5s guard; it is likely blocked"),
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn worktree_special_files_reported_by_kind_never_opened() {
+    let (dir, repo) = common::init_repo();
+    let base_oid = common::commit_entries(
+        &repo,
+        &[
+            (
+                b"src/tracked.ts".to_vec(),
+                MODE_REGULAR,
+                b"before\n".to_vec(),
+            ),
+            (b"src/gone.ts".to_vec(), MODE_REGULAR, b"bye\n".to_vec()),
+        ],
+    );
+    sync_index_to_commit(&repo, base_oid);
+    std::fs::create_dir_all(dir.path().join("src")).expect("create src dir");
+    // src/gone.ts is intentionally never written to disk (on-disk deletion,
+    // whose old side is a regular blob, fires the Phase-2 rename gate).
+    let status = Command::new("/usr/bin/mkfifo")
+        .arg(dir.path().join("src/tracked.ts"))
+        .status()
+        .expect("spawn mkfifo for the replaced src/tracked.ts");
+    assert!(status.success(), "mkfifo src/tracked.ts must succeed");
+    let status = Command::new("/usr/bin/mkfifo")
+        .arg(dir.path().join("src/new.ts"))
+        .status()
+        .expect("spawn mkfifo for the untracked src/new.ts");
+    assert!(status.success(), "mkfifo src/new.ts must succeed");
+
+    let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let changes = with_timeout(
+        "diff_commit_to_worktree over Special entries",
+        move || diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree),
+    )
+    .expect("diff commit to worktree");
+
+    assert_eq!(
+        changes,
+        vec![
+            Change::Deleted {
+                path: RepoPath::from_bytes(b"src/gone.ts".to_vec()),
+                kind: EntryKind::Regular,
+            },
+            Change::Added {
+                path: RepoPath::from_bytes(b"src/new.ts".to_vec()),
+                kind: EntryKind::Special,
+            },
+            Change::Typechange {
+                path: RepoPath::from_bytes(b"src/tracked.ts".to_vec()),
+                old_kind: EntryKind::Regular,
+                new_kind: EntryKind::Special,
+            },
+        ],
+        "a Special entry is reported by kind (Added when new, Typechange over a base blob), \
+         never read, and never a rename source/target: {changes:?}"
     );
 }
 
