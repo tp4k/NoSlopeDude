@@ -11,7 +11,7 @@ Every agent that finishes a piece of work updates its rows here in the same
 round; see *How to update this file* at the bottom and the matching rule in
 [`AGENTS.md`](../AGENTS.md).
 
-Last updated: 2026-09-24, from `feat/m0a-import@24eb128` and
+Last updated: 2026-09-24, from `main@a6b5037` and
 `feat/m1-snapshots@f23804f`.
 
 ## Legend
@@ -30,18 +30,17 @@ repository proves it. "The code exists" is `[~]`, not `[x]`.
 
 | Branch / worktree | HEAD | Holds |
 |---|---|---|
-| `main` (`~/pet/nsd`) | `1bea9f8` | Handoff only: both plans, `AGENTS.md`, `CLAUDE.md`. **No implementation.** |
-| `feat/m0a-import` (`~/pet/nsd-m0a-import`) | `24eb128`, 93 commits ahead of `main` | M0a complete, M0b complete except its private-archive leg |
+| `main` (`~/pet/nsd`) | `a6b5037` | M0a and M0b, fast-forwarded from `feat/m0a-import` on 2026-09-24. The integration branch |
+| `feat/m0a-import` (deleted) | merged into `main` at `a6b5037` | Was the M0a/M0b working branch; its worktree `~/pet/nsd-m0a-import` was removed with it |
 | `feat/m1-snapshots` (`~/pet/nsd-m1-snapshots`) | `f23804f`, branched from `c5267c0` | M1–M2 snapshots, config, diff, rename detection, Git-backed discovery |
 
-Neither feature branch is merged to `main`, and they have diverged:
-`feat/m1-snapshots` forked at `c5267c0` (mid-M0b, right after the cc/SLOC IR
-retarget) and is **missing 44 M0b commits** — the clone and rules retargets,
-all of WS-6's salvage work, and the `ir_isolation`/`salvage` suites. It must
-take those commits before its own M1 rows can be called green against the
-current M0b baseline.
+`feat/m1-snapshots` is **not** merged and has diverged: it forked at `c5267c0`
+(mid-M0b, right after the cc/SLOC IR retarget), so it is missing 45 commits
+that `main` now has — the clone and rules retargets, all of WS-6's salvage
+work, the `ir_isolation`/`salvage` suites, and this file. It must merge `main`
+before its own M1 rows can be called green against the current M0b baseline.
 
-Test state on `feat/m0a-import@24eb128`: `cargo test` is green, 173 passed /
+Test state on `main@a6b5037`: `cargo test` is green, 173 passed /
 0 failed / 1 ignored across 17 suites (local Homebrew toolchain; MSRV 1.90 is
 declared, not exercised — A4).
 
@@ -51,11 +50,11 @@ Plan: `nsd-plan-final.md` *M0a — Port and consolidate*, steps 1–3.
 
 | ID | Step | Status | Branch | Evidence |
 |---|---|---|---|---|
-| M0a-1 | Selective `git archive` import from `agent_slope@912ec7a`, rename crate/bin/CLI/docs to `nsd`, record provenance, keep root plans authoritative | `[x]` | `feat/m0a-import` | `37829cb`, `dfff3e5`, `06b5ef5`; `tests/cli.rs::test_binary_name_is_nsd`, `tests/report_html.rs` `<title>`/`<h1>` pin (`6bc362f`) |
-| M0a-2 | Consolidate the three D11 executable-line implementations into one shared function | `[x]` | `feat/m0a-import` | `be3a586` → `src/exec_lines.rs`; unit tests `57ada8b`; ledger row closed `67a6f51` |
-| M0a-3 | Replace `DefaultHasher` with versioned BLAKE3 before anything persists a fingerprint | `[x]` | `feat/m0a-import` | `5d4a79f`, `2c49e7b` (`src/hashing.rs`, `RunFingerprint` rewritten, SipHash streams dropped); unit tests `78b3506` |
-| M0a-4 | Golden digest (A1) for `java-fixture-01`, numbers-and-hashes only, no private excerpts or paths | `[x]` | `feat/m0a-import` | `a92d5f2`, `f1bfc1b`, `5a9ac01`; `tests/golden_digest.rs`, `docs/golden-digest.md`; privacy test widened `1e60aa6`, `60ed9e1` |
-| M0a-5 | Declare `rust-version = "1.90"` (A4) | `[x]` | `feat/m0a-import` | `Cargo.toml:5` |
+| M0a-1 | Selective `git archive` import from `agent_slope@912ec7a`, rename crate/bin/CLI/docs to `nsd`, record provenance, keep root plans authoritative | `[x]` | `main` | `37829cb`, `dfff3e5`, `06b5ef5`; `tests/cli.rs::test_binary_name_is_nsd`, `tests/report_html.rs` `<title>`/`<h1>` pin (`6bc362f`) |
+| M0a-2 | Consolidate the three D11 executable-line implementations into one shared function | `[x]` | `main` | `be3a586` → `src/exec_lines.rs`; unit tests `57ada8b`; ledger row closed `67a6f51` |
+| M0a-3 | Replace `DefaultHasher` with versioned BLAKE3 before anything persists a fingerprint | `[x]` | `main` | `5d4a79f`, `2c49e7b` (`src/hashing.rs`, `RunFingerprint` rewritten, SipHash streams dropped); unit tests `78b3506` |
+| M0a-4 | Golden digest (A1) for `java-fixture-01`, numbers-and-hashes only, no private excerpts or paths | `[x]` | `main` | `a92d5f2`, `f1bfc1b`, `5a9ac01`; `tests/golden_digest.rs`, `docs/golden-digest.md`; privacy test widened `1e60aa6`, `60ed9e1` |
+| M0a-5 | Declare `rust-version = "1.90"` (A4) | `[x]` | `main` | `Cargo.toml:5` |
 
 Not a plan step, recorded for accuracy: `src/golden.rs` works around a
 `serde_json` float-rounding bug via raw-text recovery (`5e0f3d1`, guarded by
@@ -70,13 +69,13 @@ Grammars deliberately unchanged here: `tree-sitter` 0.25.10,
 
 | ID | Step | Status | Branch | Evidence |
 |---|---|---|---|---|
-| M0b-4 | Prototype clone lowering before freezing IR shape; `normalized_statement_tokens` from the IR must reproduce today's clone groups exactly | `[~]` | `feat/m0a-import` | Reproduction is proven — `tests/clones.rs::test_ir_backed_groups_match_the_pre_ir_groups_on_every_fixture` (`edbf309`), plus `test_statement_children_come_from_ir_block_membership` and `test_fingerprint_is_stable_across_two_runs_of_the_ir_path`. `[~]` because it was proven *after* the IR shape landed (`671060e` → `0401481`), not by a prototype ahead of it; the exact-group requirement itself is met on every suite fixture, and on `java-fixture-01` only through the pending leg in M0b-8 |
-| M0b-5 | Define `src/ir/`; Java and JS/TS lowerings in `src/lower/` as plain functions over tree-sitter trees, both emitting typed damage spans | `[x]` | `feat/m0a-import` | `c48fa70` (red), `671060e` (green), built per file in the pipeline `7d132ef`; six remaining IR capabilities `9400a23`/`5038473`; hardening `91475eb` (iterative `Drop`), `6ab7c44` (`Span` → u32), `e332181`; `tests/ir_lowering.rs`, `tests/ir_parity.rs` |
-| M0b-6 | Retarget `cc`, D11/SLOC, clones and the six rules onto the IR | `[x]` | `feat/m0a-import` | cc/SLOC `c5267c0`; D8/D10/block classification `a839679`; clones `0401481`; six rules + verbosity `9e3e7dd`. No analyzer names a grammar node kind: `tests/ir_isolation.rs::test_no_analyzer_names_a_grammar_node_kind`, with its own positive control (`f92c33c`) |
-| M0b-7 | Error-span salvage and the `SkipReason` split, IR-level and language-agnostic | `[x]` | `feat/m0a-import` | `aacca37` (salvage per callable instead of whole-file drop), redesigned as one coherent pass `35508d9`, bare-damage-span ancestors `75ec24d`; `tests/salvage.rs` (14 tests incl. the quadratic-blowup guard, `5bf9c34`); `SkipReason` at `src/model.rs:77` |
-| M0b-8a | Measurement-neutrality gate on the ten suites' fixtures: byte-identical `report.json`, pre-IR vs IR, same fixed checkout and identical settings | `[x]` | `feat/m0a-import` | `tests/neutrality.rs` + `scripts/neutrality_gate.sh` (`4ee26c2`, `2424019`, `502a358`); clean/malformed corpus partition `b2290ea`/`1ccfeac`; baselines recaptured `08e95ae`, `687a86b`, `8af5134`; documented in `docs/ir-neutrality.md` |
-| M0b-8b | Declared-delta exception: salvage and the `SkipReason` split change malformed fixtures only, asserted explicitly, unaffected measurements identical | `[x]` | `feat/m0a-import` | `bbdf429`, `f5655ad`, `4ec3d94` (`/skipped_files` delta tightened to an exact length); `docs/ir-neutrality.md` *Declared deltas* |
-| M0b-8c | Strict leg: byte-identical against the archived full `report.json` for `java-fixture-01@c6671504…`, run locally from the checkout path that report records | `[!]` | `feat/m0a-import` | **Pending, gated on the private archive.** Harness is complete and fails visibly when asked to: `docs/ir-neutrality.md` *The `java-fixture-01` strict leg*, `test_java_fixture_01_strict_leg_is_reported_pending_when_the_archive_is_absent`, and opt-in `NSD_REQUIRE_ARCHIVE_VERIFIED=1` (`2112ee6`). **This is the gate that blocks M0c** — do not start the grammar swap until it is run and recorded |
+| M0b-4 | Prototype clone lowering before freezing IR shape; `normalized_statement_tokens` from the IR must reproduce today's clone groups exactly | `[~]` | `main` | Reproduction is proven — `tests/clones.rs::test_ir_backed_groups_match_the_pre_ir_groups_on_every_fixture` (`edbf309`), plus `test_statement_children_come_from_ir_block_membership` and `test_fingerprint_is_stable_across_two_runs_of_the_ir_path`. `[~]` because it was proven *after* the IR shape landed (`671060e` → `0401481`), not by a prototype ahead of it; the exact-group requirement itself is met on every suite fixture, and on `java-fixture-01` only through the pending leg in M0b-8 |
+| M0b-5 | Define `src/ir/`; Java and JS/TS lowerings in `src/lower/` as plain functions over tree-sitter trees, both emitting typed damage spans | `[x]` | `main` | `c48fa70` (red), `671060e` (green), built per file in the pipeline `7d132ef`; six remaining IR capabilities `9400a23`/`5038473`; hardening `91475eb` (iterative `Drop`), `6ab7c44` (`Span` → u32), `e332181`; `tests/ir_lowering.rs`, `tests/ir_parity.rs` |
+| M0b-6 | Retarget `cc`, D11/SLOC, clones and the six rules onto the IR | `[x]` | `main` | cc/SLOC `c5267c0`; D8/D10/block classification `a839679`; clones `0401481`; six rules + verbosity `9e3e7dd`. No analyzer names a grammar node kind: `tests/ir_isolation.rs::test_no_analyzer_names_a_grammar_node_kind`, with its own positive control (`f92c33c`) |
+| M0b-7 | Error-span salvage and the `SkipReason` split, IR-level and language-agnostic | `[x]` | `main` | `aacca37` (salvage per callable instead of whole-file drop), redesigned as one coherent pass `35508d9`, bare-damage-span ancestors `75ec24d`; `tests/salvage.rs` (14 tests incl. the quadratic-blowup guard, `5bf9c34`); `SkipReason` at `src/model.rs:77` |
+| M0b-8a | Measurement-neutrality gate on the ten suites' fixtures: byte-identical `report.json`, pre-IR vs IR, same fixed checkout and identical settings | `[x]` | `main` | `tests/neutrality.rs` + `scripts/neutrality_gate.sh` (`4ee26c2`, `2424019`, `502a358`); clean/malformed corpus partition `b2290ea`/`1ccfeac`; baselines recaptured `08e95ae`, `687a86b`, `8af5134`; documented in `docs/ir-neutrality.md` |
+| M0b-8b | Declared-delta exception: salvage and the `SkipReason` split change malformed fixtures only, asserted explicitly, unaffected measurements identical | `[x]` | `main` | `bbdf429`, `f5655ad`, `4ec3d94` (`/skipped_files` delta tightened to an exact length); `docs/ir-neutrality.md` *Declared deltas* |
+| M0b-8c | Strict leg: byte-identical against the archived full `report.json` for `java-fixture-01@c6671504…`, run locally from the checkout path that report records | `[!]` | `main` | **Pending, gated on the private archive.** Harness is complete and fails visibly when asked to: `docs/ir-neutrality.md` *The `java-fixture-01` strict leg*, `test_java_fixture_01_strict_leg_is_reported_pending_when_the_archive_is_absent`, and opt-in `NSD_REQUIRE_ARCHIVE_VERIFIED=1` (`2112ee6`). **This is the gate that blocks M0c** — do not start the grammar swap until it is run and recorded |
 
 ## M0c — Grammar swap
 
@@ -95,8 +94,8 @@ steps 9–12. **Not started.** Blocked on M0b-8c.
 
 Plan: `nsd-plan-final.md` *M1–M2*, plus `nsd-plan-implementation.md`
 *Implementation sequence* step 3. All work below is on `feat/m1-snapshots`,
-which still needs the 44 M0b commits listed in *Branch map*; its rows are
-green against its own fork point, not against current M0b.
+which still needs the 45 commits `main` has and it does not (see *Branch map*);
+its rows are green against its own fork point, not against current M0b.
 
 | ID | Deliverable | Status | Branch | Evidence |
 |---|---|---|---|---|
@@ -150,14 +149,12 @@ has been brought to the v1 canonical contract (`schema_version: 1`,
   `java-fixture-01` strict leg has been run against the private archive and
   its outcome recorded here. A missing fixture leaves the gate *pending* — it
   is never substituted with an invented result or silently re-baselined.
-- **`feat/m1-snapshots` is 44 M0b commits behind.** Bring it up to
-  `feat/m0a-import` before treating its rows as green against current M0b,
-  and re-run `scripts/neutrality_gate.sh` afterwards.
-- **Neither branch is on `main`.** `main` is the untouched handoff commit.
+- **`feat/m1-snapshots` is 45 commits behind `main`.** Merge `main` into it
+  before treating its rows as green against current M0b, and re-run
+  `scripts/neutrality_gate.sh` afterwards. It is the only unmerged branch.
 - [`deferred-work.md`](deferred-work.md) is the companion ledger: consciously
-  postponed items, not defects. It currently has uncommitted rows in the
-  working tree of `feat/m0a-import`. Rows named in M0c-13 are scheduled; the
-  rest are unscheduled.
+  postponed items, not defects. Rows named in M0c-13 are scheduled; the rest
+  are unscheduled.
 - Recorded measurements live in [`measurements.md`](measurements.md); its
   "Known caveats" paragraph is stale after salvage (a ledger row tracks it).
 

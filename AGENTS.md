@@ -47,8 +47,10 @@ for the per-step detail and evidence:
   analyzers retargeted, salvage, and the measurement-neutrality gate on the
   suite fixtures. The `java-fixture-01` strict byte-identity leg is *pending*
   on the private archive, and it blocks M0c.
-- **M0c, M3–M7: not started.** M1–M2 is partly done on a separate branch.
-- `main` still holds only the handoff commit; no implementation is merged.
+- **M0c, M3–M7: not started.** M1–M2 is partly done on `feat/m1-snapshots`,
+  which is 45 commits behind `main` and must merge it before its own work can
+  be judged against the current M0b baseline.
+- M0a and M0b are on `main`; `feat/m1-snapshots` is the only unmerged branch.
 
 The import constraints still bind anything that touches imported material or
 reaches back into the archive:
