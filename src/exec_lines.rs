@@ -72,7 +72,7 @@ mod tests {
     fn parse_java(source: &str) -> Tree {
         let mut parser = Parser::new();
         parser
-            .set_language(&tree_sitter_java::LANGUAGE.into())
+            .set_language(&tree_sitter_java_orchard::LANGUAGE.into())
             .expect("java grammar");
         parser.parse(source, None).expect("java parse")
     }

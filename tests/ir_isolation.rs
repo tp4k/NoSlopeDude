@@ -27,7 +27,7 @@ use tree_sitter::Language;
 /// The four grammars D20 pins, mirroring `src/parse/mod.rs::language_for`.
 fn grammar_languages() -> Vec<Language> {
     vec![
-        tree_sitter_java::LANGUAGE.into(),
+        tree_sitter_java_orchard::LANGUAGE.into(),
         tree_sitter_javascript::LANGUAGE.into(),
         tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
         tree_sitter_typescript::LANGUAGE_TSX.into(),

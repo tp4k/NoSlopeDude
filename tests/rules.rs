@@ -17,7 +17,7 @@ const JS_TS: LanguageFamily = LanguageFamily::JsTs;
 fn parse_inline_java(source: &str) -> ParsedFile {
     let mut parser = tree_sitter::Parser::new();
     parser
-        .set_language(&tree_sitter_java::LANGUAGE.into())
+        .set_language(&tree_sitter_java_orchard::LANGUAGE.into())
         .expect("java grammar");
     let tree = parser.parse(source, None).expect("java parse");
     ParsedFile {

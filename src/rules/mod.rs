@@ -543,7 +543,7 @@ mod tests {
     fn parse_java_inline(source: &str) -> ParsedFile {
         let mut parser = tree_sitter::Parser::new();
         parser
-            .set_language(&tree_sitter_java::LANGUAGE.into())
+            .set_language(&tree_sitter_java_orchard::LANGUAGE.into())
             .expect("java grammar");
         let tree = parser.parse(source, None).expect("java parse");
         ParsedFile {

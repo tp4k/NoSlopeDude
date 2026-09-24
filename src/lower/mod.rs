@@ -30,8 +30,12 @@ use crate::parse::ParsedFile;
 
 /// M0c's fingerprint keys on this alongside `ir::IR_VERSION`; bump it
 /// whenever the Java lowering's classification changes what an `IrNode`
-/// carries for a Java file.
-pub const JAVA_LOWERING_VERSION: u32 = 2;
+/// carries for a Java file. Bumped 2 -> 3 for M0c-9: orchard's grammar
+/// changes what a Java `ERROR`/`MISSING` node classifies as (`ir::DamageKind`'s
+/// `JavaVarargsAnnotation` variant is gone) and what block-kind literal a
+/// Java `IrBlock` carries (`java::is_block_kind`'s own `'static` literal, not
+/// `node.kind()`).
+pub const JAVA_LOWERING_VERSION: u32 = 3;
 
 /// The JS/TS counterpart of `JAVA_LOWERING_VERSION`.
 pub const JSTS_LOWERING_VERSION: u32 = 2;
@@ -413,9 +417,14 @@ struct Classification {
     is_clone_statement: bool,
     /// JS/TS only; always `false` from the Java lowering.
     is_hoisted_or_type_only: bool,
-    /// Whether this exact node is itself a block-kind node (the
-    /// self-is-block predicate for `SyntaxBlock` classification).
-    is_block: bool,
+    /// This exact node's own canonical block-kind literal (the self-is-block
+    /// predicate for `SyntaxBlock` classification), `None` if it is not a
+    /// block-kind node. `&'static str`, not `node.kind()` directly: tree-sitter
+    /// 0.27's `Node::kind()` borrows from the node's own lifetime rather than
+    /// promising `'static`, but `IrBlock::kind` (below) is `&'static str`
+    /// (`model::SyntaxBlock::kind` must not move), so each lowering's
+    /// `is_block_kind` returns its matched arm's own `'static` literal instead.
+    block_kind: Option<&'static str>,
     /// `Some` when this node is a callable-kind node that has a body (D8).
     callable: Option<CallableInfo>,
 }
@@ -438,7 +447,7 @@ fn classify(
     language: LanguageFamily,
     source: &str,
     parent: Option<Node>,
-    field_name: Option<&'static str>,
+    field_name: Option<&str>,
 ) -> Classification {
     match language {
         LanguageFamily::Java => java::classify(node, source, parent),
@@ -587,7 +596,7 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
     let open = |node: Node,
                 parent: Option<Node>,
                 parent_in_catch_body: bool,
-                field_name: Option<&'static str>,
+                field_name: Option<&str>,
                 tables: &mut IrTables|
      -> (IrNode, bool, bool, Option<EntitySlot>) {
         let span = Span::from_node(node);
@@ -597,10 +606,10 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
             tables.damage.push(DamageSpan { kind, span });
         }
         let mut entity_slot = None;
-        if classification.is_block {
+        if let Some(block_kind) = classification.block_kind {
             tables.blocks.push(IrBlock {
                 span,
-                kind: node.kind(),
+                kind: block_kind,
             });
             tables.block_dirty.push(false);
             entity_slot = Some(EntitySlot::Block(tables.block_dirty.len() - 1));
@@ -626,7 +635,7 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
             is_named: classification.is_named,
             is_clone_statement: classification.is_clone_statement,
             is_hoisted_or_type_only: classification.is_hoisted_or_type_only,
-            children: Vec::with_capacity(node.child_count()),
+            children: Vec::with_capacity(node.child_count() as usize),
         };
         (ir_node, in_catch_body, self_damage, entity_slot)
     };
@@ -773,7 +782,7 @@ mod tests {
 
     fn tree_sitter_language(grammar: Grammar) -> tree_sitter::Language {
         match grammar {
-            Grammar::Java => tree_sitter_java::LANGUAGE.into(),
+            Grammar::Java => tree_sitter_java_orchard::LANGUAGE.into(),
             Grammar::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
             Grammar::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
             Grammar::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
