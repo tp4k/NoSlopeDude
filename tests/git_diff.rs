@@ -648,6 +648,40 @@ fn worktree_diff_masks_directory_kind_entry_at_builtin_dir() {
     );
 }
 
+/// WS-4 r2 row 3: `mask_builtin_base_entries`'s base-tree walk must tolerate
+/// a non-UTF-8 directory name (D3/D18 supports non-UTF-8 paths generally).
+/// git2's `Tree::walk` passes its `root` argument as `&str` and aborts the
+/// whole walk when a directory name is not valid UTF-8.
+#[test]
+fn worktree_diff_tolerates_non_utf8_base_directory() {
+    let (_dir, repo) = common::init_repo();
+    let mut dir_name = b"caf".to_vec();
+    dir_name.push(0xE9);
+    let mut path = dir_name;
+    path.push(b'/');
+    path.extend_from_slice(b"a.ts");
+    let base_oid = common::commit_entries(
+        &repo,
+        &[(path.clone(), MODE_REGULAR, b"content\n".to_vec())],
+    );
+    sync_index_to_commit(&repo, base_oid);
+    // The worktree is empty: this base file is an on-disk deletion, and no
+    // non-UTF-8 name is ever created on disk (D23).
+
+    let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let changes = diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree)
+        .expect("diff commit to worktree must tolerate a non-UTF-8 base directory name");
+
+    assert_eq!(
+        changes,
+        vec![Change::Deleted {
+            path: RepoPath::from_bytes(path),
+            kind: EntryKind::Regular,
+        }],
+        "a non-UTF-8 base directory name must not abort the built-in-exclusion walk: {changes:?}"
+    );
+}
+
 #[test]
 fn worktree_over_ceiling_unchanged_file_is_not_reported() {
     let (dir, repo) = common::init_repo();
