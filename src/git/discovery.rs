@@ -87,6 +87,9 @@ pub enum SkipReason {
     Symlink,
     Submodule,
     NestedCheckout,
+    /// D26: a non-regular worktree entry (`EntryKind::Special`) — a FIFO,
+    /// socket, block or character device — extension-gated like `Symlink`.
+    SpecialFile,
     BuiltinExclusion,
     OutsideInclude,
     ConfigExclude,
@@ -101,6 +104,7 @@ impl SkipReason {
             SkipReason::Symlink => "symlink",
             SkipReason::Submodule => "submodule",
             SkipReason::NestedCheckout => "nested_checkout",
+            SkipReason::SpecialFile => "special_file",
             SkipReason::BuiltinExclusion => "builtin_exclusion",
             SkipReason::OutsideInclude => "outside_include",
             SkipReason::ConfigExclude => "config_exclude",
@@ -123,12 +127,13 @@ pub struct DiscoveryResult {
     pub skipped: Vec<SkippedEntry>,
 }
 
-/// Classifies every entry of a WS-1 snapshot against `scope` (D20
-/// precedence: entry kind — symlink/submodule/nested_checkout — then
-/// built-in exclusion, then outside-include, then config-exclude). An
-/// entry without a supported extension (`LanguageFamily::from_extension`)
+/// Classifies every entry of a WS-1 snapshot against `scope` (D20/D26
+/// precedence: entry kind — symlink/submodule/nested_checkout/special_file
+/// — then built-in exclusion, then outside-include, then config-exclude).
+/// An entry without a supported extension (`LanguageFamily::from_extension`)
 /// is not listed at all, except a submodule or nested-checkout entry,
-/// which is always listed as skipped regardless of its path's extension.
+/// which is always listed as skipped regardless of its path's extension
+/// (a `Special` entry follows the same extension gate as `Symlink`, D26).
 pub fn discover(entries: &[Entry], scope: &CompiledScope) -> DiscoveryResult {
     let builtins = builtin_override();
     let mut included = Vec::new();
@@ -161,6 +166,10 @@ pub fn discover(entries: &[Entry], scope: &CompiledScope) -> DiscoveryResult {
 
         if entry.kind == EntryKind::Symlink {
             skipped.push(skip(entry, SkipReason::Symlink));
+            continue;
+        }
+        if entry.kind == EntryKind::Special {
+            skipped.push(skip(entry, SkipReason::SpecialFile));
             continue;
         }
         if is_builtin_excluded(&entry.path, &builtins, &mut builtin_dir_verdicts) {
