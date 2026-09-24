@@ -106,8 +106,16 @@ checkout it came from:
    turn a still-missing archive into a panic instead, for a CI job (once
    wired) that has the archive and wants to demand it.
 3. `test_committed_digest_carries_no_paths_names_or_excerpts` runs
-   unconditionally, with no archive needed, and checks the committed file
-   itself for forbidden keys and absolute-path-shaped strings.
+   unconditionally, with no archive needed, against both committed digest
+   files (it shares its check with
+   `test_nsd_v1_digest_carries_no_paths_names_or_excerpts`), and asserts:
+   the forbidden keys and the widened path-shape scan (any `/`, `\`, or `~`
+   anywhere in a string, not just a leading `/`); the exact eleven-key
+   top-level set; the exact `label`, `authorship`, `revision_sha`, and
+   `language` values; `body_blake3`'s `blake3:` + 32-lowercase-hex-char
+   shape; `scores`' per-language `{erosion, verbosity}` and
+   `verbosity`'s `{flagged_lines, ratio, scanned_lines}` key shape; and
+   that every leaf under `scores` is numeric.
 
 ## The `nsd-v1` digest (M0c-14)
 
