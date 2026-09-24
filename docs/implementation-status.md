@@ -11,8 +11,9 @@ Every agent that finishes a piece of work updates its rows here in the same
 round; see *How to update this file* at the bottom and the matching rule in
 [`AGENTS.md`](../AGENTS.md).
 
-Last updated: 2026-09-24, from `main@a6b5037` and
-`feat/m1-snapshots@f23804f`.
+Last updated: 2026-09-24, from `main@a6b5037`,
+`feat/m1-snapshots@f23804f`, and `feat/m0c-grammar@3dd9ae2` (WS-1, round 1;
+not yet merged to `main`).
 
 ## Legend
 
@@ -75,7 +76,7 @@ Grammars deliberately unchanged here: `tree-sitter` 0.25.10,
 | M0b-7 | Error-span salvage and the `SkipReason` split, IR-level and language-agnostic | `[x]` | `main` | `aacca37` (salvage per callable instead of whole-file drop), redesigned as one coherent pass `35508d9`, bare-damage-span ancestors `75ec24d`; `tests/salvage.rs` (14 tests incl. the quadratic-blowup guard, `5bf9c34`); `SkipReason` at `src/model.rs:77` |
 | M0b-8a | Measurement-neutrality gate on the ten suites' fixtures: byte-identical `report.json`, pre-IR vs IR, same fixed checkout and identical settings | `[x]` | `main` | `tests/neutrality.rs` + `scripts/neutrality_gate.sh` (`4ee26c2`, `2424019`, `502a358`); clean/malformed corpus partition `b2290ea`/`1ccfeac`; baselines recaptured `08e95ae`, `687a86b`, `8af5134`; documented in `docs/ir-neutrality.md` |
 | M0b-8b | Declared-delta exception: salvage and the `SkipReason` split change malformed fixtures only, asserted explicitly, unaffected measurements identical | `[x]` | `main` | `bbdf429`, `f5655ad`, `4ec3d94` (`/skipped_files` delta tightened to an exact length); `docs/ir-neutrality.md` *Declared deltas* |
-| M0b-8c | Strict leg: byte-identical against the archived full `report.json` for `java-fixture-01@c6671504…`, run locally from the checkout path that report records | `[!]` | `main` | **Pending, gated on the private archive.** Harness is complete and fails visibly when asked to: `docs/ir-neutrality.md` *The `java-fixture-01` strict leg*, `test_java_fixture_01_strict_leg_is_reported_pending_when_the_archive_is_absent`, and opt-in `NSD_REQUIRE_ARCHIVE_VERIFIED=1` (`2112ee6`). **This is the gate that blocks M0c** — do not start the grammar swap until it is run and recorded |
+| M0b-8c | Strict leg: byte-identical against the archived full `report.json` for `java-fixture-01@c6671504…`, run locally from the checkout path that report records | `[x]` | `feat/m0c-grammar` | **PASS**, run against the private archive with `NSD_REQUIRE_ARCHIVE_VERIFIED=1`: `test_java_fixture_01_strict_scan_is_byte_identical_to_the_archived_report` reported a byte-identical 2,613,042-byte `report.json`; the tampered-archive negative control (a one-byte-flipped copy of the archive) correctly failed the same comparison. Last run at `tree-sitter-java` 0.23.5, before this workstream's grammar swap (M0c-9); the test and its pending twin were then retired at M0c-10, see `docs/ir-neutrality.md` *The `java-fixture-01` strict leg (retired at M0c-10)*. No archive path or excerpt is recorded here or anywhere in this repository |
 
 ## M0c — Grammar swap
 
