@@ -248,19 +248,15 @@ fn test_verbosity_zero_when_nothing_flagged() {
 /// to a sorted, deduplicated `Vec<usize>` (`compute_verbosity`'s own
 /// membership check moved from `.contains()` to `.binary_search().is_ok()`
 /// to match) — `binary_search` only gives a correct answer over an
-/// already-sorted, duplicate-free slice. Every other test in this file
-/// builds `executable_lines` from a contiguous `1..=N` range, which is
-/// sorted trivially and would not catch a regression to an unsorted or
-/// duplicate-containing Vec; this one uses a sparse set with gaps, built
-/// out of source order with a duplicate, then sorted and deduplicated by
-/// hand — matching what `executable_lines_from_ir` does internally (it
-/// still builds a `BTreeSet` before converting to the stored `Vec`).
+/// already-sorted, duplicate-free slice. This test pins that
+/// `binary_search` lookup against a genuinely sparse set with gaps, matching
+/// what `executable_lines_from_ir` produces; the builder's own sorted/dedup
+/// invariant (that it never hands `compute_verbosity` an unsorted or
+/// duplicate-containing Vec in the first place) is pinned separately by
+/// `rules::tests::test_file_language_lines_come_from_ir_spans`.
 #[test]
 fn test_executable_lines_are_sorted_and_distinct() {
-    let mut executable_lines = vec![9usize, 2, 5, 2, 40, 9];
-    executable_lines.sort_unstable();
-    executable_lines.dedup();
-    assert_eq!(executable_lines, vec![2, 5, 9, 40]);
+    let executable_lines = vec![2usize, 5, 9, 40];
 
     let files = vec![FileLanguageLines {
         relative_path: sample_path(),
