@@ -288,9 +288,9 @@ pub(crate) const AUTHORSHIP: &str = "unknown";
 /// `hashing.rs` exposes no accessor for it, and this workstream's brief
 /// forbids editing that module to add one (see the round-1 implementer
 /// report's Refactor request). This digest's own `hash_version` metadata
-/// field is therefore kept in sync by hand; a drift would first surface as
-/// a loud failure in `hashing.rs`'s own `test_digest_is_stable_for_known_input`,
-/// which pins a known digest value against the same constant.
+/// field is therefore kept in sync by hand; a drift is caught by
+/// `tests::test_body_blake3_of_empty_input_matches_hash_version_mirror`,
+/// which pins `body_blake3(b"")` against this constant.
 const HASH_VERSION_MIRROR: u8 = 1;
 
 /// The BLAKE3 family-prefix domain this digest hashes under, distinct from
