@@ -266,6 +266,81 @@ fn include_narrows_then_exclude_subtracts() {
 }
 
 #[test]
+fn include_directory_pattern_covers_nested_files() {
+    let (_dir, repo) = common::init_repo();
+    common::commit_entries(
+        &repo,
+        &[
+            (b"src/a.ts".to_vec(), MODE_REGULAR, b"export {};\n".to_vec()),
+            (
+                b"src/deep/b.ts".to_vec(),
+                MODE_REGULAR,
+                b"export {};\n".to_vec(),
+            ),
+            (b"lib/c.ts".to_vec(), MODE_REGULAR, b"export {};\n".to_vec()),
+        ],
+    );
+    let snapshot = CommitSnapshot::head_or_empty(&repo).expect("snapshot HEAD");
+    let scope = scope_from_yaml(b"version: 1\ninclude: [\"src/\"]\n");
+    let result = discover(&snapshot.entries, &scope);
+
+    assert!(
+        is_included(&result, "src/a.ts"),
+        "a directory-anchored include pattern must cover a direct child (D19/D31)"
+    );
+    assert!(
+        is_included(&result, "src/deep/b.ts"),
+        "a directory-anchored include pattern must cover files nested beneath it (D19/D31)"
+    );
+    assert_eq!(
+        skip_reason_for(&result, "lib/c.ts"),
+        Some(SkipReason::OutsideInclude)
+    );
+}
+
+#[test]
+fn include_walk_keeps_d20_precedence() {
+    let (_dir, repo) = common::init_repo();
+    common::commit_entries(
+        &repo,
+        &[
+            (
+                b"node_modules/x.js".to_vec(),
+                MODE_REGULAR,
+                b"module.exports = {};\n".to_vec(),
+            ),
+            (
+                b"src/legacy/old.ts".to_vec(),
+                MODE_REGULAR,
+                b"export {};\n".to_vec(),
+            ),
+            (
+                b"src/keep.ts".to_vec(),
+                MODE_REGULAR,
+                b"export {};\n".to_vec(),
+            ),
+        ],
+    );
+    let snapshot = CommitSnapshot::head_or_empty(&repo).expect("snapshot HEAD");
+    let scope = scope_from_yaml(
+        b"version: 1\ninclude: [\"node_modules/\", \"src/\"]\nexclude: [\"src/legacy/\"]\n",
+    );
+    let result = discover(&snapshot.entries, &scope);
+
+    assert_eq!(
+        skip_reason_for(&result, "node_modules/x.js"),
+        Some(SkipReason::BuiltinExclusion),
+        "builtin_exclusion must win over a directory include (D20)"
+    );
+    assert_eq!(
+        skip_reason_for(&result, "src/legacy/old.ts"),
+        Some(SkipReason::ConfigExclude),
+        "config_exclude must still subtract from a directory include (D20)"
+    );
+    assert!(is_included(&result, "src/keep.ts"));
+}
+
+#[test]
 fn config_exclude_directory_pattern_covers_nested_files() {
     let (_dir, repo) = common::init_repo();
     common::commit_entries(
