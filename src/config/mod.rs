@@ -336,6 +336,112 @@ where
     Vec::<String>::deserialize(deserializer).map(Some)
 }
 
+/// Deserializes a *present* scalar leaf as `T` (D30, same present-then-
+/// `T::deserialize(d).map(Some)` shape as `deserialize_present_include`):
+/// `#[serde(default)]` on the field already covers the omitted case
+/// without calling this. For a scalar leaf, `T::deserialize` rejects a
+/// present null itself (e.g. `u32`/`Severity` deserialization does not
+/// accept a unit value or an unknown variant), and serde_yaml_ng prefixes
+/// the full key path onto that error
+/// (`serde_yaml_ng-0.10.0/src/error.rs:210-212`), so no key name needs to
+/// be added here.
+fn deserialize_present_scalar<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
+/// Rejects a present YAML null (blank, `~`, `null`, `Null`, `NULL`) on
+/// `key`, deserializing normally otherwise (D30). Unlike a scalar leaf,
+/// `T::deserialize` on `exclude`/`measurement`/`policy`/`output` would
+/// itself turn a present null into an empty sequence or an empty mapping
+/// (`deserialize_seq`/`deserialize_map`,
+/// `serde_yaml_ng-0.10.0/src/de.rs:1612-1683`) instead of erroring, so the
+/// null must be caught earlier, through `deserialize_option`. That path
+/// does not prefix the key the way `T::deserialize` does — it has no
+/// `fix_mark` call (`serde_yaml_ng-0.10.0/src/de.rs:1517-1561`) — so `key`
+/// is named in the error explicitly.
+fn deserialize_present<'de, D, T>(key: &'static str, deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    struct RejectNull<T> {
+        key: &'static str,
+        marker: std::marker::PhantomData<T>,
+    }
+
+    impl<'de, T: Deserialize<'de>> serde::de::Visitor<'de> for RejectNull<T> {
+        type Value = T;
+
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "a present, non-null {}", self.key)
+        }
+
+        fn visit_none<E>(self) -> Result<T, E>
+        where
+            E: serde::de::Error,
+        {
+            Err(E::custom(format!(
+                "{}: null value is not allowed",
+                self.key
+            )))
+        }
+
+        fn visit_some<D2>(self, deserializer: D2) -> Result<T, D2::Error>
+        where
+            D2: serde::Deserializer<'de>,
+        {
+            T::deserialize(deserializer)
+        }
+    }
+
+    deserializer.deserialize_option(RejectNull {
+        key,
+        marker: std::marker::PhantomData,
+    })
+}
+
+/// Deserializes a *present* `exclude` key as `Vec<String>`, rejecting a
+/// present null instead of letting it become `[]` (D30).
+fn deserialize_present_exclude<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    deserialize_present("exclude", deserializer)
+}
+
+/// Deserializes a *present* `measurement` key, rejecting a present null
+/// instead of letting it become an empty mapping (D30).
+fn deserialize_present_measurement<'de, D>(
+    deserializer: D,
+) -> Result<Option<RawMeasurement>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    deserialize_present("measurement", deserializer).map(Some)
+}
+
+/// Deserializes a *present* `policy` key, rejecting a present null instead
+/// of letting it become an empty mapping (D30).
+fn deserialize_present_policy<'de, D>(deserializer: D) -> Result<Option<RawPolicy>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    deserialize_present("policy", deserializer).map(Some)
+}
+
+/// Deserializes a *present* `output` key, rejecting a present null instead
+/// of letting it become an empty mapping (D30).
+fn deserialize_present_output<'de, D>(deserializer: D) -> Result<Option<RawOutput>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    deserialize_present("output", deserializer).map(Some)
+}
+
 /// The raw, unvalidated shape `serde_yaml_ng` deserializes `nsd.yml`
 /// into: strict at every level (`deny_unknown_fields`), so an unknown or
 /// duplicate field at any depth fails before semantic validation runs.
@@ -345,43 +451,63 @@ struct RawConfig {
     version: u32,
     #[serde(default, deserialize_with = "deserialize_present_include")]
     include: Option<Vec<String>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_present_exclude")]
     exclude: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_present_measurement")]
     measurement: Option<RawMeasurement>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_present_policy")]
     policy: Option<RawPolicy>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_present_output")]
     output: Option<RawOutput>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawMeasurement {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_present_scalar")]
     min_clone_lines: Option<u32>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawPolicy {
-    #[serde(rename = "NSD-E101", default)]
+    #[serde(
+        rename = "NSD-E101",
+        default,
+        deserialize_with = "deserialize_present_scalar"
+    )]
     nsd_e101: Option<Severity>,
-    #[serde(rename = "NSD-E102", default)]
+    #[serde(
+        rename = "NSD-E102",
+        default,
+        deserialize_with = "deserialize_present_scalar"
+    )]
     nsd_e102: Option<Severity>,
-    #[serde(rename = "NSD-V101", default)]
+    #[serde(
+        rename = "NSD-V101",
+        default,
+        deserialize_with = "deserialize_present_scalar"
+    )]
     nsd_v101: Option<Severity>,
-    #[serde(rename = "NSD-V102", default)]
+    #[serde(
+        rename = "NSD-V102",
+        default,
+        deserialize_with = "deserialize_present_scalar"
+    )]
     nsd_v102: Option<Severity>,
-    #[serde(rename = "NSD-S102", default)]
+    #[serde(
+        rename = "NSD-S102",
+        default,
+        deserialize_with = "deserialize_present_scalar"
+    )]
     nsd_s102: Option<Severity>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawOutput {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_present_scalar")]
     max_terminal_diagnostics: Option<u32>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_present_scalar")]
     max_agent_diagnostics: Option<u32>,
 }

@@ -365,10 +365,9 @@ fn null_values_are_c102() {
 
 #[test]
 fn empty_mappings_and_empty_exclude_still_default() {
-    let config = Config::parse(
-        b"version: 1\nmeasurement: {}\npolicy: {}\noutput: {}\nexclude: []\n",
-    )
-    .expect("empty mappings and an empty exclude list are not null");
+    let config =
+        Config::parse(b"version: 1\nmeasurement: {}\npolicy: {}\noutput: {}\nexclude: []\n")
+            .expect("empty mappings and an empty exclude list are not null");
     assert_eq!(config.exclude, Vec::<String>::new());
     assert_eq!(config.measurement.min_clone_lines, DEFAULT_MIN_CLONE_LINES);
     assert_eq!(config.policy.nsd_e101, Severity::Deny);
