@@ -325,7 +325,9 @@ fn null_values_are_c102() {
     );
 
     assert_is_c102(Config::parse(b"version: 1\npolicy: ~\n"), "policy");
+    assert_is_c102(Config::parse(b"version: 1\npolicy:\n"), "policy");
     assert_is_c102(Config::parse(b"version: 1\noutput: ~\n"), "output");
+    assert_is_c102(Config::parse(b"version: 1\noutput:\n"), "output");
 
     assert_is_c102(
         Config::parse(b"version: 1\nmeasurement:\n  min_clone_lines: ~\n"),
