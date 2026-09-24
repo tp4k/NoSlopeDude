@@ -61,9 +61,11 @@ Because the underlying stream preserves every identifier and literal
 verbatim, renaming one variable or changing one literal is enough to put a
 block in a different group (or no group at all, if nothing else duplicates
 it) — normalization only removes formatting, whitespace and comments.
-Because the stream is prefixed with the language family, a Java block and a
-JS/TS block are never grouped even if their token text happens to match
-exactly.
+Because the fingerprint is computed over a stream prefixed with the
+language family, a Java block and a JS/TS block group together only on a
+fingerprint collision across families — like the same-family collision
+case above, a non-concern in practice, not a structural impossibility, even
+when their token text happens to match exactly.
 
 A group needs at least two candidates (from anywhere in the scanned tree,
 including two spots in the same file) to be reported at all.
