@@ -129,9 +129,13 @@ itself), or some other uncontrolled difference between the two worktrees
 separates them despite the warm rebuild. Three `a370e3d` runs (6.90s,
 6.77s, 5.68s) against two `e83228b` runs (4.28s, 4.14s) is still not the
 same reproducibility bar on both sides (n=3 vs. n=2, taken across two
-sessions ~20 minutes to hours apart, never back-to-back) — this file
-records what was measured, not a settled attribution of the fusion's own
-effect.
+sessions ~20 minutes to hours apart, never back-to-back). The within-side
+spread alone is not small: the three control runs span 1.22s (6.90s −
+5.68s, ~18% of the 6.90s parent), and the two warm reruns alone span 1.09s
+(6.77s − 5.68s, ~18% of their 6.225s mean) — a share of the "still above
+ceiling" gap that could be ordinary run-to-run noise on the control side,
+not evidence the ceiling model itself is wrong. This file records what was
+measured, not a settled attribution of the fusion's own effect.
 
 ## Rows
 
