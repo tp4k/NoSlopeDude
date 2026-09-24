@@ -15,16 +15,16 @@
       "erosion": 0.3173652170244212,
       "verbosity": {
         "flagged_lines": 227,
-        "scanned_lines": 1018,
-        "ratio": 0.22298624754420432
+        "scanned_lines": 1019,
+        "ratio": 0.22276741903827282
       }
     },
     "java": {
       "erosion": 0.392743515046639,
       "verbosity": {
         "flagged_lines": 154,
-        "scanned_lines": 636,
-        "ratio": 0.24213836477987422
+        "scanned_lines": 637,
+        "ratio": 0.24175824175824176
       }
     },
     "js_ts": {
