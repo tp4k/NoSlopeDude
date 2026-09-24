@@ -578,7 +578,7 @@ mod tests {
     fn test_normalization_strips_excerpts_and_the_absolute_target() {
         let mut report = json!({
             "scan": {
-                "target": "/Users/example/private-checkout",
+                "target": "/example/checkout",
                 "revision": { "sha": "deadbeef", "dirty": false, "unavailable_reason": null },
             },
             "scores": { "overall": { "erosion": 0.5 } },
