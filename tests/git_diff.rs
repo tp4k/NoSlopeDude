@@ -450,19 +450,24 @@ fn symlink_and_submodule_changes_are_typed() {
 
 #[test]
 fn worktree_diff_keeps_symlink_and_gitlink_modes() {
+    // D34: the gitlink lives at `third_party/lib`, not `vendor/lib` — D28
+    // masks every `vendor/**` path as a built-in exclusion, which would make
+    // this test's "unchanged tracked gitlink must not appear" half pass
+    // vacuously (masked regardless of any real change) instead of actually
+    // exercising diff_commit_to_worktree's own unchanged-gitlink handling.
     let (dir, repo) = common::init_repo();
     let gitlink = [0xAAu8; 20];
     let base_oid = common::commit_entries(
         &repo,
         &[
             (b"link".to_vec(), MODE_SYMLINK, b"target.ts".to_vec()),
-            (b"vendor/lib".to_vec(), MODE_SUBMODULE, gitlink.to_vec()),
+            (b"third_party/lib".to_vec(), MODE_SUBMODULE, gitlink.to_vec()),
         ],
     );
     sync_index_to_commit(&repo, base_oid);
     std::os::unix::fs::symlink("target.ts", dir.path().join("link"))
         .expect("create a real symlink matching the committed target");
-    std::fs::create_dir_all(dir.path().join("vendor/lib"))
+    std::fs::create_dir_all(dir.path().join("third_party/lib"))
         .expect("create the tracked submodule's directory");
 
     let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
@@ -486,6 +491,119 @@ fn worktree_diff_keeps_symlink_and_gitlink_modes() {
             path: RepoPath::from_bytes(b"link".to_vec()),
             kind: EntryKind::Symlink,
         }]
+    );
+}
+
+/// D28 (user decision (b)): every built-in-excluded path is masked out of
+/// `diff_commit_to_worktree` before Phase 1 reads or hashes anything, on
+/// both sides and for every entry kind and extension. `target/locked.ts`'s
+/// mode `000` proves the point operationally: if masking ran after a read
+/// attempt (or not at all), the whole diff would fail closed on that one
+/// unreadable path instead of returning cleanly.
+#[test]
+#[cfg(unix)]
+fn worktree_diff_masks_builtin_excluded_paths() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (dir, repo) = common::init_repo();
+    let gone_content = numbered_lines(40, None);
+    let base_oid = common::commit_entries(
+        &repo,
+        &[
+            (b"src/gone.ts".to_vec(), MODE_REGULAR, gone_content.clone()),
+            (
+                b"vendor/kept.js".to_vec(),
+                MODE_REGULAR,
+                b"vendor original\n".to_vec(),
+            ),
+            (
+                b"node_modules/old.js".to_vec(),
+                MODE_REGULAR,
+                b"old\n".to_vec(),
+            ),
+        ],
+    );
+    sync_index_to_commit(&repo, base_oid);
+    // `common::commit_entries` never writes to disk (D23): src/gone.ts and
+    // node_modules/old.js are already on-disk deletions.
+    std::fs::create_dir_all(dir.path().join("vendor")).expect("create vendor dir");
+    std::fs::write(dir.path().join("vendor/kept.js"), b"vendor edited\n")
+        .expect("edit vendor/kept.js on disk");
+
+    std::fs::create_dir_all(dir.path().join("target/debug")).expect("create target/debug dir");
+    std::fs::write(dir.path().join("target/debug/copy.ts"), &gone_content)
+        .expect("write a byte-identical copy of src/gone.ts under target/");
+    std::fs::write(dir.path().join("target/app.rlib"), b"rlib\n")
+        .expect("write target/app.rlib (no supported extension)");
+    let over_ceiling = vec![b'z'; SOURCE_CEILING_BYTES as usize + 1];
+    std::fs::write(dir.path().join("target/big.ts"), &over_ceiling)
+        .expect("write an over-ceiling file under target/");
+    std::fs::write(dir.path().join("target/locked.ts"), b"locked\n")
+        .expect("write target/locked.ts before locking it down");
+    let mut perms = std::fs::metadata(dir.path().join("target/locked.ts"))
+        .expect("stat target/locked.ts")
+        .permissions();
+    perms.set_mode(0o000);
+    std::fs::set_permissions(dir.path().join("target/locked.ts"), perms)
+        .expect("chmod target/locked.ts to 000");
+    assert!(
+        std::fs::File::open(dir.path().join("target/locked.ts")).is_err(),
+        "precondition: target/locked.ts must be unreadable"
+    );
+
+    std::fs::create_dir_all(dir.path().join("dist")).expect("create dist dir");
+    std::fs::write(dir.path().join("dist/y.js"), b"dist\n").expect("write dist/y.js");
+
+    write_nested_checkout(&dir, "node_modules/pkg");
+
+    let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let changes = with_timeout("diff_commit_to_worktree over built-in-excluded paths", move || {
+        diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree)
+    })
+    .expect("diff commit to worktree");
+
+    assert_eq!(
+        changes,
+        vec![Change::Deleted {
+            path: RepoPath::from_bytes(b"src/gone.ts".to_vec()),
+            kind: EntryKind::Regular,
+        }],
+        "every built-in-excluded path must be masked out, on both sides and \
+         regardless of kind or extension: {changes:?}"
+    );
+}
+
+/// D28: a base blob at a built-in-excluded path can never be a rename
+/// source, because the base side is masked into the in-memory index too —
+/// otherwise every deleted `vendor/**` file would look like a rename source
+/// for an unrelated, non-excluded add with the same content.
+#[test]
+fn worktree_diff_builtin_path_is_never_a_rename_source() {
+    let (dir, repo) = common::init_repo();
+    let content = numbered_lines(40, None);
+    let base_oid = common::commit_entries(
+        &repo,
+        &[(b"vendor/lib.ts".to_vec(), MODE_REGULAR, content.clone())],
+    );
+    sync_index_to_commit(&repo, base_oid);
+    // `common::commit_entries` never writes to disk (D23): vendor/lib.ts is
+    // already an on-disk deletion; write only the unrelated, byte-identical
+    // add.
+    std::fs::create_dir_all(dir.path().join("src")).expect("create src dir");
+    std::fs::write(dir.path().join("src/lib.ts"), &content)
+        .expect("write a byte-identical unrelated add");
+
+    let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let changes = diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree)
+        .expect("diff commit to worktree");
+
+    assert_eq!(
+        changes,
+        vec![Change::Added {
+            path: RepoPath::from_bytes(b"src/lib.ts".to_vec()),
+            kind: EntryKind::Regular,
+        }],
+        "a masked base blob must never pair with a non-excluded add as a rename: {changes:?}"
     );
 }
 
