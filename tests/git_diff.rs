@@ -703,10 +703,9 @@ fn worktree_special_files_reported_by_kind_never_opened() {
     assert!(status.success(), "mkfifo src/new.ts must succeed");
 
     let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
-    let changes = with_timeout(
-        "diff_commit_to_worktree over Special entries",
-        move || diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree),
-    )
+    let changes = with_timeout("diff_commit_to_worktree over Special entries", move || {
+        diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree)
+    })
     .expect("diff commit to worktree");
 
     assert_eq!(
