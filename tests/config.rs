@@ -310,6 +310,77 @@ fn unreadable_root_nsd_yml_keeps_g101() {
 }
 
 #[test]
+fn null_values_are_c102() {
+    // `version` and `exclude: ~` are already C102 today (regression pins:
+    // `version` is a plain `u32`, `exclude: ~` is rejected by `Vec`
+    // deserialization); every other case here is a red case before D30.
+    assert_is_c102(Config::parse(b"version: ~\n"), "version");
+    assert_is_c102(Config::parse(b"version: 1\nexclude: ~\n"), "exclude");
+    assert_is_c102(Config::parse(b"version: 1\nexclude:\n"), "exclude");
+
+    assert_is_c102(Config::parse(b"version: 1\nmeasurement:\n"), "measurement");
+    assert_is_c102(
+        Config::parse(b"version: 1\nmeasurement: null\n"),
+        "measurement",
+    );
+
+    assert_is_c102(Config::parse(b"version: 1\npolicy: ~\n"), "policy");
+    assert_is_c102(Config::parse(b"version: 1\noutput: ~\n"), "output");
+
+    assert_is_c102(
+        Config::parse(b"version: 1\nmeasurement:\n  min_clone_lines: ~\n"),
+        "min_clone_lines",
+    );
+
+    assert_is_c102(
+        Config::parse(b"version: 1\npolicy:\n  NSD-E101: ~\n"),
+        "NSD-E101",
+    );
+    assert_is_c102(
+        Config::parse(b"version: 1\npolicy:\n  NSD-E102: null\n"),
+        "NSD-E102",
+    );
+    assert_is_c102(
+        Config::parse(b"version: 1\npolicy:\n  NSD-V101: Null\n"),
+        "NSD-V101",
+    );
+    assert_is_c102(
+        Config::parse(b"version: 1\npolicy:\n  NSD-V102: NULL\n"),
+        "NSD-V102",
+    );
+    assert_is_c102(
+        Config::parse(b"version: 1\npolicy:\n  NSD-S102: ~\n"),
+        "NSD-S102",
+    );
+
+    assert_is_c102(
+        Config::parse(b"version: 1\noutput:\n  max_terminal_diagnostics: ~\n"),
+        "max_terminal_diagnostics",
+    );
+    assert_is_c102(
+        Config::parse(b"version: 1\noutput:\n  max_agent_diagnostics: null\n"),
+        "max_agent_diagnostics",
+    );
+}
+
+#[test]
+fn empty_mappings_and_empty_exclude_still_default() {
+    let config = Config::parse(
+        b"version: 1\nmeasurement: {}\npolicy: {}\noutput: {}\nexclude: []\n",
+    )
+    .expect("empty mappings and an empty exclude list are not null");
+    assert_eq!(config.exclude, Vec::<String>::new());
+    assert_eq!(config.measurement.min_clone_lines, DEFAULT_MIN_CLONE_LINES);
+    assert_eq!(config.policy.nsd_e101, Severity::Deny);
+    assert_eq!(config.policy.nsd_e102, Severity::Deny);
+    assert_eq!(config.policy.nsd_v101, Severity::Deny);
+    assert_eq!(config.policy.nsd_v102, Severity::Deny);
+    assert_eq!(config.policy.nsd_s102, Severity::Warn);
+    assert_eq!(config.output.max_terminal_diagnostics, 50);
+    assert_eq!(config.output.max_agent_diagnostics, 30);
+}
+
+#[test]
 fn min_clone_lines_positive_value_exposed() {
     let config = Config::parse(b"version: 1\nmeasurement:\n  min_clone_lines: 25\n")
         .expect("a valid config");
