@@ -45,10 +45,18 @@ signature) never becomes an `IrCallable` at all, so it contributes no SLOC,
 CC or mass. Which node kinds are callables, and how each one finds its own
 body, is named per language under Lowering below.
 
+A callable whose `span` shares any byte with a `DamageSpan` (`DamageKind`,
+`ir::is_clear_of_damage`) is excluded fail-closed (`lower::cascade_exclusions`,
+`lower::prune_damage`): it never enters `IrFile::callables` at all, so it
+contributes no CC, SLOC, mass, scanned lines, clone candidates or findings,
+and a pruned damage subtree contributes nothing to any metric, rule or
+clone candidate either.
+
 A nested callable (a lambda or arrow inside a method, for example) is its
 own, separately counted `IrCallable`: the enclosing callable's SLOC and CC
-walk excludes the nested callable's `body_span`, so no source line and no
-decision point is counted twice, and total mass is conserved.
+walk excludes the nested callable's own declaration `span` (`IrCallable::span`,
+`metrics::nested_callable_spans`), so no source line and no decision point
+is counted twice, and total mass is conserved.
 
 D10 naming: the node's own `name` field; else the name read off an
 enclosing name-carrying construct (named per language under Lowering
@@ -68,8 +76,9 @@ line count.
 A bare `break`, `continue` or `return` (no expression) is a documented
 exception: its own keyword and `;` are anonymous leaves with no named leaf
 beneath them, so the rule above would otherwise drop it entirely. A
-terminator node (`IrNode::terminator: Some(_)`) with zero children counts
-as its own executable line regardless.
+`break`/`continue`/`return` node (`TerminatorKind::Break`/`Continue`/
+`Return`, not `Throw`) with zero **named** children counts as its own
+executable line (`exec_lines::is_bare_control_flow`).
 
 `scanned source lines` (used elsewhere as the verbosity denominator) is a
 different, file-level quantity: the same per-leaf rule applied across an
@@ -92,8 +101,8 @@ callables at all). The `10` threshold is fixed and unrelated to
 
 `tests/fixtures/metrics/erosion/HighComplexity.java` has one callable,
 `compute`, with a branch (with an `And`), three loops (a `for`, a `while`,
-a `do`), a catch, a ternary, two case groups (3 `Case` decisions total) and
-an `Or`:
+a `do`), a catch, a ternary, two `switch` statements (3 non-`default` `case`
+labels, so 3 `Case` decisions) and an `Or`:
 
 ```
 cc   = 1 (base) + 11 (Branch, And, Loop×3, Catch, Ternary, Case×3, Or) = 12
@@ -147,18 +156,8 @@ and the arrow form (`case 1 ->`, a required child of a `switch_rule`).
 inside it already does, so both forms count identically without a second
 match arm. A `switch_label` is `default` when its own first child's kind is
 literally `"default"` (covers both `default:` and `default ->`).
-
-*(This resolves a doc/lowering question this stream was asked to check: the
-pre-M0c-11 wording of this document listed `switch_label` and a separate
-`switch_rule` bullet as if each needed its own weight — but `decision_kind`
-has never had a `switch_rule` arm, at any point in this repository's
-history. `tests/metrics.rs::test_switch_case_labels_count_each_default_excluded`
-confirms both `colonForm` and `arrowForm` in
-`tests/fixtures/metrics/__tests__/SwitchForms.java` score `cc == 3` today,
-because `switch_rule`'s own required `switch_label` child already supplies
-the point. There is no behavioral disagreement between doc and code here —
-only a surface-naming imprecision this rewrite corrects; see this stream's
-report for the full evidence trail.)*
+`tests/metrics.rs::test_switch_case_labels_count_each_default_excluded`
+checks both switch shapes score `cc == 3`.
 
 `finally_clause` and the `else` branch of an `if_statement` carry no
 `DecisionKind` at all.
