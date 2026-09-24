@@ -454,6 +454,25 @@ fn test_a_clean_callable_contained_in_a_bare_damage_span_is_not_measured() {
              sloc:0 measurement: {:?}",
             output.metrics.callables
         );
+        // L43 positive anchor: the absence above must mean the callable was
+        // scanned and salvaged, not that the whole file was silently
+        // dropped -- a regression to whole-file dropping would leave the
+        // negative assertions above green too. (Not also asserting absence
+        // from `output.parse_failures`: `parse::parse_one`'s own doc
+        // comment documents that a file tree-sitter built a tree for but
+        // that still carries residual damage produces *both* a `ParsedFile`
+        // and a `ParseFailure{reason: SyntaxError}` -- these two fixtures
+        // are exactly that case, so a parse-failures-absence assertion
+        // would never pass here regardless of salvage correctness.)
+        assert!(
+            output
+                .metrics
+                .file_scan_summaries
+                .iter()
+                .any(|summary| summary.relative_path == path),
+            "{relative_path}: expected the file to have been scanned: {:?}",
+            output.metrics.file_scan_summaries
+        );
     }
 }
 
