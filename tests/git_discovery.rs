@@ -395,6 +395,44 @@ fn symlink_and_submodule_skip_reasons() {
 }
 
 #[test]
+fn special_file_skip_reason_and_precedence() {
+    let make = |path: &[u8]| Entry {
+        path: RepoPath::from_bytes(path.to_vec()),
+        kind: EntryKind::Special,
+        oid: None,
+        size: 0,
+    };
+    let entries = vec![
+        make(b"src/fifo.ts"),
+        make(b"node_modules/f.ts"),
+        make(b"src/fifo.bin"),
+    ];
+    let scope = scope_from_yaml(b"version: 1\ninclude: [\"**\"]\n");
+    let result = discover(&entries, &scope);
+
+    assert_eq!(
+        skip_reason_for(&result, "src/fifo.ts"),
+        Some(SkipReason::SpecialFile)
+    );
+    assert_eq!(
+        skip_reason_for(&result, "node_modules/f.ts"),
+        Some(SkipReason::SpecialFile),
+        "entry-kind special_file must win over builtin_exclusion (D26)"
+    );
+    assert_eq!(
+        skip_reason_for(&result, "src/fifo.bin"),
+        None,
+        "an unsupported extension is not listed at all, even for a Special entry (D26)"
+    );
+    assert!(!is_included(&result, "src/fifo.bin"));
+}
+
+#[test]
+fn special_file_label_is_special_file() {
+    assert_eq!(SkipReason::SpecialFile.label(), "special_file");
+}
+
+#[test]
 fn nested_git_checkout_excluded_when_not_gitignored() {
     let (dir, repo) = common::init_repo();
     std::fs::create_dir_all(dir.path().join("sub")).expect("create sub dir");
