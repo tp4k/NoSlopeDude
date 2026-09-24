@@ -67,8 +67,8 @@ impl Default for Config {
 impl Config {
     /// Parses repository-root `nsd.yml` bytes strictly (D12-D17): unknown
     /// or duplicate fields, unsupported versions or codes, invalid globs,
-    /// invalid severities, and a non-positive `min_clone_lines` all
-    /// produce `NSD-C102`.
+    /// invalid severities, a non-positive `min_clone_lines`, and a present
+    /// null value on any key all produce `NSD-C102`.
     pub fn parse(bytes: &[u8]) -> Result<Config, ConfigError> {
         let text = std::str::from_utf8(bytes)
             .map_err(|err| ConfigError::new(format!("nsd.yml is not valid UTF-8: {err}")))?;
