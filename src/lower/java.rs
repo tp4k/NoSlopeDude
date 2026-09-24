@@ -109,9 +109,9 @@ fn is_block_kind(kind: &str) -> Option<&'static str> {
     }
 }
 
-/// Java's non-default `switch_label`: `case`, never `default` -- a
-/// `switch_label`'s first child's kind is literally `"default"` when it is
-/// one.
+/// True for Java's `default` `switch_label`: its first child's kind is
+/// literally `"default"`. `decision_kind` (below) counts every other
+/// `switch_label` as a `Case`.
 fn is_default_label(node: Node) -> bool {
     node.child(0).is_some_and(|child| child.kind() == "default")
 }
