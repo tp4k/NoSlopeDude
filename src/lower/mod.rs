@@ -248,6 +248,12 @@ fn cascade_exclusions(
             Some(EntityRef::Block(index)),
         ));
     }
+    // Row-1's security fix depends on `sort_by`'s stability: for two
+    // entries with an identical span, it preserves push order, and damage
+    // entries are pushed first (above), so a damage entry always sorts
+    // ahead of a same-span callable/block entry and wins the tie-break
+    // below. `sort_unstable_by` would not preserve that push order and
+    // could reopen row-1 for that exact same-span shape.
     entries.sort_by(|(a_span, ..), (b_span, ..)| {
         a_span
             .start_byte
