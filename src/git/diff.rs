@@ -627,10 +627,15 @@ fn old_side_blob_oid(base_tree: Option<&Tree<'_>>, path_bytes: &[u8]) -> Option<
 }
 
 /// The old-side entry (kind, raw mode, object id) at `path_bytes` in
-/// `base_tree`, or `None` when `base_tree` is absent (D2's unborn-HEAD case)
-/// or has no entry there. D27's mask for a `Special` worktree entry: copying
-/// this triple into the in-memory index keeps a base blob out of rename
-/// detection instead of surfacing it as a spurious Deleted delta.
+/// `base_tree`, or `None` when `base_tree` is absent (D2's unborn-HEAD case),
+/// has no entry there, or the entry there is a directory (row 3: a worktree
+/// Special path can replace a whole tracked subtree, not just a single
+/// tracked file; the base has no old-side *file* to mask against, so the
+/// path is reported as newly Added, and the base's own file entries under it
+/// are listed separately as Deleted by the ordinary tree-to-index diff).
+/// D27's mask for a `Special` worktree entry: copying this triple into the
+/// in-memory index keeps a base blob out of rename detection instead of
+/// surfacing it as a spurious Deleted delta.
 fn old_side_entry(
     base_tree: Option<&Tree<'_>>,
     path_bytes: &[u8],
@@ -639,6 +644,7 @@ fn old_side_entry(
         return Ok(None);
     };
     match tree.get_path(&bytes_to_path(path_bytes)) {
+        Ok(entry) if entry.kind() == Some(ObjectType::Tree) => Ok(None),
         Ok(entry) => {
             let mode = entry.filemode();
             let kind = entry_kind_from_raw_mode(mode)?;
