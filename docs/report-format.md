@@ -107,17 +107,16 @@ skip, D16) or `"parse_<ParseFailureReason label>"` (a parse failure, D18,
 e.g. `parse_syntax_error`) — the `parse_` prefix is how the two kinds of
 skip are told apart in one merged list.
 
-### Top-25 span (a known compromise)
+### Top-25 span
 
-`Callable` (D8, owned by WS-2) publishes only `start_line`: the callable's
-own declaration line, not its body's end line. A top-25 row's
-`location.start_line == location.end_line`, and `excerpt` is that one line
-read back off disk — not the callable's whole body. Every finding's and
-every duplicate-group location's span, by contrast, is a real
-`[start_line, end_line]` region and its excerpt fully brackets the flagged
-code. See the WS-5 implementer report for why this was not solved by
-re-parsing or by hand-rolled brace-matching (both are out of this stream's
-scope).
+`Callable` (D8) publishes both `start_line` and `end_line`
+(`IrCallable::span.end_line`, M0c-13). A top-25 row's `location` is a
+real `[start_line, end_line]` region — the callable's whole declaration
+and body, not just its first line — and `excerpt` fully brackets it, read
+back off disk, the same as every finding's and every duplicate-group
+location's span. A single-line callable (an empty-body arrow function
+declared and closed on one line) still has `start_line == end_line`, same
+as any other one-line region.
 
 ## `report.html` sections
 

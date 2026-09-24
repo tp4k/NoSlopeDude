@@ -390,6 +390,70 @@ indistinguishable one and lost the historical record of which workstream
 caused which — `DECLARED_DELTAS` in `tests/neutrality.rs` is untouched by
 this workstream.
 
+## M0c-13: baselines moved by the real Top-25 span
+
+`Callable::end_line` (M0c-13, `src/model.rs`) is now
+`IrCallable::span.end_line`, populated from the AST walk, instead of a
+duplicate of `start_line` — a deliberate change to what `report.json`'s
+`top25[].location` publishes, so this baseline move is expected, not a
+regression, provided the moved pointers are fully explained (below)
+rather than merely observed.
+
+**`clean.report.json` — recaptured.** Exactly 66 JSON pointers changed
+(`NSD_NEUTRALITY_CAPTURE=1 cargo test --test neutrality`, then `git diff`
+grepped for every changed key name to confirm only three keys ever
+appear: `end_line`, `excerpt`, `link` — 66 additions paired with 66
+deletions, i.e. 22 of the corpus's 25 top-25 entries, three fields each).
+The three entries that did **not** move are single-line callables whose
+`end_line` already equalled `start_line` before this change (an
+empty-body callable declared and closed on one line has nothing to
+widen). Every moved entry:
+
+| callable | file | start_line | end_line before | end_line after |
+| --- | --- | --- | --- | --- |
+| `decide` | `metrics/__tests__/Decisions.java` | 2 | 2 | 44 |
+| `decide` | `metrics/__tests__/JsDecisions.js` | 1 | 1 | 39 |
+| `compute` | `metrics/erosion/HighComplexity.java` | 2 | 2 | 12 |
+| `classify` | `report_erosion/src/HighComplexity.java` | 2 | 2 | 16 |
+| `m` | `ir/Decisions.java` | 2 | 2 | 28 |
+| `m` | `ir/decisions.ts` | 1 | 1 | 27 |
+| `lowComplexity` | `metrics/erosion/LowComplexity.js` | 1 | 1 | 11 |
+| `loopy` | `metrics/__tests__/BareControlFlow.js` | 1 | 1 | 11 |
+| `run` | `clones/__tests__/SwitchDupJava.java` | 2 | 2 | 29 |
+| `run` | `clones/__tests__/SwitchDupJs.js` | 1 | 1 | 37 |
+| `forOfOptional` | `metrics/__tests__/ForOfOptional.js` | 1 | 1 | 9 |
+| `colonForm` | `metrics/__tests__/SwitchForms.java` | 2 | 2 | 12 |
+| `arrowForm` | `metrics/__tests__/SwitchForms.java` | 14 | 14 | 21 |
+| `m` | `ir/ContainerSet.java` | 7 | 7 | 13 |
+| `m` | `ir/StructuralPredicates.java` | 2 | 2 | 10 |
+| `m` | `ir/container_set.ts` | 4 | 4 | 10 |
+| `m` | `ir/structural_predicates.ts` | 1 | 1 | 9 |
+| `Point` | `metrics/__tests__/CallableKinds.java` | 10 | 10 | 14 |
+| `outer` | `metrics/__tests__/NestedCallable.js` | 1 | 1 | 7 |
+| `sloc` | `metrics/__tests__/SlocLines.js` | 1 | 1 | 12 |
+| `ifConstruct` | `parity/Constructs.java` | 2 | 2 | 8 |
+| `forConstruct` | `parity/Constructs.java` | 10 | 10 | 14 |
+
+Each row's `excerpt` widened to match (the callable's whole declaration
+and body, read back off disk, not just its first line) and each row's
+`link` moved from `#L{n}-L{n}` to `#L{start}-L{end}` accordingly — no
+other field on any row, and no field outside `top25[]`, moved.
+
+**`malformed.report.json` — unchanged.** Its own `top25` array is empty
+(the corpus is `incomplete`, fail-closed on every fixture's one
+callable), so the span widening has nothing to reach there; a capture
+run touched it anyway (recapturing both files at once), and that
+recapture was reverted (`git show HEAD:tests/golden/neutrality/
+malformed.report.json > tests/golden/neutrality/malformed.report.json`,
+`git checkout --`/`git restore` being off-limits) after confirming the
+only observed delta — `/skipped_files` shrinking from three entries to
+zero, `scores.{overall,java}.verbosity.scanned_lines` moving `0` → `3`
+— is the *Declared deltas* section's own pre-existing, WS-6-era
+divergence, unrelated to and unmoved by this workstream: a fresh
+`cargo test --test neutrality` run against the reverted file passes
+(`test_malformed_corpus_report_matches_its_baseline_with_declared_deltas_only`
+tolerates exactly this, already-declared, delta).
+
 ## The `java-fixture-01` strict leg (retired at M0c-10)
 
 Spec item 8 named a byte-identity comparison against `java-fixture-01`,
