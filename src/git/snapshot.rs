@@ -34,6 +34,12 @@ pub enum EntryKind {
     /// Worktree-only (D7): an untracked directory containing its own `.git`
     /// (file or directory), surfaced as one entry rather than descended.
     NestedCheckout,
+    /// Worktree-only (D25): an on-disk entry whose type (`symlink_metadata`,
+    /// never following links) is not a directory, a symlink or a regular
+    /// file — a FIFO, socket, block or character device. `WorktreeSnapshot::
+    /// read`/`link_target` never `open` it. A `Commit`/`Index` snapshot can
+    /// never produce one: Git modes cannot express this shape.
+    Special,
 }
 
 /// One entry in a snapshot. Carries no source bytes itself (perf HIGH: an
@@ -226,6 +232,14 @@ impl WorktreeSnapshot {
         }
         let workdir = worktree_dir(repo)?;
         let full_path = repo_path_to_fs(&workdir, entry.path.as_bytes());
+        // D25: re-checked immediately before opening, narrowing (not
+        // closing — that needs `O_NONBLOCK`, a `libc` dependency the
+        // anti-scope forbids) the window where this path was swapped for a
+        // non-regular file after enumeration.
+        match fs::symlink_metadata(&full_path) {
+            Ok(metadata) if metadata.is_file() => {}
+            _ => return Ok(None),
+        }
         let file = fs::File::open(&full_path).map_err(|err| {
             GitError::new(
                 CODE_SNAPSHOT_UNAVAILABLE,
@@ -339,6 +353,10 @@ fn entry_fields(odb: &Odb<'_>, kind: EntryKind, id: Oid) -> Result<(Option<Oid>,
             Ok((Some(id), size as u64))
         }
         EntryKind::Symlink | EntryKind::Submodule | EntryKind::NestedCheckout => Ok((Some(id), 0)),
+        EntryKind::Special => Err(GitError::new(
+            CODE_SNAPSHOT_UNAVAILABLE,
+            "a Special entry kind cannot come from a Git mode",
+        )),
     }
 }
 
@@ -490,6 +508,18 @@ fn refresh_from_disk(
             size: 0,
         }));
     }
+    if !metadata.is_file() {
+        // D25: a FIFO, socket or device node now sits where a tracked blob
+        // used to be. Surfaced as `Special` and never opened; never dropped
+        // as a silent deletion (the `is_dir` branch above is for a plain
+        // directory replacing a tracked blob only).
+        return Ok(Some(Entry {
+            path: path.clone(),
+            kind: EntryKind::Special,
+            oid: None,
+            size: 0,
+        }));
+    }
     let kind = if is_executable(metadata) {
         EntryKind::Executable
     } else {
@@ -589,6 +619,19 @@ fn walk_worktree(
                 Entry {
                     path: relative,
                     kind: EntryKind::Symlink,
+                    oid: None,
+                    size: 0,
+                },
+            );
+            continue;
+        }
+        if !file_type.is_file() {
+            // D25: a FIFO, socket or device node — never opened.
+            by_path.insert(
+                relative.clone(),
+                Entry {
+                    path: relative,
+                    kind: EntryKind::Special,
                     oid: None,
                     size: 0,
                 },
