@@ -422,19 +422,37 @@ fn test_source_spans_match_the_inspected_code() {
             assert_bracket_exact(&fixture_root(), location);
         }
     }
+}
 
-    // Top-25 rows (D8's `Callable`) only publish a declaration line, not a
-    // body end line (see docs/report-format.md's "Top-25 span" note) — the
-    // excerpt is that single line, read back off disk, not the callable's
-    // whole body.
+/// M0c-13: Top-25 rows (D8's `Callable`) now publish the callable's own
+/// declaration end line too (`IrCallable::span.end_line`, not just its
+/// start line), so the excerpt brackets the whole declaration, not just its
+/// first line (see docs/report-format.md's "Top-25 span" section, which
+/// used to disclose the single-line compromise this closes).
+#[test]
+fn test_top25_span_covers_the_whole_callable() {
+    let (_dir, output) = run_scan(&fixture_root(), |_| {});
+    let report = &output.report;
+
     assert!(!report.top25.is_empty());
+    let mut any_multi_line_span = false;
     for callable in &report.top25 {
-        assert_eq!(
-            callable.location.start_line, callable.location.end_line,
-            "a top-25 row's span is its single declaration line: {callable:?}"
+        assert!(
+            callable.location.end_line >= callable.location.start_line,
+            "a top-25 row's end_line must not precede its start_line: {callable:?}"
         );
+        if callable.location.end_line > callable.location.start_line {
+            any_multi_line_span = true;
+        }
         assert_bracket_exact(&fixture_root(), &callable.location);
     }
+    assert!(
+        any_multi_line_span,
+        "at least one top-25 row's fixture callable must span more than its \
+         declaration line, or this test cannot discriminate end_line from \
+         start_line: {:?}",
+        report.top25
+    );
 }
 
 fn assert_bracket_exact(root: &Path, location: &report::SourceLocation) {

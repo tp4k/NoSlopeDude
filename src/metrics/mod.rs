@@ -150,6 +150,7 @@ fn scan_file(file: &ParsedFile) -> (Vec<Callable>, Vec<SyntaxBlock>, FileScanSum
                 language: file.language,
                 name: callable.name.clone(),
                 start_line: callable.span.start_line as usize,
+                end_line: callable.span.end_line as usize,
                 cc,
                 sloc,
                 mass: mass(cc, sloc),

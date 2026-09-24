@@ -41,6 +41,7 @@ fn make_callable_named(cc: u32, sloc: usize, path: &str, start_line: usize) -> C
         language: LanguageFamily::Java,
         name: "callable".to_string(),
         start_line,
+        end_line: start_line,
         cc,
         sloc,
         mass: metrics::mass(cc, sloc),

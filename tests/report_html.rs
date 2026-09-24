@@ -325,8 +325,17 @@ fn test_links_point_at_the_scanned_revision() {
     // Anchor *text* (the visible label between `>` and `</a>`) is a
     // separate interpolation site from the `href` value above — checked
     // independently so a regression in either one is caught on its own.
+    // Derived from `payload_finding.location` itself, not a hardcoded
+    // `#L1-L1` — this fixture's real unreachable-after-return finding spans
+    // more than one line, so a literal `#L1-L1` would never appear in the
+    // HTML regardless of whether escaping worked, making the assertion
+    // below vacuously true.
+    let payload_anchor = format!(
+        ">src/\"><img onerror=1>.js#L{}-L{}</a>",
+        payload_finding.location.start_line, payload_finding.location.end_line
+    );
     assert!(
-        !remote_html.contains(">src/\"><img onerror=1>.js#L1-L1</a>"),
+        !remote_html.contains(&payload_anchor),
         "an unescaped anchor text leaked the raw payload filename"
     );
 

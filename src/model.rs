@@ -206,6 +206,12 @@ pub struct Callable {
     pub name: String,
     /// 1-based line of the callable's own declaration (not its body).
     pub start_line: usize,
+    /// 1-based last line of the callable's own span
+    /// (`IrCallable::span.end_line`) — its real closing line, including its
+    /// body. Not `IrCallable::body_span.end_line`: that field is an
+    /// internal input to CC/mass counting, not meant for reporting, even
+    /// though the two line numbers usually coincide.
+    pub end_line: usize,
     /// D7: `1 + decision points` in the callable's own body, excluding any
     /// nested callable's span (D9).
     pub cc: u32,
