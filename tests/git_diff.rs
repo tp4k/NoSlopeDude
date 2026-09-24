@@ -828,6 +828,40 @@ fn worktree_diff_special_leaf_at_masked_base_gitlink_keeps_mask() {
     );
 }
 
+/// WS-4 r3 row 2: depth ≥ 2 variant of
+/// `worktree_diff_leaf_replacing_masked_builtin_dir_keeps_mask`. The masked
+/// base path here is two levels deep, so this fixture (unlike the depth-1
+/// one above) actually exercises `ancestor_dirs` yielding more than its
+/// first item, and `collect_tree_leaves` inserting a `/` separator at
+/// depth >= 2.
+#[test]
+fn worktree_diff_leaf_replacing_nested_masked_builtin_dir_keeps_mask() {
+    let (dir, repo) = common::init_repo();
+    let content = numbered_lines(40, None);
+    let base_oid = common::commit_entries(
+        &repo,
+        &[(b"vendor/sub/lib.ts".to_vec(), MODE_REGULAR, content.clone())],
+    );
+    sync_index_to_commit(&repo, base_oid);
+    // No `vendor/` directory on disk at all: `vendor` itself is a regular
+    // file whose bytes exactly match the masked, nested base blob.
+    std::fs::write(dir.path().join("vendor"), &content).expect("write leaf vendor file");
+
+    let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let changes = diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree)
+        .expect("diff commit to worktree");
+
+    assert_eq!(
+        changes,
+        vec![Change::Added {
+            path: RepoPath::from_bytes(b"vendor".to_vec()),
+            kind: EntryKind::Regular,
+        }],
+        "a leaf replacing a nested masked built-in directory must never \
+         un-mask it or become a rename target: {changes:?}"
+    );
+}
+
 #[test]
 fn worktree_over_ceiling_unchanged_file_is_not_reported() {
     let (dir, repo) = common::init_repo();
