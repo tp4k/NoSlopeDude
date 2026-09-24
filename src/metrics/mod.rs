@@ -270,10 +270,11 @@ fn find_ir_subtree(root: &IrNode, target: Span) -> Option<&IrNode> {
 /// redacted tree matches a callable's body span. WS-6 round 4's fix to
 /// `cascade_exclusions` (excluding an entity contained in a bare damage
 /// span) closed the one known input shape that reached this branch; this
-/// crate's own suite and a 400-mutant fuzz run now hit it zero times, but
-/// unlike `lower::fallback_node`'s span, that is evidence, not a proof of
-/// unreachability. Kept so a future gap here degrades (D18) instead of
-/// panicking.
+/// crate's own suite hits it zero times, as did a 400-input fuzz run at
+/// WS-6 round 4 (before M0c's grammar swap), but unlike
+/// `lower::fallback_node`'s structural unreachability, that is evidence,
+/// not a proof of unreachability. Kept so a future gap here degrades (D18)
+/// instead of panicking.
 fn fallback_ir_body(span: Span) -> IrNode {
     IrNode::empty(span)
 }
