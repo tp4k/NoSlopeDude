@@ -229,9 +229,10 @@ pub fn diff_commit_to_worktree(
     // or unrelated to the base entirely).
     let builtins = discovery::builtin_override();
     // WS-4 r2 row 2: every proper ancestor directory of a path just masked
-    // in above, so a worktree leaf whose own path equals one of them (e.g. a
-    // regular file or symlink literally named `vendor`) can be masked too,
-    // instead of un-masking those base rows when it is inserted below.
+    // in above, plus a masked gitlink's own path, so a worktree leaf whose
+    // own path equals one of them (e.g. a regular file or symlink literally
+    // named `vendor`) can be masked too, instead of un-masking those base
+    // rows when it is inserted below.
     let mut masked_dirs: HashSet<Vec<u8>> = HashSet::new();
     if let Some(tree) = base_tree.as_ref() {
         masked_dirs = mask_builtin_base_entries(&candidate_repo, tree, &builtins, &mut index)?;
