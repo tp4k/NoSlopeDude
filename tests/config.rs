@@ -366,6 +366,30 @@ fn null_values_are_c102() {
 }
 
 #[test]
+fn empty_tagged_scalars_are_c102() {
+    // An explicit tag on an empty plain scalar is not a null spelling, but
+    // serde_yaml_ng still turns it into an empty sequence or mapping on a
+    // container key, which would silently default the key.
+    assert_is_c102(Config::parse(b"version: 1\nexclude: !!seq\n"), "exclude");
+    assert_is_c102(
+        Config::parse(b"version: 1\nmeasurement: !!map\n"),
+        "measurement",
+    );
+    assert_is_c102(Config::parse(b"version: 1\npolicy: !!str\n"), "policy");
+    assert_is_c102(Config::parse(b"version: 1\noutput: !!map\n"), "output");
+    assert_is_c102(Config::parse(b"version: 1\nexclude: !custom\n"), "exclude");
+    // `!!null` on an empty scalar already fails; the error must name the key.
+    assert_is_c102(
+        Config::parse(b"version: 1\nmeasurement: !!null\n"),
+        "measurement",
+    );
+
+    let config = Config::parse(b"version: 1\nexclude: !!seq []\npolicy: !!map {}\n")
+        .expect("a tagged, non-empty container is not an empty scalar");
+    assert_eq!(config.exclude, Vec::<String>::new());
+}
+
+#[test]
 fn empty_mappings_and_empty_exclude_still_default() {
     let config =
         Config::parse(b"version: 1\nmeasurement: {}\npolicy: {}\noutput: {}\nexclude: []\n")

@@ -67,13 +67,22 @@ impl Default for Config {
 impl Config {
     /// Parses repository-root `nsd.yml` bytes strictly (D12-D17): unknown
     /// or duplicate fields, unsupported versions or codes, invalid globs,
-    /// invalid severities, a non-positive `min_clone_lines`, and a present
-    /// null value on any key all produce `NSD-C102`.
+    /// invalid severities, a non-positive `min_clone_lines`, a present null
+    /// value on any key, and an empty tagged scalar on a container key all
+    /// produce `NSD-C102`.
     pub fn parse(bytes: &[u8]) -> Result<Config, ConfigError> {
         let text = std::str::from_utf8(bytes)
             .map_err(|err| ConfigError::new(format!("nsd.yml is not valid UTF-8: {err}")))?;
-        let raw: RawConfig = serde_yaml_ng::from_str(text)
-            .map_err(|err| ConfigError::new(format!("nsd.yml failed to parse: {err}")))?;
+        let raw: RawConfig = serde_yaml_ng::from_str(text).map_err(|err| {
+            // A generic parse prefixes the key onto a few errors the typed
+            // one reports bare (e.g. `measurement: !!null`), so prefer it
+            // whenever it fails too.
+            let err = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(text)
+                .err()
+                .unwrap_or(err);
+            ConfigError::new(format!("nsd.yml failed to parse: {err}"))
+        })?;
+        reject_empty_tagged_containers(text)?;
         Config::try_from_raw(raw)
     }
 
@@ -322,6 +331,41 @@ pub fn load_from_commit(
             ))
         })?;
     Config::parse(&bytes)
+}
+
+/// Rejects an empty scalar carrying an explicit tag (`exclude: !!seq`,
+/// `policy: !!str`, `output: !custom`) on a container key. It is not a
+/// null spelling, so `deserialize_present` lets it through, but
+/// `deserialize_seq`/`deserialize_map` then read any empty plain scalar as
+/// an empty container (`serde_yaml_ng-0.10.0/src/de.rs:1620-1632`) and the
+/// key silently defaults. The typed value carries no tag, so this re-reads
+/// the already-valid document as a generic `Value`, where such a scalar is
+/// an empty string (a core tag) or a `Tagged` null (any other tag).
+fn reject_empty_tagged_containers(text: &str) -> Result<(), ConfigError> {
+    use serde_yaml_ng::Value;
+    let value: Value = serde_yaml_ng::from_str(text)
+        .map_err(|err| ConfigError::new(format!("nsd.yml failed to parse: {err}")))?;
+    let Value::Mapping(map) = value else {
+        return Ok(());
+    };
+    for key in ["exclude", "measurement", "policy", "output"] {
+        let is_empty_scalar = match map.get(key) {
+            Some(Value::String(text)) => text.is_empty(),
+            Some(Value::Tagged(tagged)) => match &tagged.value {
+                Value::Null => true,
+                Value::String(text) => text.is_empty(),
+                _ => false,
+            },
+            _ => false,
+        };
+        if is_empty_scalar {
+            return Err(ConfigError::new(format!(
+                "nsd.yml failed to parse: {key}: an empty tagged scalar is not allowed; \
+                 write the value out or omit the key"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Deserializes a *present* `include` key as `Vec<String>` (D14: only an
