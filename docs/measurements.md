@@ -202,6 +202,7 @@ session; `overall`/`java`/`js_ts` blocks of `report.json`):
 | `JAVA-REDUNDANT-ELSE-AFTER-RETURN` | 2,062 | 2,064 | +2 |
 | `JAVA-EMPTY-CATCH` | 60 | 60 | 0 |
 | duplicate groups | 258 | 258 | 0 |
+| duplicate `redundant_lines` (sum across all 258 groups) | 6,911 | 6,911 | 0 |
 | js\_ts `verbosity.scanned_lines` | 294,902 | 294,902 | 0 |
 | js\_ts `erosion` | 0.45137589185379046 | 0.45137589185379046 | 0 |
 
@@ -232,7 +233,7 @@ contained the varargs-annotation `ERROR` node was entirely excluded from
 measurement (`src/lower/mod.rs`'s `cascade_exclusions`/`prune_damage`,
 fail-closed at the callable boundary) — contributing zero `sloc`/`cc`/
 `mass`/scanned-lines/findings, no matter how large its real body. After the
-swap the same callable parses clean and is fully measured. Two real
+swap the same callable parses clean and is fully measured. Three real
 callables, hand-checked by copying each verbatim into an isolated
 single-file scan (scratch fixtures scanned with both release binaries;
 paths below are the pinned public fixture's own, not privacy-sensitive):
@@ -241,12 +242,19 @@ paths below are the pinned public fixture's own, not privacy-sensitive):
 | --- | --- | --- |
 | `org.springframework.util.ClassUtils#getMethodIfAvailable` (`Class<?> clazz, String methodName, @Nullable Class<?> @Nullable ... paramTypes`) | excluded: file `incomplete=true`, callable absent from every measurement (`sloc`/`cc`/`mass` = 0/unmeasured) | `cc=3`, `sloc=8`, `mass=8.485281374238571` |
 | `org.springframework.util.ReflectionUtils#findMethod` (`Class<?> clazz, String name, Class<?> @Nullable ... paramTypes`) | excluded: file `incomplete=true`, callable absent from every measurement | `cc=7`, `sloc=11`, `mass=23.2163735324878` |
+| `org.springframework.asm.ClassReader#readCode` (no varargs annotation; already measured pre-swap, `private` now wrapped in orchard's `modifier`/`visibility` node) | `cc=532`, `sloc=900`, `mass=15960.0` | `cc=532`, `sloc=900`, `mass=15960.0` (unchanged) |
 
-Both methods contain an `if`/`while`/`for` (hence a nonzero post-swap `cc`)
-that was previously invisible to every rule and score entirely — which is
-also where the `+2 JAVA-REDUNDANT-ELSE-AFTER-RETURN` findings and `+5`
-Java `flagged_lines` come from: newly-measured callables across the other
-53 files carrying the same pattern, not a changed rule or a changed
-verdict on already-measured code. No callable that was already measured
-before the swap changed its `sloc`/`cc`/`mass` value; the entire delta is
-newly-measured code that was previously invisible.
+Both `ClassUtils`/`ReflectionUtils` methods contain an `if`/`while`/`for`
+(hence a nonzero post-swap `cc`) that was previously invisible to every
+rule and score entirely — which is also where the `+2
+JAVA-REDUNDANT-ELSE-AFTER-RETURN` findings and `+5` Java `flagged_lines`
+come from: newly-measured callables across the other 53 files carrying
+the same pattern, not a changed rule or a changed verdict on
+already-measured code. `readCode` is the control for the other half of
+that claim: it was already measured before the swap (it carries no
+varargs-annotation damage), its `private` modifier is wrapped in orchard's
+new `modifier`/`visibility` node exactly like every other Java
+modifier keyword, and its `cc`/`sloc`/`mass` are bit-for-bit identical
+before and after — no callable that was already measured before the swap
+changed its `sloc`/`cc`/`mass` value; the entire delta is newly-measured
+code that was previously invisible.
