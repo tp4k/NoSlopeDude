@@ -407,14 +407,16 @@ pinned the pending path. When resolved, the archived report's own
 it to rebuild the exact `ScanSettings` used to produce it, a fresh scan was
 run, and the two `report.json` texts were compared byte-for-byte.
 
-**Last run before retirement (M0b, this workstream's first commit, still
-at `tree-sitter-java` 0.23.5): PASS.** `NSD_ARCHIVED_REPORT=<the private
-archive> NSD_REQUIRE_ARCHIVE_VERIFIED=1 cargo test --test golden_digest`
-and the equivalent `neutrality` invocation both scanned `java-fixture-01`
-byte-identical to the archived `report.json` — 2,613,042 bytes, verified
-against a tampered-archive negative control (a single flipped byte in a
-scratch copy of the archive correctly failed the comparison). See
-`docs/implementation-status.md`, row M0b-8c, for the commit that records
+**Last run before retirement (run by the coordinator on `main@3dd9ae2`,
+still at `tree-sitter-java` 0.23.5): PASS.** `NSD_ARCHIVED_REPORT=<the
+private archive> NSD_REQUIRE_ARCHIVE_VERIFIED=1 cargo test --test
+neutrality` ran
+`test_java_fixture_01_strict_scan_is_byte_identical_to_the_archived_report`,
+which scanned `java-fixture-01` byte-identical to the archived
+`report.json` — 2,613,042 bytes, verified against a tampered-archive
+negative control (a single flipped byte in a scratch copy of the archive
+correctly failed the comparison). See `docs/implementation-status.md`,
+row M0b-8c, for the commit that records
 this without the archive's path or contents.
 
 **Retired by this workstream (M0c-10), not merely re-baselined.** Item 8's
