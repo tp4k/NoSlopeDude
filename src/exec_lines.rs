@@ -108,6 +108,12 @@ mod tests {
         let jsts = parse_jsts("function f() {\n  // note\n}\n");
         let comment = find_by_kind(jsts.root_node(), "comment");
         assert!(!is_executable_leaf(comment, LanguageFamily::JsTs));
+
+        // Cross-family: is_comment_kind must discriminate by language, not
+        // just by kind string, so a language-blind implementation fails.
+        assert!(!is_comment_kind("line_comment", LanguageFamily::JsTs));
+        assert!(!is_comment_kind("block_comment", LanguageFamily::JsTs));
+        assert!(!is_comment_kind("comment", LanguageFamily::Java));
     }
 
     #[test]
