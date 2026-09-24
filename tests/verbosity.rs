@@ -244,6 +244,47 @@ fn test_verbosity_zero_when_nothing_flagged() {
     );
 }
 
+/// M0c-13: `FileLanguageLines::executable_lines` moved from `BTreeSet<usize>`
+/// to a sorted, deduplicated `Vec<usize>` (`compute_verbosity`'s own
+/// membership check moved from `.contains()` to `.binary_search().is_ok()`
+/// to match) — `binary_search` only gives a correct answer over an
+/// already-sorted, duplicate-free slice. Every other test in this file
+/// builds `executable_lines` from a contiguous `1..=N` range, which is
+/// sorted trivially and would not catch a regression to an unsorted or
+/// duplicate-containing Vec; this one uses a sparse set with gaps, built
+/// out of source order with a duplicate, then sorted and deduplicated by
+/// hand — matching what `executable_lines_from_ir` does internally (it
+/// still builds a `BTreeSet` before converting to the stored `Vec`).
+#[test]
+fn test_executable_lines_are_sorted_and_distinct() {
+    let mut executable_lines = vec![9usize, 2, 5, 2, 40, 9];
+    executable_lines.sort_unstable();
+    executable_lines.dedup();
+    assert_eq!(executable_lines, vec![2, 5, 9, 40]);
+
+    let files = vec![FileLanguageLines {
+        relative_path: sample_path(),
+        language: JAVA,
+        scanned_lines: 100,
+        executable_lines,
+    }];
+    let group = CloneGroup {
+        language: JAVA,
+        locations: vec![
+            clone_location("Sample.java", 1, 10, 10),
+            clone_location("Sample.java", 1, 45, 10),
+        ],
+        redundant_lines: 10,
+    };
+
+    let verbosity = rules::compute_verbosity(&files, &[], &[group]);
+
+    // Expected vs actual, the two edge cases this test pins: a naive raw
+    // [1, 45] span would count all 45 lines; the D11-correct answer counts
+    // only the 4 sparse executable lines (2, 5, 9, 40) that fall inside it.
+    assert_eq!(verbosity.overall.flagged_lines, 4, "{verbosity:?}");
+}
+
 #[test]
 fn test_per_family_and_overall_scores_are_computed_separately() {
     let files = vec![
