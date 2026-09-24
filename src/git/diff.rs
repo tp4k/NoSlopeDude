@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use git2::{
-    Delta, Diff, DiffDelta, DiffFile, DiffFindOptions, DiffLineType, DiffOptions, Index,
+    Delta, Diff, DiffDelta, DiffFile, DiffFindOptions, DiffLineType, DiffOptions, ErrorCode, Index,
     IndexEntry, IndexTime, ObjectType, Oid, Patch, Repository, Tree,
 };
 
@@ -192,10 +192,17 @@ pub fn diff_commit_to_worktree(
         )
     })?;
 
+    let base_tree = resolve_tree(&candidate_repo, base)?;
+
     // Phase 1: every entry's real object id, with no ODB write anywhere.
     let mut index =
         Index::new().map_err(|err| wrap_git_error("cannot create an in-memory index", &err))?;
     let mut nested_checkouts = Vec::new();
+    // D27: a `Special` path is never given its own content in the in-memory
+    // index; masked to the base tree's entry (if any) instead, so libgit2's
+    // diff sees no delta there, and reported directly by kind, same as
+    // `NestedCheckout` above.
+    let mut special_changes = Vec::new();
 
     for entry in &worktree.entries {
         match entry.kind {
@@ -205,6 +212,28 @@ pub fn diff_commit_to_worktree(
                     path: entry.path.clone(),
                     kind: EntryKind::NestedCheckout,
                 });
+            }
+            EntryKind::Special => {
+                // D27: never read. A base-tree entry at this path is copied
+                // in by its own mode/oid so it produces no delta (neither a
+                // rename source nor a rename target); its absence means
+                // this path is new.
+                match old_side_entry(base_tree.as_ref(), entry.path.as_bytes())? {
+                    Some((old_kind, old_mode, old_oid)) => {
+                        insert_index_entry(&mut index, &entry.path, old_mode as u32, 0, old_oid)?;
+                        special_changes.push(Change::Typechange {
+                            path: entry.path.clone(),
+                            old_kind,
+                            new_kind: EntryKind::Special,
+                        });
+                    }
+                    None => {
+                        special_changes.push(Change::Added {
+                            path: entry.path.clone(),
+                            kind: EntryKind::Special,
+                        });
+                    }
+                }
             }
             EntryKind::Submodule => {
                 let oid = entry.oid.ok_or_else(|| {
@@ -252,7 +281,6 @@ pub fn diff_commit_to_worktree(
         }
     }
 
-    let base_tree = resolve_tree(&candidate_repo, base)?;
     let mut opts = diff_options();
     let mut diff = candidate_repo
         .diff_tree_to_index(base_tree.as_ref(), Some(&index), Some(&mut opts))
@@ -407,6 +435,7 @@ pub fn diff_commit_to_worktree(
     }
 
     changes.append(&mut nested_checkouts);
+    changes.append(&mut special_changes);
     changes.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
     Ok(changes)
 }
@@ -578,6 +607,29 @@ fn old_side_blob_oid(base_tree: Option<&Tree<'_>>, path_bytes: &[u8]) -> Option<
         .get_path(&bytes_to_path(path_bytes))
         .ok()
         .map(|entry| entry.id())
+}
+
+/// The old-side entry (kind, raw mode, object id) at `path_bytes` in
+/// `base_tree`, or `None` when `base_tree` is absent (D2's unborn-HEAD case)
+/// or has no entry there. D27's mask for a `Special` worktree entry: copying
+/// this triple into the in-memory index keeps a base blob out of rename
+/// detection instead of surfacing it as a spurious Deleted delta.
+fn old_side_entry(
+    base_tree: Option<&Tree<'_>>,
+    path_bytes: &[u8],
+) -> Result<Option<(EntryKind, i32, Oid)>, GitError> {
+    let Some(tree) = base_tree else {
+        return Ok(None);
+    };
+    match tree.get_path(&bytes_to_path(path_bytes)) {
+        Ok(entry) => {
+            let mode = entry.filemode();
+            let kind = entry_kind_from_raw_mode(mode)?;
+            Ok(Some((kind, mode, entry.id())))
+        }
+        Err(err) if err.code() == ErrorCode::NotFound => Ok(None),
+        Err(err) => Err(wrap_git_error("cannot read a base tree entry", &err)),
+    }
 }
 
 /// Where a diff's new-side file mode is read from: a candidate commit's
