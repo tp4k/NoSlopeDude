@@ -264,6 +264,57 @@ fn unborn_empty_tree_to_index_all_added() {
     assert!(changes.iter().all(|c| matches!(c, Change::Added { .. })));
 }
 
+/// D32/D34: the same conflicted-index fixture as
+/// `tests/git_snapshots.rs::conflicted_index_is_g101`, copied here so this
+/// suite pins `diff_commit_to_index`'s own D4 behavior, not
+/// `IndexSnapshot::open`'s (task.md Codex r1 test note).
+#[test]
+fn conflicted_index_diff_is_g101() {
+    let (_dir, repo) = common::init_repo();
+    let ancestor_oid =
+        common::commit_entries(&repo, &[(b"a.ts".to_vec(), MODE_REGULAR, b"base".to_vec())]);
+    let ours_oid =
+        common::commit_entries(&repo, &[(b"a.ts".to_vec(), MODE_REGULAR, b"ours".to_vec())]);
+    let theirs_oid = common::commit_entries(
+        &repo,
+        &[(b"a.ts".to_vec(), MODE_REGULAR, b"theirs".to_vec())],
+    );
+
+    let ancestor_tree = repo
+        .find_commit(ancestor_oid)
+        .expect("ancestor commit")
+        .tree()
+        .expect("ancestor tree");
+    let ours_tree = repo
+        .find_commit(ours_oid)
+        .expect("ours commit")
+        .tree()
+        .expect("ours tree");
+    let theirs_tree = repo
+        .find_commit(theirs_oid)
+        .expect("theirs commit")
+        .tree()
+        .expect("theirs tree");
+
+    let mut merged_index = repo
+        .merge_trees(&ancestor_tree, &ours_tree, &theirs_tree, None)
+        .expect("merge trees");
+    assert!(
+        merged_index.has_conflicts(),
+        "fixture setup must actually produce a conflicted merge"
+    );
+    repo.set_index(&mut merged_index)
+        .expect("install the conflicted index as the repo index");
+
+    let err = diff::diff_commit_to_index(&repo, Some(ours_oid))
+        .expect_err("diff_commit_to_index must reject a conflicted index");
+    assert_eq!(err.code(), "NSD-G101");
+    assert!(
+        err.to_string().contains("unresolved merge conflicts"),
+        "expected the D4 message, got: {err}"
+    );
+}
+
 #[test]
 fn exact_rename_reports_full_similarity() {
     let (_dir, repo) = common::init_repo();
