@@ -54,7 +54,8 @@ const FULL_FILE_CONTEXT_LINES: u32 = u32::MAX;
 
 /// One file-level change between a base tree and a candidate snapshot (D10:
 /// sorted by raw path bytes). A symlink or gitlink change is reported by
-/// its `EntryKind`, never line-diffed as source.
+/// its `EntryKind`, never line-diffed as source; so is a worktree `Special`
+/// entry (D27: a FIFO, socket or device node), which is never read either.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Change {
     Added {
@@ -150,6 +151,8 @@ pub fn diff_commit_to_index(repo: &Repository, base: Option<Oid>) -> Result<Vec<
 /// `SOURCE_CEILING_BYTES` is never read into memory or written to the
 /// mempack; it is represented by a raw fd hash of its real on-disk bytes
 /// instead (D2/D5), so it still diffs correctly against its real content.
+/// A `Special` entry (D27) is masked to its base tree entry, if any, and
+/// reported directly by kind; its content is never read.
 ///
 /// Two phases keep the ODB write (and its `git_odb__freshen` readdir/utime
 /// cost, perf HIGH) proportional to what rename detection actually needs,
