@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use git2::{
     Delta, Diff, DiffDelta, DiffFile, DiffFindOptions, DiffLineType, DiffOptions, ErrorCode, Index,
-    IndexEntry, IndexTime, ObjectType, Oid, Patch, Repository, Tree, TreeWalkMode, TreeWalkResult,
+    IndexEntry, IndexTime, ObjectType, Oid, Patch, Repository, Tree,
 };
 use ignore::overrides::Override;
 
@@ -229,7 +229,7 @@ pub fn diff_commit_to_worktree(
     // or unrelated to the base entirely).
     let builtins = discovery::builtin_override();
     if let Some(tree) = base_tree.as_ref() {
-        mask_builtin_base_entries(tree, &builtins, &mut index)?;
+        mask_builtin_base_entries(&candidate_repo, tree, &builtins, &mut index)?;
     }
     let mut builtin_dir_verdicts: HashMap<&[u8], bool> = HashMap::new();
 
@@ -677,45 +677,74 @@ fn old_side_blob_oid(base_tree: Option<&Tree<'_>>, path_bytes: &[u8]) -> Option<
 
 /// D28: copies every base-tree entry whose path matches the D19 built-in
 /// exclusion predicate into `index`, with its own mode and object id and
-/// nothing else — no blob is ever read, since `Tree::walk` reports a leaf
-/// entry's mode and oid straight from the tree object itself. Runs once,
-/// before Phase 1 looks at a single worktree entry, so a built-in path
+/// nothing else — no blob is ever read, since `collect_tree_leaves` reports
+/// a leaf entry's mode and oid straight from the tree object itself. Runs
+/// once, before Phase 1 looks at a single worktree entry, so a built-in path
 /// produces no delta on either side regardless of what the worktree holds
 /// there: deleted, edited, or with no worktree entry related to it at all.
 /// A directory entry (`ObjectType::Tree`) is never itself an index row, so
 /// it is skipped; every other kind (blob or gitlink) is a candidate.
 fn mask_builtin_base_entries(
+    repo: &Repository,
     base_tree: &Tree<'_>,
     builtins: &Override,
     index: &mut Index,
 ) -> Result<(), GitError> {
     let mut leaves: Vec<(RepoPath, i32, Oid)> = Vec::new();
-    base_tree
-        .walk(TreeWalkMode::PreOrder, |root, tree_entry| {
-            if tree_entry.kind() == Some(ObjectType::Tree) {
-                return TreeWalkResult::Ok;
-            }
-            let mut path_bytes = root.as_bytes().to_vec();
-            path_bytes.extend_from_slice(tree_entry.name_bytes());
-            leaves.push((
-                RepoPath::from_bytes(path_bytes),
-                tree_entry.filemode(),
-                tree_entry.id(),
-            ));
-            TreeWalkResult::Ok
-        })
-        .map_err(|err| wrap_git_error("cannot walk the base tree for built-in exclusions", &err))?;
+    collect_tree_leaves(repo, base_tree, &mut Vec::new(), &mut leaves)?;
 
     let mut dir_verdicts: HashMap<&[u8], bool> = HashMap::new();
     for (path, mode, oid) in &leaves {
         // A gitlink leaf (mode `MODE_SUBMODULE`) is itself a directory in
-        // Git's own model (row 1): the ancestor walk in `Tree::walk` never
-        // recurses into it, so a gitlink at `vendor` needs the same
-        // directory-aware check as a worktree `Submodule` entry.
+        // Git's own model (row 1): `collect_tree_leaves` never recurses into
+        // it, so a gitlink at `vendor` needs the same directory-aware check
+        // as a worktree `Submodule` entry.
         let is_dir = *mode as u32 == MODE_SUBMODULE;
         if discovery::is_builtin_excluded(path, is_dir, builtins, &mut dir_verdicts) {
             insert_index_entry(index, path, *mode as u32, 0, *oid)?;
         }
+    }
+    Ok(())
+}
+
+/// Recursively collects every leaf (blob or gitlink) entry of `tree` into
+/// `leaves`, with each path built from raw bytes only — row 3: replaces a
+/// `Tree::walk` callback, whose `root` argument is a `&str` and aborts the
+/// whole walk (`git_tree_walk` returns -1, git2-0.21.0 `tree.rs:219-221`) on
+/// a non-UTF-8 directory name. Nothing here ever depends on UTF-8. A gitlink
+/// entry (`ObjectType::Commit`, never `Tree`) is collected as a leaf exactly
+/// like a blob, so its caller's row-1 `is_dir` check still applies to it.
+fn collect_tree_leaves(
+    repo: &Repository,
+    tree: &Tree<'_>,
+    prefix: &mut Vec<u8>,
+    leaves: &mut Vec<(RepoPath, i32, Oid)>,
+) -> Result<(), GitError> {
+    for entry in tree.iter() {
+        let name = entry.name_bytes();
+        if entry.kind() == Some(ObjectType::Tree) {
+            let subtree = repo.find_tree(entry.id()).map_err(|err| {
+                wrap_git_error("cannot read a base subtree for built-in exclusions", &err)
+            })?;
+            let prefix_len = prefix.len();
+            if !prefix.is_empty() {
+                prefix.push(b'/');
+            }
+            prefix.extend_from_slice(name);
+            collect_tree_leaves(repo, &subtree, prefix, leaves)?;
+            prefix.truncate(prefix_len);
+            continue;
+        }
+        let mut path_bytes = prefix.clone();
+        if !path_bytes.is_empty() {
+            path_bytes.push(b'/');
+        }
+        path_bytes.extend_from_slice(name);
+        leaves.push((
+            RepoPath::from_bytes(path_bytes),
+            entry.filemode(),
+            entry.id(),
+        ));
     }
     Ok(())
 }
