@@ -109,9 +109,9 @@ fn is_block_kind(kind: &str) -> Option<&'static str> {
     }
 }
 
-/// Java's non-default `switch_label`: `case`, never `default`. Mirrors
-/// `metrics::is_default_label`'s own check (a `switch_label`'s first child's
-/// kind is literally `"default"`).
+/// Java's non-default `switch_label`: `case`, never `default` -- a
+/// `switch_label`'s first child's kind is literally `"default"` when it is
+/// one.
 fn is_default_label(node: Node) -> bool {
     node.child(0).is_some_and(|child| child.kind() == "default")
 }

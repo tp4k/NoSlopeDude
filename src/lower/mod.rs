@@ -5,9 +5,11 @@
 //! catch-body structure, damage classification, clone-candidate statement
 //! containers); this file holds only the traversal shared by both -- one
 //! iterative `TreeCursor`-based tree build (D18: no per-AST-depth
-//! recursion), the same shape `metrics::walk_excluding` already uses for its
-//! own flat traversal, extended here to also assemble the `IrNode` tree
-//! itself rather than only visiting.
+//! recursion) over the raw tree-sitter tree, assembling the `IrNode` tree
+//! itself as it goes. `metrics::walk_ir_excluding` is a separate,
+//! later-stage traversal over the already-built `IrNode` tree -- an
+//! explicit work-list, not a `TreeCursor`, so a different shape from this
+//! one.
 
 mod java;
 mod jsts;
@@ -572,14 +574,15 @@ struct IrTables<'a> {
 }
 
 /// Builds `root`'s whole `IrNode` tree in one iterative pass: a single
-/// `TreeCursor` walks the tree exactly as `metrics::walk_excluding` does
-/// (D18: no per-AST-depth recursion), but this traversal also assembles a
-/// tree rather than only visiting, via an explicit stack of in-progress
-/// `IrNode`s mirroring the cursor's own descent depth. A node is finalized
-/// (popped and attached to its parent's `children`) the moment the cursor
-/// has no more children and no more siblings to explore under it, which is
-/// exactly when `metrics::walk_excluding`'s own traversal would have moved
-/// on past that subtree.
+/// `TreeCursor` walks the raw tree-sitter tree (D18: no per-AST-depth
+/// recursion), assembling the `IrNode` tree as it goes rather than only
+/// visiting, via an explicit stack of in-progress `IrNode`s mirroring the
+/// cursor's own descent depth. A node is finalized (popped and attached to
+/// its parent's `children`) the moment the cursor has no more children and
+/// no more siblings to explore under it. `metrics::walk_ir_excluding` is a
+/// later, separate pass over this already-built `IrNode` tree, using an
+/// explicit work-list rather than a `TreeCursor` -- a different shape from
+/// this one, not the same one reused.
 fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrTables) -> IrNode {
     // `parent_in_catch_body` is the already-computed `in_catch_body` flag of
     // this node's own parent (or `false` for `root`), inherited rather than
