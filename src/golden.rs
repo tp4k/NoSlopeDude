@@ -548,9 +548,8 @@ mod tests {
             "decoy": { "mass": 9.0 },
             "skipped_files": []
         }"#;
-        let err = parse_report(non_object_top25_entry).expect_err(
-            "a non-object top25 entry must be rejected with an error, not a panic",
-        );
+        let err = parse_report(non_object_top25_entry)
+            .expect_err("a non-object top25 entry must be rejected with an error, not a panic");
         assert!(err.to_string().contains("mass"), "error was: {err}");
     }
 
