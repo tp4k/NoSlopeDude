@@ -191,9 +191,11 @@ pub struct IrNode {
 }
 
 impl IrNode {
-    /// A structurally-empty `IrNode` for the one degrade-don't-panic
-    /// fallback outside `src/lower/` (`metrics::fallback_ir_body`, D18):
-    /// all flags false, no decision, no terminator, no children.
+    /// A structurally-empty `IrNode`. Its main caller today is
+    /// `src/lower/`'s own `prune_damage`, redacting a damaged subtree; it is
+    /// also the one degrade-don't-panic fallback outside `src/lower/`,
+    /// `metrics::fallback_ir_body` (D18): all flags false, no decision, no
+    /// terminator, no children.
     pub fn empty(span: Span) -> IrNode {
         IrNode {
             span,
