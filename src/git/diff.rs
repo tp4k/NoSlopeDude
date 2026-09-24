@@ -5,7 +5,7 @@
 //! primitive for parse errors, findings, suppressions, callables and clone
 //! attribution" (`nsd-plan-final.md` *M1-M2*).
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -228,8 +228,13 @@ pub fn diff_commit_to_worktree(
     // delta regardless of the worktree's own state there (deleted, edited,
     // or unrelated to the base entirely).
     let builtins = discovery::builtin_override();
+    // WS-4 r2 row 2: every proper ancestor directory of a path just masked
+    // in above, so a worktree leaf whose own path equals one of them (e.g. a
+    // regular file or symlink literally named `vendor`) can be masked too,
+    // instead of un-masking those base rows when it is inserted below.
+    let mut masked_dirs: HashSet<Vec<u8>> = HashSet::new();
     if let Some(tree) = base_tree.as_ref() {
-        mask_builtin_base_entries(&candidate_repo, tree, &builtins, &mut index)?;
+        masked_dirs = mask_builtin_base_entries(&candidate_repo, tree, &builtins, &mut index)?;
     }
     let mut builtin_dir_verdicts: HashMap<&[u8], bool> = HashMap::new();
 
@@ -253,6 +258,25 @@ pub fn diff_commit_to_worktree(
             // side, if any, was already masked in above. Checked ahead of
             // `entry.kind` so a built-in-excluded `NestedCheckout` or
             // `Special` entry is masked too, exactly like every other kind.
+            continue;
+        }
+        // WS-4 r2 row 2: a leaf (Regular/Executable/Symlink/Submodule) whose
+        // own path equals an already-masked directory's name must never be
+        // given its own index entry either — libgit2's index insertion
+        // removes every masked row nested under the same name on insert
+        // (`index_insert(replace=1)` -> `has_file_name`), which would
+        // un-mask those base rows and turn them into a spurious Deleted
+        // delta and rename source. `NestedCheckout`/`Special` are excluded
+        // here: `NestedCheckout` is always caught by the `is_dir` check
+        // above when its own path is the built-in directory, and `Special`
+        // has its own base-directory-replacement handling below.
+        if !matches!(entry.kind, EntryKind::NestedCheckout | EntryKind::Special)
+            && masked_dirs.contains(entry.path.as_bytes())
+        {
+            special_changes.push(Change::Added {
+                path: entry.path.clone(),
+                kind: entry.kind,
+            });
             continue;
         }
         match entry.kind {
@@ -684,16 +708,22 @@ fn old_side_blob_oid(base_tree: Option<&Tree<'_>>, path_bytes: &[u8]) -> Option<
 /// there: deleted, edited, or with no worktree entry related to it at all.
 /// A directory entry (`ObjectType::Tree`) is never itself an index row, so
 /// it is skipped; every other kind (blob or gitlink) is a candidate.
+///
+/// Returns every proper ancestor directory of a path this masked in (WS-4 r2
+/// row 2), so the caller can also mask a worktree leaf whose own path equals
+/// one of them, before that leaf's insertion into the same in-memory index
+/// un-masks these very rows.
 fn mask_builtin_base_entries(
     repo: &Repository,
     base_tree: &Tree<'_>,
     builtins: &Override,
     index: &mut Index,
-) -> Result<(), GitError> {
+) -> Result<HashSet<Vec<u8>>, GitError> {
     let mut leaves: Vec<(RepoPath, i32, Oid)> = Vec::new();
     collect_tree_leaves(repo, base_tree, &mut Vec::new(), &mut leaves)?;
 
     let mut dir_verdicts: HashMap<&[u8], bool> = HashMap::new();
+    let mut masked_dirs: HashSet<Vec<u8>> = HashSet::new();
     for (path, mode, oid) in &leaves {
         // A gitlink leaf (mode `MODE_SUBMODULE`) is itself a directory in
         // Git's own model (row 1): `collect_tree_leaves` never recurses into
@@ -702,9 +732,21 @@ fn mask_builtin_base_entries(
         let is_dir = *mode as u32 == MODE_SUBMODULE;
         if discovery::is_builtin_excluded(path, is_dir, builtins, &mut dir_verdicts) {
             insert_index_entry(index, path, *mode as u32, 0, *oid)?;
+            masked_dirs.extend(ancestor_dirs(path.as_bytes()));
         }
     }
-    Ok(())
+    Ok(masked_dirs)
+}
+
+/// Every proper ancestor directory of `path`, as raw byte vectors: for
+/// `vendor/sub/lib.ts`, yields `vendor/sub` then `vendor` (WS-4 r2 row 2).
+fn ancestor_dirs(path: &[u8]) -> impl Iterator<Item = Vec<u8>> + '_ {
+    let mut current = path;
+    std::iter::from_fn(move || {
+        let slash = current.iter().rposition(|&byte| byte == b'/')?;
+        current = &current[..slash];
+        Some(current.to_vec())
+    })
 }
 
 /// Recursively collects every leaf (blob or gitlink) entry of `tree` into
