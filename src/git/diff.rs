@@ -241,7 +241,14 @@ pub fn diff_commit_to_worktree(
     let mut special_changes = Vec::new();
 
     for entry in &worktree.entries {
-        if discovery::is_builtin_excluded(&entry.path, &builtins, &mut builtin_dir_verdicts) {
+        // WS-4 r2 row 1: a `NestedCheckout`/`Submodule` entry's own path can
+        // itself be the built-in directory (e.g. a gitlink or nested
+        // checkout literally at `vendor`), which only a directory-aware
+        // check (`is_dir = true`) can match against a directory-anchored
+        // glob such as `vendor/`.
+        let is_dir = matches!(entry.kind, EntryKind::NestedCheckout | EntryKind::Submodule);
+        if discovery::is_builtin_excluded(&entry.path, is_dir, &builtins, &mut builtin_dir_verdicts)
+        {
             // D28: never read, never given its own index entry — the base
             // side, if any, was already masked in above. Checked ahead of
             // `entry.kind` so a built-in-excluded `NestedCheckout` or
@@ -701,7 +708,12 @@ fn mask_builtin_base_entries(
 
     let mut dir_verdicts: HashMap<&[u8], bool> = HashMap::new();
     for (path, mode, oid) in &leaves {
-        if discovery::is_builtin_excluded(path, builtins, &mut dir_verdicts) {
+        // A gitlink leaf (mode `MODE_SUBMODULE`) is itself a directory in
+        // Git's own model (row 1): the ancestor walk in `Tree::walk` never
+        // recurses into it, so a gitlink at `vendor` needs the same
+        // directory-aware check as a worktree `Submodule` entry.
+        let is_dir = *mode as u32 == MODE_SUBMODULE;
+        if discovery::is_builtin_excluded(path, is_dir, builtins, &mut dir_verdicts) {
             insert_index_entry(index, path, *mode as u32, 0, *oid)?;
         }
     }

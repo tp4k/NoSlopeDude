@@ -175,7 +175,10 @@ pub fn discover(entries: &[Entry], scope: &CompiledScope) -> DiscoveryResult {
             skipped.push(skip(entry, SkipReason::SpecialFile));
             continue;
         }
-        if is_builtin_excluded(&entry.path, &builtins, &mut builtin_dir_verdicts) {
+        // `Submodule`/`NestedCheckout` entries never reach this call (they
+        // are skipped above), so `discover`'s own verdicts never depend on
+        // `is_dir`: every entry left standing here is a file.
+        if is_builtin_excluded(&entry.path, false, &builtins, &mut builtin_dir_verdicts) {
             skipped.push(skip(entry, SkipReason::BuiltinExclusion));
             continue;
         }
@@ -215,12 +218,24 @@ fn skip(entry: &Entry, reason: SkipReason) -> SkippedEntry {
 /// dependency/build, generated or WebJar glob lists. D29: exposed to
 /// `diff.rs` so WS-4's worktree-diff mask (D28) and `discover` share one
 /// predicate, never a second copy of the glob lists.
+///
+/// `is_dir` is whether `path` itself denotes a directory (a `NestedCheckout`
+/// or `Submodule` worktree/tree entry, WS-4 r2 row 1): `matches_including_
+/// ancestors` always matches `path` itself with `is_dir = false`, since it
+/// exists to catch a *file* nested under a directory-anchored glob such as
+/// `target/`, so it never matches the glob against the directory entry
+/// itself. When `is_dir` is true, `dir_verdict` is also consulted directly
+/// against `path`'s own bytes, checking `path` as a directory (and, through
+/// its own recursion, every ancestor above it too).
 pub(super) fn is_builtin_excluded<'e>(
     path: &'e RepoPath,
+    is_dir: bool,
     builtins: &Override,
     dir_verdicts: &mut HashMap<&'e [u8], bool>,
 ) -> bool {
-    has_git_component(path.as_bytes()) || matches_including_ancestors(builtins, path, dir_verdicts)
+    has_git_component(path.as_bytes())
+        || matches_including_ancestors(builtins, path, dir_verdicts)
+        || (is_dir && dir_verdict(builtins, path.as_bytes(), dir_verdicts))
 }
 
 /// Whether `path` falls outside `include` (D20's `outside_include`);
