@@ -81,12 +81,14 @@ Grammars deliberately unchanged here: `tree-sitter` 0.25.10,
 ## M0c — Grammar swap
 
 Plan: `nsd-plan-final.md` *M0c — Grammar swap, now a one-lowering change*,
-steps 9–12. **Not started.** Blocked on M0b-8c.
+steps 9–12. M0b-8c cleared; the grammar swap (M0c-9) and its acceptance gate
+(M0c-10) are done on `feat/m0c-grammar`, not yet merged to `main`. M0c-11
+through M0c-13 are separate workstreams' scope and remain as recorded below.
 
 | ID | Step | Status | Branch | Evidence |
 |---|---|---|---|---|
-| M0c-9 | Swap to `tree-sitter-java-orchard` 0.5.18, bump `tree-sitter` to 0.27.0 | `[ ]` | — | `Cargo.toml` still pins `tree-sitter` 0.25.10 / `tree-sitter-java` 0.23.5 |
-| M0c-10 | Quantify the re-baseline: re-run `scripts/perf_scan.sh` on the pinned Spring+Angular fixture, record parse-failure movement (55 Java → 0 required, 3 TS `using` remain) and the Java SLOC/mass/erosion delta, **explained** on ≥2 hand-checked callables | `[ ]` | — | Gate: stop M0 without freezing if the 55 do not clear |
+| M0c-9 | Swap to `tree-sitter-java-orchard` 0.5.18, bump `tree-sitter` to 0.27.0 | `[x]` | `feat/m0c-grammar` | `Cargo.toml`/`Cargo.lock` now pin `tree-sitter` 0.27.0 / `tree-sitter-java-orchard` 0.5.18, no `tree-sitter-java` (`grep -c '^name = "tree-sitter-java"$' Cargo.lock` is 0); JS/TS grammars unchanged. `ir::IR_VERSION` 2→3, `lower::JAVA_LOWERING_VERSION` 2→3 (`JSTS_LOWERING_VERSION` unchanged), `DamageKind::JavaVarargsAnnotation` removed. `cargo test` green, 173+ tests across 20 suites |
+| M0c-10 | Quantify the re-baseline: re-run `scripts/perf_scan.sh` on the pinned Spring+Angular fixture, record parse-failure movement (55 Java → 0 required, 3 TS `using` remain) and the Java SLOC/mass/erosion delta, **explained** on ≥2 hand-checked callables | `[x]` | `feat/m0c-grammar` | Gate cleared: `tests/grammar_gate.rs` (new, env-gated on `NSD_PERF_FIXTURE`, reads unfiltered `PipelineOutput::parse_failures` since `report.json`'s `skipped_files` filters `SyntaxError` out) shows 0 Java + exactly 3 TS `SyntaxError` failures on the pinned Spring+Angular fixture. Delta quantified and explained in `docs/measurements.md` *M0c-10*: the sole mechanism is fail-closed damage-exclusion lifting (a varargs-annotation parse fix), **not** orchard's new `modifier`/`visibility` node types as hypothesized — those wrapper nodes always have exactly one child and so can never satisfy `is_executable_leaf`, proven on a real parse dump and a corpus-wide sweep. Two hand-checked Spring callables (`ClassUtils#getMethodIfAvailable`, `ReflectionUtils#findMethod`) with exact before/after CC/SLOC/mass in the same section. Neutrality baselines recaptured/reverted and explained in `docs/ir-neutrality.md` *M0c-10* |
 | M0c-11 | Re-baseline fixture expectations; update the three `docs/*.md` contracts to describe IR kinds, not grammar node names | `[ ]` | — | — |
 | M0c-12 | Freeze `nsd-v1`: fingerprint over IR version, both lowering versions, three grammar versions, `tree-sitter` runtime version, rule catalog, effective clone configuration incl. `min_clone_lines` | `[ ]` | — | — |
 | M0c-13 | Clear the cheap ledger rows named in the plan: `erosion` returning `-0.0`, `BTreeSet<usize>` → sorted `Vec`, the `rposition` and `always_returns` survivors, the `LanguageFamily::JsTs` guard at `src/rules/mod.rs:339`, `tests/report_html.rs`'s `#L1-L1` anchor, and `Callable::end_line` | `[ ]` | — | All still open in [`deferred-work.md`](deferred-work.md). `end_line` **must not** be cleared before M0b-8c passes — it widens Top-25 spans and would fail that gate by design |
@@ -146,10 +148,11 @@ has been brought to the v1 canonical contract (`schema_version: 1`,
 
 ## Standing gates and known debt
 
-- **M0b-8c is the live blocker.** M0c must not begin until the
-  `java-fixture-01` strict leg has been run against the private archive and
-  its outcome recorded here. A missing fixture leaves the gate *pending* — it
-  is never substituted with an invented result or silently re-baselined.
+- **M0b-8c cleared** (PASS, see its row above) and M0c-9/M0c-10 are done on
+  `feat/m0c-grammar`, not yet merged to `main`. The strict leg that gated it
+  is now retired (`docs/ir-neutrality.md` *The `java-fixture-01` strict leg
+  (retired at M0c-10)*); parser-invariance is no longer the right question
+  once the parser itself has changed.
 - **`feat/m1-snapshots` is 45 commits behind `main`.** Merge `main` into it
   before treating its rows as green against current M0b, and re-run
   `scripts/neutrality_gate.sh` afterwards. It is the only unmerged branch.
