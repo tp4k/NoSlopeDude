@@ -648,6 +648,68 @@ fn worktree_diff_masks_directory_kind_entry_at_builtin_dir() {
     );
 }
 
+/// WS-4 r2 row 2: a worktree *leaf* (Regular/Symlink) whose own path equals
+/// a masked built-in directory's name must not un-mask that directory's
+/// base entries. Pre-fix, inserting such a leaf into the libgit2 in-memory
+/// index removed every already-masked `vendor/**` base row
+/// (`index_insert(replace=1)` -> `has_file_name`, libgit2-sys-0.18.8
+/// `index.c:1142-1147`, `:1706`), so those rows came back as `Deleted` and
+/// became rename sources for the leaf.
+#[test]
+fn worktree_diff_leaf_replacing_masked_builtin_dir_keeps_mask() {
+    let (dir, repo) = common::init_repo();
+    let content = numbered_lines(40, None);
+    let base_oid = common::commit_entries(
+        &repo,
+        &[(b"vendor/lib.ts".to_vec(), MODE_REGULAR, content.clone())],
+    );
+    sync_index_to_commit(&repo, base_oid);
+    // No `vendor/` directory on disk at all: `vendor` itself is a regular
+    // file whose bytes exactly match the masked base blob.
+    std::fs::write(dir.path().join("vendor"), &content).expect("write leaf vendor file");
+
+    let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let changes = diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree)
+        .expect("diff commit to worktree");
+
+    assert_eq!(
+        changes,
+        vec![Change::Added {
+            path: RepoPath::from_bytes(b"vendor".to_vec()),
+            kind: EntryKind::Regular,
+        }],
+        "a leaf replacing a masked built-in directory must never un-mask it \
+         or become a rename target: {changes:?}"
+    );
+}
+
+/// Symlink variant of `worktree_diff_leaf_replacing_masked_builtin_dir_keeps_mask`.
+#[test]
+fn worktree_diff_symlink_leaf_replacing_masked_builtin_dir_keeps_mask() {
+    let (dir, repo) = common::init_repo();
+    let content = numbered_lines(40, None);
+    let base_oid =
+        common::commit_entries(&repo, &[(b"vendor/lib.ts".to_vec(), MODE_REGULAR, content)]);
+    sync_index_to_commit(&repo, base_oid);
+    // No `vendor/` directory on disk at all: `vendor` itself is a symlink.
+    std::os::unix::fs::symlink("elsewhere", dir.path().join("vendor"))
+        .expect("create symlink leaf vendor");
+
+    let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let changes = diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree)
+        .expect("diff commit to worktree");
+
+    assert_eq!(
+        changes,
+        vec![Change::Added {
+            path: RepoPath::from_bytes(b"vendor".to_vec()),
+            kind: EntryKind::Symlink,
+        }],
+        "a symlink leaf replacing a masked built-in directory must never \
+         un-mask it or become a rename target: {changes:?}"
+    );
+}
+
 /// WS-4 r2 row 3: `mask_builtin_base_entries`'s base-tree walk must tolerate
 /// a non-UTF-8 directory name (D3/D18 supports non-UTF-8 paths generally).
 /// git2's `Tree::walk` passes its `root` argument as `&str` and aborts the
