@@ -71,6 +71,12 @@ pub fn erosion(callables: &[Callable]) -> f64 {
         .filter(|callable| callable.cc > CC_EROSION_THRESHOLD)
         .map(|callable| callable.mass)
         .sum();
+    if eroded_mass == 0.0 {
+        // `Iterator::sum::<f64>()` over an empty (or empty-after-filter)
+        // sequence is `-0.0` on this toolchain; force the positive literal
+        // so a caller sees `+0.0`, not `-0.0`, when nothing is eroded.
+        return 0.0;
+    }
     eroded_mass / total_mass
 }
 
