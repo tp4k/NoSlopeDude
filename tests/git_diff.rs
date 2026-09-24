@@ -560,6 +560,15 @@ fn worktree_diff_masks_builtin_excluded_paths() {
 
     write_nested_checkout(&dir, "node_modules/pkg");
 
+    // WS-4 r2 row 4: a `Special` entry (never read) at a built-in-excluded
+    // path must also be masked — proves the built-in check runs ahead of
+    // `entry.kind`, not only for the kinds already covered above.
+    let status = Command::new("/usr/bin/mkfifo")
+        .arg(dir.path().join("target/pipe"))
+        .status()
+        .expect("spawn mkfifo for target/pipe");
+    assert!(status.success(), "mkfifo target/pipe must succeed");
+
     let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
     let changes = with_timeout(
         "diff_commit_to_worktree over built-in-excluded paths",
