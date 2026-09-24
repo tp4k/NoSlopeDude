@@ -15,7 +15,9 @@ is decidable purely from the IR — no control-flow graph, no name
 resolution, no cross-file information — which is what "conservative" means
 throughout this document: a rule only ever flags a shape that is
 unambiguous in isolation, so it can under-report real waste but is designed
-to never mislabel legitimate code.
+to never mislabel legitimate code. A callable excluded fail-closed for
+damage (`docs/cc-rules.md`'s `IrCallable` section) contributes no finding
+to any of the six rules.
 
 ### `JAVA-UNREACHABLE-AFTER-RETURN` / `JSTS-UNREACHABLE-AFTER-RETURN`
 
@@ -99,9 +101,11 @@ verbosity = |{ (file, line) flagged by a rule finding, or by a clone
 - Terminator kinds (`TerminatorKind`, `src/lower/java.rs::terminator_kind`):
   `return_statement` → `Return`, `break_statement` → `Break`,
   `continue_statement` → `Continue`, `throw_statement` → `Throw`.
-- Block-kind containers (`IrNode::in_block`; the same containers
-  `docs/clone-detection.md`'s Java clone-candidate list names): `block` (a
-  method/constructor body, or a nested `{ … }` scope), `constructor_body`.
+- Block-kind containers (`IrNode::in_block`; a subset of
+  `docs/clone-detection.md`'s Java clone-candidate containers —
+  `switch_block_statement_group` is a clone container but not block-kind):
+  `block` (a method/constructor body, or a nested `{ … }` scope),
+  `constructor_body`.
 - `IrNode::is_hoisted_or_type_only` is always `false` for Java — it has no
   equivalent exemption.
 
