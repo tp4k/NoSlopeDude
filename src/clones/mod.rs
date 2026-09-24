@@ -12,7 +12,8 @@
 //! (`accumulate_line` below); `accumulate_line` stays independently
 //! implemented here — it counts a run's total lines with a
 //! `last_counted_line` watermark, a different contract from
-//! `exec_lines`'s distinct-line `BTreeSet`. `is_comment_kind` (from
+//! `rules::executable_lines_from_ir`'s distinct-line `Vec`
+//! (`src/rules/mod.rs`). `is_comment_kind` (from
 //! `src/exec_lines.rs`) and `tree_sitter::Node` are only reachable from the
 //! `#[cfg(test)]` pre-IR reference implementation kept below for WS-1's
 //! pinned floor test; the retargeted production path uses neither.
