@@ -774,6 +774,114 @@ fn count_odb_objects(repo: &Repository) -> usize {
     count
 }
 
+/// D33: runs `f` on a detached, `'static` thread and waits at most 5s for
+/// its result. A hang inside `f` (the defect this guards against, e.g. an
+/// `open(2)` on a FIFO with no writer) leaves the thread running forever,
+/// but the test process still exits: nothing here ever joins it.
+#[cfg(unix)]
+fn with_timeout<T: Send + 'static>(label: &str, f: impl FnOnce() -> T + Send + 'static) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+        Ok(value) => value,
+        Err(_) => panic!("{label} did not complete within the 5s guard; it is likely blocked"),
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn worktree_special_files_are_special_and_never_opened() {
+    let (dir, repo) = common::init_repo();
+    let commit_oid = common::commit_entries(
+        &repo,
+        &[(b"src/b.ts".to_vec(), MODE_REGULAR, b"tracked".to_vec())],
+    );
+    sync_index_to_commit(&repo, commit_oid);
+    std::fs::create_dir_all(dir.path().join("src")).expect("create src dir");
+    std::fs::write(dir.path().join("src/b.ts"), b"tracked").expect("write tracked src/b.ts");
+
+    // An untracked FIFO.
+    let fifo_status = Command::new("/usr/bin/mkfifo")
+        .arg(dir.path().join("src/a.ts"))
+        .status()
+        .expect("spawn mkfifo for src/a.ts");
+    assert!(fifo_status.success(), "mkfifo src/a.ts must succeed");
+
+    // An untracked Unix socket; the listener is kept alive for the whole
+    // test (bound to `_listener`, dropped only at function end) so the
+    // socket file stays a real bound socket (D33).
+    let _listener = std::os::unix::net::UnixListener::bind(dir.path().join("src/s.ts"))
+        .expect("bind a unix socket at src/s.ts");
+
+    // A tracked path replaced on disk by a FIFO (the overlay-step gap).
+    std::fs::remove_file(dir.path().join("src/b.ts")).expect("remove tracked src/b.ts from disk");
+    let replaced_status = Command::new("/usr/bin/mkfifo")
+        .arg(dir.path().join("src/b.ts"))
+        .status()
+        .expect("spawn mkfifo for the replaced tracked src/b.ts");
+    assert!(replaced_status.success(), "mkfifo src/b.ts must succeed");
+
+    let snapshot = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+
+    for path in [b"src/a.ts".as_slice(), b"src/s.ts".as_slice(), b"src/b.ts".as_slice()] {
+        let entry = snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.path.as_bytes() == path)
+            .unwrap_or_else(|| panic!("{path:?} entry present"));
+        assert_eq!(
+            entry.kind,
+            EntryKind::Special,
+            "{path:?} must be classified Special"
+        );
+        assert_eq!(entry.size, 0, "{path:?} must carry size 0");
+    }
+
+    let repo_path = dir.path().to_path_buf();
+    for path in [b"src/a.ts".as_slice(), b"src/s.ts".as_slice(), b"src/b.ts".as_slice()] {
+        let entry = snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.path.as_bytes() == path)
+            .expect("entry present")
+            .clone();
+        let snapshot_clone = snapshot.clone();
+        let repo_path_clone = repo_path.clone();
+        let read_result = with_timeout("WorktreeSnapshot::read on a Special entry", move || {
+            let repo = Repository::open(&repo_path_clone).expect("reopen repo for read");
+            snapshot_clone.read(&repo, &entry)
+        });
+        assert_eq!(
+            read_result.expect("read must not error"),
+            None,
+            "{path:?} must never be opened for content"
+        );
+
+        let entry = snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.path.as_bytes() == path)
+            .expect("entry present")
+            .clone();
+        let snapshot_clone = snapshot.clone();
+        let repo_path_clone = repo_path.clone();
+        let link_result = with_timeout(
+            "WorktreeSnapshot::link_target on a Special entry",
+            move || {
+                let repo = Repository::open(&repo_path_clone).expect("reopen repo for link_target");
+                snapshot_clone.link_target(&repo, &entry)
+            },
+        );
+        assert_eq!(
+            link_result.expect("link_target must not error"),
+            None,
+            "{path:?} must never be read as a symlink target"
+        );
+    }
+}
+
 /// Creates a single-file, parentless commit under `update_ref`, independent
 /// of `HEAD`'s own history — the "unrelated histories" fixture.
 fn commit_orphan(repo: &Repository, path: &[u8], content: &[u8], update_ref: &str) -> Oid {
