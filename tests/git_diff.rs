@@ -612,6 +612,42 @@ fn worktree_diff_builtin_path_is_never_a_rename_source() {
     );
 }
 
+/// WS-4 r2 row 1: the built-in predicate must also match a directory-kind
+/// worktree entry (`NestedCheckout`/`Submodule`) whose own path *is* the
+/// built-in directory, not only a leaf nested beneath one. Pre-fix, every
+/// check passed `is_dir = false` regardless of the entry's actual kind, so a
+/// directory-anchored glob such as `target/` or `vendor/` never matched the
+/// directory entry itself.
+#[test]
+#[cfg(unix)]
+fn worktree_diff_masks_directory_kind_entry_at_builtin_dir() {
+    let (dir, repo) = common::init_repo();
+    let gitlink = [0xBBu8; 20];
+    let base_oid = common::commit_entries(
+        &repo,
+        &[
+            (b"a.ts".to_vec(), MODE_REGULAR, b"unchanged\n".to_vec()),
+            (b"vendor".to_vec(), MODE_SUBMODULE, gitlink.to_vec()),
+        ],
+    );
+    sync_index_to_commit(&repo, base_oid);
+    std::fs::write(dir.path().join("a.ts"), b"unchanged\n").expect("write a.ts unchanged");
+    // No `vendor` directory is ever created on disk: the base gitlink at
+    // `vendor` must be masked from the base side alone.
+    write_nested_checkout(&dir, "target");
+
+    let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let changes = diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree)
+        .expect("diff commit to worktree");
+
+    assert_eq!(
+        changes,
+        Vec::new(),
+        "a directory-kind worktree entry and a base gitlink at a built-in \
+         directory's own path must both be masked: {changes:?}"
+    );
+}
+
 #[test]
 fn worktree_over_ceiling_unchanged_file_is_not_reported() {
     let (dir, repo) = common::init_repo();
