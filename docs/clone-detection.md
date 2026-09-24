@@ -10,7 +10,9 @@ textual/regex line matcher.
 A candidate is any contiguous run of **two or more** sibling `IrNode`s the
 lowering marked as clone candidates, taken from one container (the exact
 containers this covers, and the field/parent-kind test each language uses
-to set the flag, are named per language under Lowering below).
+to set the flag, are named per language under Lowering below). A callable
+excluded fail-closed for damage (`docs/cc-rules.md`'s `IrCallable` section)
+contributes no clone candidate at all.
 
 Every contiguous sub-run of length ≥ 2 inside one of these containers is its
 own candidate — including the full container, which is simply the run of
