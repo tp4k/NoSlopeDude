@@ -335,6 +335,88 @@ fn test_hoisted_and_type_only_exemption_stays_jsts_only() {
     );
 }
 
+/// M0c-13 mutation-survivor row: `find_unreachable_after_return` locates
+/// the *first* unreachable-terminator statement via `.position()`; a
+/// `.position()` -> `.rposition()` mutant would instead find the *last* one
+/// among two, dropping the statements between them from the finding. A
+/// block with two terminators (`return 1; return 2; after();`) pins the
+/// difference: `.position()` flags from the second `return` onward
+/// (`start_line == 4`); `.rposition()` would flag only `after()`
+/// (`start_line == 5`).
+#[test]
+fn test_unreachable_after_return_starts_after_the_first_terminator() {
+    let source =
+        "class C {\n    void m() {\n        return 1;\n        return 2;\n        after();\n    }\n}\n";
+    let files = vec![parse_inline_java(source)];
+    let findings = rules::find_findings(&files);
+    let hits: Vec<_> = findings
+        .iter()
+        .filter(|f| f.rule_id == rules::JAVA_UNREACHABLE_AFTER_RETURN)
+        .collect();
+    assert_eq!(hits.len(), 1, "{findings:?}");
+    let hit = hits[0];
+    assert_eq!(
+        hit.start_line, 4,
+        "must flag from the second return onward, not just the trailing after(): {hit:?}"
+    );
+    assert_eq!(hit.end_line, 5, "{hit:?}");
+    assert_eq!(hit.flagged_lines, vec![4, 5], "{hit:?}");
+}
+
+/// M0c-13 mutation-survivor row: `is_unreachable_container`'s `is_root &&
+/// language == LanguageFamily::JsTs` disjunct is JS/TS-only by design (Java
+/// has no bare top-level statements as a *container* the way JS/TS's
+/// `program` node is); a mutant dropping the `&& language == JsTs` conjunct
+/// would treat Java's top level as a container too. Java's grammar does
+/// allow bare top-level statements syntactically (confirmed against
+/// `tree-sitter-java-orchard`'s `grammar.js`), so this fixture lowers with
+/// no damage; the real code produces no finding, since Java's top level is
+/// not itself a `{ }` block and `is_root` alone doesn't fire for it.
+#[test]
+fn test_java_top_level_terminator_is_not_an_unreachable_container() {
+    let source = "return 1;\nfoo();\n";
+    let file = parse_inline_java(source);
+    let ir_file = lower::lower_file(&file);
+    assert!(
+        ir_file.damage.is_empty(),
+        "the fixture must lower with no damage: {:?}",
+        ir_file.damage
+    );
+    let findings = rules::find_findings(std::slice::from_ref(&file));
+    assert!(
+        findings.is_empty(),
+        "Java's top level must not be treated as an unreachable container: {findings:?}"
+    );
+}
+
+/// M0c-13 mutation-survivor row: `always_returns`'s block-kind branch takes
+/// the *last* direct statement (`.last()`); a `.last()` -> `.first()`
+/// mutant would instead look at the *first* one. Existing coverage
+/// (`test_break_terminated_consequence_does_not_trigger_redundant_else`)
+/// only fixtures a single-statement branch, where `.first()` and `.last()`
+/// agree. This fixtures a multi-statement consequence (`work(); return
+/// x;`) where they disagree, and also verifies `docs/wasteful-rules.md`'s
+/// "last direct statement" claim against that shape.
+#[test]
+fn test_redundant_else_fires_on_a_multi_statement_returning_branch() {
+    let source = "class C {\n    void m(int x) {\n        if (x > 0) {\n            work();\n            return x;\n        } else {\n            other();\n        }\n    }\n}\n";
+    let files = vec![parse_inline_java(source)];
+    let findings = rules::find_findings(&files);
+    let hits: Vec<_> = findings
+        .iter()
+        .filter(|f| f.rule_id == rules::JAVA_REDUNDANT_ELSE_AFTER_RETURN)
+        .collect();
+    assert_eq!(
+        hits.len(),
+        1,
+        "a multi-statement returning branch must still make its else redundant: {findings:?}"
+    );
+    let hit = hits[0];
+    assert_eq!(hit.start_line, 6, "{hit:?}");
+    assert_eq!(hit.end_line, 8, "{hit:?}");
+    assert_eq!(hit.flagged_lines, vec![7], "{hit:?}");
+}
+
 #[test]
 fn test_clean_fixture_produces_no_findings() {
     let files = parsed_files(&[
