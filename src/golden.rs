@@ -471,6 +471,34 @@ pub(crate) fn build_digest(report: &mut Value) -> Result<(Value, usize)> {
 mod tests {
     use super::*;
 
+    /// L23 drift check (`HASH_VERSION_MIRROR`'s own doc comment names this
+    /// test): computes `body_blake3(b"")`'s expected value independently,
+    /// via a bare `blake3::Hasher` mirroring `hashing.rs`'s documented
+    /// framing (version byte, then each slice as an 8-byte LE length plus
+    /// its bytes, `BODY_FAMILY_PREFIX` first) under `HASH_VERSION_MIRROR`
+    /// -- never through `hashing::Digest`, which is the code path
+    /// `body_blake3` itself runs and so could never expose a drift between
+    /// `HASH_VERSION_MIRROR` and the real `HASH_VERSION`. A future bump of
+    /// `HASH_VERSION` without a matching bump of `HASH_VERSION_MIRROR`
+    /// fails this test.
+    #[test]
+    fn test_body_blake3_of_empty_input_matches_hash_version_mirror() {
+        let body: &[u8] = b"";
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&[HASH_VERSION_MIRROR]);
+        let prefix = BODY_FAMILY_PREFIX.as_bytes();
+        hasher.update(&(prefix.len() as u64).to_le_bytes());
+        hasher.update(prefix);
+        hasher.update(&(body.len() as u64).to_le_bytes());
+        hasher.update(body);
+        let output_bytes = hasher.finalize();
+        let mut leading = [0u8; 16];
+        leading.copy_from_slice(&output_bytes.as_bytes()[..16]);
+        let expected = format!("blake3:{:032x}", u128::from_le_bytes(leading));
+
+        assert_eq!(body_blake3(body), expected);
+    }
+
     fn location_with_excerpt(relative_path: &str) -> serde_json::Value {
         json!({
             "relative_path": relative_path,
