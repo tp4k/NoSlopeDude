@@ -730,6 +730,110 @@ fn worktree_special_files_reported_by_kind_never_opened() {
     );
 }
 
+/// Row 1: `WorktreeSnapshot::read` returns `Ok(None)` for a Regular entry
+/// (classified at enumeration time) swapped to a FIFO before the read
+/// happens (D25's re-check). `worktree_blob_oid`'s `None` arm must not treat
+/// that the same as an over-ceiling file and fall through to
+/// `Oid::hash_file`, which would `open(2)` the FIFO and block.
+#[test]
+#[cfg(unix)]
+fn worktree_diff_entry_swapped_to_fifo_after_snapshot_fails_promptly() {
+    let (dir, repo) = common::init_repo();
+    let base_oid = common::commit_entries(
+        &repo,
+        &[(b"src/a.ts".to_vec(), MODE_REGULAR, b"before\n".to_vec())],
+    );
+    sync_index_to_commit(&repo, base_oid);
+    std::fs::create_dir_all(dir.path().join("src")).expect("create src dir");
+    std::fs::write(dir.path().join("src/a.ts"), b"before\n").expect("write src/a.ts");
+
+    let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let entry = worktree
+        .entries
+        .iter()
+        .find(|entry| entry.path.as_bytes() == b"src/a.ts")
+        .expect("src/a.ts entry present");
+    assert_eq!(
+        entry.kind,
+        EntryKind::Regular,
+        "classified before the swap, at enumeration time"
+    );
+
+    std::fs::remove_file(dir.path().join("src/a.ts")).expect("remove src/a.ts before the swap");
+    let status = Command::new("/usr/bin/mkfifo")
+        .arg(dir.path().join("src/a.ts"))
+        .status()
+        .expect("spawn mkfifo for the swapped src/a.ts");
+    assert!(status.success(), "mkfifo src/a.ts must succeed");
+
+    let result = with_timeout(
+        "diff_commit_to_worktree over a Regular entry swapped to a FIFO after the snapshot",
+        move || diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree),
+    );
+
+    let err =
+        result.expect_err("a Regular entry swapped to a FIFO after the snapshot must fail closed");
+    assert_eq!(err.code(), nsd::git::CODE_SNAPSHOT_UNAVAILABLE);
+}
+
+/// Row 3 (D27): a base tree entry at `path` can itself be a directory (mode
+/// `040000`) rather than a file, when the worktree's Special file replaces a
+/// whole tracked subtree. `old_side_entry` must not hand that tree mode to
+/// `entry_kind_from_raw_mode` (which rejects it, failing the whole diff with
+/// NSD-G101); it has no old-side *file* to mask against, so the Special path
+/// is reported as newly Added, with the base's own file entries listed
+/// separately as Deleted.
+#[test]
+#[cfg(unix)]
+fn worktree_special_file_replacing_base_directory_is_added() {
+    let (dir, repo) = common::init_repo();
+    let base_oid = common::commit_entries(
+        &repo,
+        &[(
+            b"src/gen/a.ts".to_vec(),
+            MODE_REGULAR,
+            b"generated\n".to_vec(),
+        )],
+    );
+    sync_index_to_commit(&repo, base_oid);
+    std::fs::create_dir_all(dir.path().join("src")).expect("create src dir");
+    // `src/gen` is intentionally never created as a directory: the base's
+    // own `src/gen/a.ts` therefore has no on-disk file at all (an on-disk
+    // deletion), and `src/gen` itself is a FIFO where the base tree instead
+    // has a directory entry.
+    let status = Command::new("/usr/bin/mkfifo")
+        .arg(dir.path().join("src/gen"))
+        .status()
+        .expect("spawn mkfifo for src/gen");
+    assert!(status.success(), "mkfifo src/gen must succeed");
+
+    let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let changes = with_timeout(
+        "diff_commit_to_worktree with a Special entry replacing a base directory",
+        move || diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree),
+    )
+    .expect("diff commit to worktree");
+
+    // Observed order: the final sort in `diff_commit_to_worktree` sorts by
+    // raw path bytes, and "src/gen" is a byte-prefix of "src/gen/a.ts", so
+    // the shorter path sorts first.
+    assert_eq!(
+        changes,
+        vec![
+            Change::Added {
+                path: RepoPath::from_bytes(b"src/gen".to_vec()),
+                kind: EntryKind::Special,
+            },
+            Change::Deleted {
+                path: RepoPath::from_bytes(b"src/gen/a.ts".to_vec()),
+                kind: EntryKind::Regular,
+            },
+        ],
+        "a base directory replaced on disk by a Special file must be Added{{Special}}, with \
+         the base's own file entries listed separately as Deleted, never NSD-G101: {changes:?}"
+    );
+}
+
 #[test]
 fn worktree_content_rename_detected() {
     let (dir, repo) = common::init_repo();
