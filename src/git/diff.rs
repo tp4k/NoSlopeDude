@@ -260,17 +260,23 @@ pub fn diff_commit_to_worktree(
             // `Special` entry is masked too, exactly like every other kind.
             continue;
         }
-        // WS-4 r2 row 2: a leaf (Regular/Executable/Symlink/Submodule) whose
-        // own path equals an already-masked directory's name must never be
-        // given its own index entry either — libgit2's index insertion
-        // removes every masked row nested under the same name on insert
-        // (`index_insert(replace=1)` -> `has_file_name`), which would
-        // un-mask those base rows and turn them into a spurious Deleted
-        // delta and rename source. `NestedCheckout`/`Special` are excluded
-        // here: `NestedCheckout` is always caught by the `is_dir` check
-        // above when its own path is the built-in directory, and `Special`
-        // has its own base-directory-replacement handling below.
-        if !matches!(entry.kind, EntryKind::NestedCheckout | EntryKind::Special)
+        // WS-4 r2 row 2 / r3 row 1: a leaf (Regular/Executable/Symlink/
+        // Submodule/Special) whose own path equals an already-masked
+        // directory's name (a proper ancestor, or a masked gitlink's own
+        // path) must never be given its own index entry either — libgit2's
+        // index insertion removes every masked row nested under the same
+        // name on insert (`index_insert(replace=1)` -> `has_file_name`),
+        // which would un-mask those base rows and turn them into a spurious
+        // Deleted delta and rename source. Only `NestedCheckout` is excluded
+        // here: it is always caught by the `is_dir` check above when its own
+        // path is the built-in directory, since a `NestedCheckout` path is
+        // never itself the masked gitlink's path (a gitlink is `Submodule`,
+        // not `NestedCheckout`). `Special` is included here so a FIFO/socket
+        // replacing a masked base gitlink at its own path is masked too,
+        // instead of reaching the base-directory-replacement handling below,
+        // which would surface a spurious `Typechange` from the gitlink's own
+        // now-stale `old_side_entry` lookup.
+        if !matches!(entry.kind, EntryKind::NestedCheckout)
             && masked_dirs.contains(entry.path.as_bytes())
         {
             special_changes.push(Change::Added {
@@ -710,9 +716,10 @@ fn old_side_blob_oid(base_tree: Option<&Tree<'_>>, path_bytes: &[u8]) -> Option<
 /// it is skipped; every other kind (blob or gitlink) is a candidate.
 ///
 /// Returns every proper ancestor directory of a path this masked in (WS-4 r2
-/// row 2), so the caller can also mask a worktree leaf whose own path equals
-/// one of them, before that leaf's insertion into the same in-memory index
-/// un-masks these very rows.
+/// row 2), plus the masked path itself when it is a directory in Git's own
+/// model (a gitlink, WS-4 r3 row 1), so the caller can also mask a worktree
+/// leaf whose own path equals one of them, before that leaf's insertion into
+/// the same in-memory index un-masks these very rows.
 fn mask_builtin_base_entries(
     repo: &Repository,
     base_tree: &Tree<'_>,
@@ -733,6 +740,15 @@ fn mask_builtin_base_entries(
         if discovery::is_builtin_excluded(path, is_dir, builtins, &mut dir_verdicts) {
             insert_index_entry(index, path, *mode as u32, 0, *oid)?;
             masked_dirs.extend(ancestor_dirs(path.as_bytes()));
+            // WS-4 r3 row 1: a masked gitlink is itself a directory in
+            // Git's own model and has no ancestor of its own when it sits
+            // at the repository root, so it must also be its own member of
+            // `masked_dirs` — otherwise a worktree leaf at that exact path
+            // (e.g. a regular file or FIFO literally named `vendor`) is not
+            // caught by the caller's guard and un-masks this very row.
+            if is_dir {
+                masked_dirs.insert(path.as_bytes().to_vec());
+            }
         }
     }
     Ok(masked_dirs)
