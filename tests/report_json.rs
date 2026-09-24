@@ -453,6 +453,39 @@ fn test_top25_span_covers_the_whole_callable() {
          start_line: {:?}",
         report.top25
     );
+
+    // The `>=` loop above only proves end_line never precedes start_line, so
+    // it survives a mutant that adds a constant offset to end_line (e.g.
+    // `start_line + 1`) instead of using the real declaration span. These
+    // three exact pins, read by hand off the fixture files, catch that
+    // mutant directly.
+    let expected_spans = [
+        ("classify", "src/Sample.java", 2usize, 8usize),
+        ("orderSummary", "src/sample.js", 1usize, 12usize),
+        (
+            "unreachableDemo",
+            "src/\"><img onerror=1>.js",
+            1usize,
+            5usize,
+        ),
+    ];
+    for (name, relative_path, expected_start, expected_end) in expected_spans {
+        let callable = report
+            .top25
+            .iter()
+            .find(|c| c.name == name && c.location.relative_path == Path::new(relative_path))
+            .unwrap_or_else(|| {
+                panic!(
+                    "{name} in {relative_path} should be in top25: {:?}",
+                    report.top25
+                )
+            });
+        assert_eq!(
+            (callable.location.start_line, callable.location.end_line),
+            (expected_start, expected_end),
+            "{name} in {relative_path}: {callable:?}"
+        );
+    }
 }
 
 fn assert_bracket_exact(root: &Path, location: &report::SourceLocation) {
