@@ -141,7 +141,10 @@ pub fn discover(entries: &[Entry], scope: &CompiledScope) -> DiscoveryResult {
     // One directory-verdict memo per matcher (D19's ancestor walk), so a
     // directory shared by many sibling entries is matched at most once per
     // matcher per `discover` call, not once per entry (perf, triage row 7).
+    // A memo is valid only for the matcher it was filled against (D31), so
+    // `include` gets its own map rather than sharing `exclude`'s.
     let mut builtin_dir_verdicts: HashMap<&[u8], bool> = HashMap::new();
+    let mut include_dir_verdicts: HashMap<&[u8], bool> = HashMap::new();
     let mut exclude_dir_verdicts: HashMap<&[u8], bool> = HashMap::new();
 
     for entry in entries {
@@ -176,7 +179,7 @@ pub fn discover(entries: &[Entry], scope: &CompiledScope) -> DiscoveryResult {
             skipped.push(skip(entry, SkipReason::BuiltinExclusion));
             continue;
         }
-        if is_outside_include(&entry.path, &scope.include) {
+        if is_outside_include(&entry.path, &scope.include, &mut include_dir_verdicts) {
             skipped.push(skip(entry, SkipReason::OutsideInclude));
             continue;
         }
@@ -219,13 +222,18 @@ fn is_builtin_excluded<'e>(
 }
 
 /// Whether `path` falls outside `include` (D20's `outside_include`);
-/// `None` means every supported path is in scope.
-fn is_outside_include(path: &RepoPath, include: &Option<Override>) -> bool {
+/// `None` means every supported path is in scope. A `Some` matcher gets
+/// the same ancestor-directory walk as `exclude` (D31), so a
+/// directory-anchored `include: ["src/"]` covers files nested beneath it,
+/// not only entries whose own path matches directly.
+fn is_outside_include<'e>(
+    path: &'e RepoPath,
+    include: &Option<Override>,
+    dir_verdicts: &mut HashMap<&'e [u8], bool>,
+) -> bool {
     match include {
         None => false,
-        Some(matcher) => !matcher
-            .matched(path_for_matching(path.as_bytes()), false)
-            .is_whitelist(),
+        Some(matcher) => !matches_including_ancestors(matcher, path, dir_verdicts),
     }
 }
 
