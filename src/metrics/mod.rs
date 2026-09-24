@@ -266,11 +266,14 @@ fn find_ir_subtree(root: &IrNode, target: Span) -> Option<&IrNode> {
     Some(current)
 }
 
-/// A structurally-unreachable fallback for `find_ir_subtree` returning
-/// `None`: `build_ir` produces exactly one `IrNode` per tree-sitter node, in
-/// the same nested-span shape, so a callable body's own span always has a
-/// match. Kept only so a defect here degrades (D18) instead of panicking --
-/// same reasoning as `lower::fallback_node`'s own doc comment.
+/// Fallback for `find_ir_subtree` returning `None` -- no `IrNode` in the
+/// redacted tree matches a callable's body span. WS-6 round 4's fix to
+/// `cascade_exclusions` (excluding an entity contained in a bare damage
+/// span) closed the one known input shape that reached this branch; this
+/// crate's own suite and a 400-mutant fuzz run now hit it zero times, but
+/// unlike `lower::fallback_node`'s span, that is evidence, not a proof of
+/// unreachability. Kept so a future gap here degrades (D18) instead of
+/// panicking.
 fn fallback_ir_body(span: Span) -> IrNode {
     IrNode::empty(span)
 }
