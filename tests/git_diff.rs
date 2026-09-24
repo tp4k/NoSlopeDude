@@ -862,6 +862,45 @@ fn worktree_diff_leaf_replacing_nested_masked_builtin_dir_keeps_mask() {
     );
 }
 
+/// WS-4 r3 row 3: the built-in mask must also cover a worktree `Submodule`
+/// entry (a tracked gitlink whose directory exists on disk, without any
+/// nested checkout inside it) whose own path is the built-in directory, not
+/// only a `NestedCheckout` one, which
+/// `worktree_diff_masks_directory_kind_entry_at_builtin_dir` already covers.
+#[test]
+fn worktree_diff_masks_staged_submodule_at_builtin_dir() {
+    let (dir, repo) = common::init_repo();
+    let base_oid = common::commit_entries(
+        &repo,
+        &[
+            (b"a.ts".to_vec(), MODE_REGULAR, b"unchanged\n".to_vec()),
+            (b"vendor".to_vec(), MODE_SUBMODULE, [0xBBu8; 20].to_vec()),
+        ],
+    );
+    let second_oid = common::commit_entries(
+        &repo,
+        &[
+            (b"a.ts".to_vec(), MODE_REGULAR, b"unchanged\n".to_vec()),
+            (b"vendor".to_vec(), MODE_SUBMODULE, [0xCCu8; 20].to_vec()),
+        ],
+    );
+    sync_index_to_commit(&repo, second_oid);
+    std::fs::write(dir.path().join("a.ts"), b"unchanged\n").expect("write a.ts unchanged");
+    // No nested `.git` marker: this directory is a plain, empty directory —
+    // the index alone is what makes the worktree entry `Submodule`.
+    std::fs::create_dir_all(dir.path().join("vendor")).expect("create vendor directory");
+
+    let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let changes = diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree)
+        .expect("diff commit to worktree");
+
+    assert_eq!(
+        changes,
+        Vec::new(),
+        "a staged Submodule entry at a built-in directory's own path must be masked too: {changes:?}"
+    );
+}
+
 #[test]
 fn worktree_over_ceiling_unchanged_file_is_not_reported() {
     let (dir, repo) = common::init_repo();
