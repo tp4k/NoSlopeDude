@@ -60,14 +60,29 @@ fn test_version_constants_match_cargo_lock() {
 fn test_current_inputs_read_the_live_constants() {
     let current = MeasurementProfileInputs::current();
     assert_eq!(current.ir_version, nsd::ir::IR_VERSION);
-    assert_eq!(current.java_lowering_version, nsd::lower::JAVA_LOWERING_VERSION);
-    assert_eq!(current.jsts_lowering_version, nsd::lower::JSTS_LOWERING_VERSION);
+    assert_eq!(
+        current.java_lowering_version,
+        nsd::lower::JAVA_LOWERING_VERSION
+    );
+    assert_eq!(
+        current.jsts_lowering_version,
+        nsd::lower::JSTS_LOWERING_VERSION
+    );
     assert_eq!(current.rule_catalog, &nsd::rules::ALL_RULE_IDS);
     assert_eq!(current.min_clone_lines, nsd::model::DEFAULT_MIN_CLONE_LINES);
-    assert_eq!(current.tree_sitter_runtime_version, profile::TREE_SITTER_RUNTIME_VERSION);
+    assert_eq!(
+        current.tree_sitter_runtime_version,
+        profile::TREE_SITTER_RUNTIME_VERSION
+    );
     assert_eq!(current.java_grammar_version, profile::JAVA_GRAMMAR_VERSION);
-    assert_eq!(current.javascript_grammar_version, profile::JAVASCRIPT_GRAMMAR_VERSION);
-    assert_eq!(current.typescript_grammar_version, profile::TYPESCRIPT_GRAMMAR_VERSION);
+    assert_eq!(
+        current.javascript_grammar_version,
+        profile::JAVASCRIPT_GRAMMAR_VERSION
+    );
+    assert_eq!(
+        current.typescript_grammar_version,
+        profile::TYPESCRIPT_GRAMMAR_VERSION
+    );
 }
 
 #[test]
@@ -90,15 +105,27 @@ fn test_each_input_changes_the_fingerprint() {
 
     let mut changed = baseline;
     changed.ir_version += 1;
-    assert_ne!(profile::fingerprint(&changed), baseline_fingerprint, "ir_version");
+    assert_ne!(
+        profile::fingerprint(&changed),
+        baseline_fingerprint,
+        "ir_version"
+    );
 
     let mut changed = baseline;
     changed.java_lowering_version += 1;
-    assert_ne!(profile::fingerprint(&changed), baseline_fingerprint, "java_lowering_version");
+    assert_ne!(
+        profile::fingerprint(&changed),
+        baseline_fingerprint,
+        "java_lowering_version"
+    );
 
     let mut changed = baseline;
     changed.jsts_lowering_version += 1;
-    assert_ne!(profile::fingerprint(&changed), baseline_fingerprint, "jsts_lowering_version");
+    assert_ne!(
+        profile::fingerprint(&changed),
+        baseline_fingerprint,
+        "jsts_lowering_version"
+    );
 
     let mut changed = baseline;
     changed.tree_sitter_runtime_version = "0.27.1";
@@ -110,7 +137,11 @@ fn test_each_input_changes_the_fingerprint() {
 
     let mut changed = baseline;
     changed.java_grammar_version = "0.5.19";
-    assert_ne!(profile::fingerprint(&changed), baseline_fingerprint, "java_grammar_version");
+    assert_ne!(
+        profile::fingerprint(&changed),
+        baseline_fingerprint,
+        "java_grammar_version"
+    );
 
     let mut changed = baseline;
     changed.javascript_grammar_version = "0.25.1";
@@ -130,11 +161,19 @@ fn test_each_input_changes_the_fingerprint() {
 
     let mut changed = baseline;
     changed.rule_catalog = &nsd::rules::ALL_RULE_IDS[..nsd::rules::ALL_RULE_IDS.len() - 1];
-    assert_ne!(profile::fingerprint(&changed), baseline_fingerprint, "rule_catalog");
+    assert_ne!(
+        profile::fingerprint(&changed),
+        baseline_fingerprint,
+        "rule_catalog"
+    );
 
     let mut changed = baseline;
     changed.min_clone_lines += 1;
-    assert_ne!(profile::fingerprint(&changed), baseline_fingerprint, "min_clone_lines");
+    assert_ne!(
+        profile::fingerprint(&changed),
+        baseline_fingerprint,
+        "min_clone_lines"
+    );
 }
 
 /// The freeze itself: the default-configuration fingerprint is pinned
@@ -145,8 +184,7 @@ fn test_each_input_changes_the_fingerprint() {
 fn test_nsd_v1_fingerprint_is_frozen() {
     let fingerprint = profile::fingerprint(&MeasurementProfileInputs::current());
     assert_eq!(
-        fingerprint,
-        "blake3:00000000000000000000000000000000",
+        fingerprint, "blake3:90b27f53ddecccd4ac879652d4d9c4eb",
         "nsd-v1's frozen fingerprint moved — bump this literal deliberately, with a reason, \
          if the input that moved it is an intentional profile change"
     );
