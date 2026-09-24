@@ -19,15 +19,35 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use nsd::model::{ParseFailureReason, ScanSettings, DEFAULT_MIN_CLONE_LINES};
+use nsd::model::{LanguageFamily, ParseFailureReason, ScanSettings, DEFAULT_MIN_CLONE_LINES};
 use nsd::pipeline;
 
 const FIXTURE_ROOT_ENV_VAR: &str = "NSD_PERF_FIXTURE";
+
+/// The full Java corpus `discover` selects on the pinned perf fixture with
+/// `scripts/perf_scan.sh`'s settings (no `--include-tests`, default
+/// `min_clone_lines`) -- 4972, measured directly against
+/// `nsd::discover::discover`'s own `DiscoveredFile::language` field (not
+/// derived from the 55/4917 split, which counts parse outcomes, not
+/// discovery). Anchors the assertion below against a vacuous pass: without
+/// it, a mutated or misconfigured `LanguageFamily::from_extension` that
+/// stopped discovering `.java` files at all would still report zero Java
+/// `SyntaxError` failures.
+const EXPECTED_JAVA_DISCOVERED: usize = 4972;
 
 /// Expected TS `using`-declaration parse failures the perf fixture still
 /// carries after the Java grammar swap (M0c-10's decision 3: JS/TS grammars
 /// are unchanged, so this count is expected to *remain*, not clear).
 const EXPECTED_TS_USING_FAILURES: usize = 3;
+
+/// The exact set (not merely the count) of TS `using`-declaration parse
+/// failures, named in `docs/deferred-work.md`'s "58 parse failures" row,
+/// sorted.
+const EXPECTED_TS_USING_FAILURE_PATHS: [&str; 3] = [
+    "angular/packages/core/src/testability/testability.ts",
+    "angular/packages/forms/signals/src/api/types.ts",
+    "angular/packages/platform-browser/animations/async/src/async_animation_renderer.ts",
+];
 
 enum FixtureGate {
     Resolved(PathBuf),
@@ -67,12 +87,19 @@ fn is_ts(path: &Path) -> bool {
     )
 }
 
+/// One full-fixture scan's worth of gate data: the discovered-file count
+/// for the row-1 anchor (`EXPECTED_JAVA_DISCOVERED`) alongside every
+/// `SyntaxError`-reason parse failure, unfiltered.
+struct GateScan {
+    java_discovered: usize,
+    failures: Vec<PathBuf>,
+}
+
 /// Scans `fixture_root` (the perf fixture's parent directory, holding both
 /// `spring-framework/` and `angular/`) with the same settings
 /// `scripts/perf_scan.sh` uses (no `--include-tests`, default
-/// `min_clone_lines`), and returns every `SyntaxError`-reason parse
-/// failure, unfiltered.
-fn syntax_error_failures(fixture_root: &Path) -> Vec<PathBuf> {
+/// `min_clone_lines`).
+fn scan_fixture(fixture_root: &Path) -> GateScan {
     let output_dir = tempfile::tempdir().expect("output tempdir");
     let settings = ScanSettings {
         output: output_dir.path().to_path_buf(),
@@ -86,12 +113,22 @@ fn syntax_error_failures(fixture_root: &Path) -> Vec<PathBuf> {
         .to_string();
     let output = pipeline::run(&target_input, settings)
         .unwrap_or_else(|error| panic!("scanning the perf fixture: {error}"));
-    output
+    let java_discovered = output
+        .discover
+        .discovered
+        .iter()
+        .filter(|file| file.language == LanguageFamily::Java)
+        .count();
+    let failures = output
         .parse_failures
         .into_iter()
         .filter(|failure| failure.reason == ParseFailureReason::SyntaxError)
         .map(|failure| failure.relative_path)
-        .collect()
+        .collect();
+    GateScan {
+        java_discovered,
+        failures,
+    }
 }
 
 /// M0c-10's headline assertion: every Java syntax-error failure the perf
@@ -107,8 +144,18 @@ fn test_perf_fixture_java_varargs_failures_clear() {
             return;
         }
     };
-    let failures = syntax_error_failures(&fixture_root);
-    let java_failures: Vec<&PathBuf> = failures.iter().filter(|path| is_java(path)).collect();
+    let scan = scan_fixture(&fixture_root);
+    println!("java discovered files: {}", scan.java_discovered);
+    assert_eq!(
+        scan.java_discovered, EXPECTED_JAVA_DISCOVERED,
+        "expected the recorded full Java corpus ({EXPECTED_JAVA_DISCOVERED} files) to be \
+         discovered on the perf fixture, found {} -- a wrong or empty NSD_PERF_FIXTURE root, \
+         or a discovery regression, would otherwise pass the failure assertion below \
+         vacuously",
+        scan.java_discovered
+    );
+    let java_failures: Vec<&PathBuf> = scan.failures.iter().filter(|path| is_java(path)).collect();
+    println!("java syntax-error files: {}", java_failures.len());
     assert!(
         java_failures.is_empty(),
         "expected zero Java SyntaxError parse failures on the perf fixture after the \
@@ -129,8 +176,19 @@ fn test_perf_fixture_ts_using_failures_remain() {
             return;
         }
     };
-    let failures = syntax_error_failures(&fixture_root);
-    let ts_failures: Vec<&PathBuf> = failures.iter().filter(|path| is_ts(path)).collect();
+    let scan = scan_fixture(&fixture_root);
+    let mut ts_failures: Vec<String> = scan
+        .failures
+        .iter()
+        .filter(|path| is_ts(path))
+        .map(|path| {
+            path.to_str()
+                .expect("perf fixture paths are valid UTF-8")
+                .to_string()
+        })
+        .collect();
+    ts_failures.sort();
+    println!("js_ts syntax-error files: {}", ts_failures.len());
     assert_eq!(
         ts_failures.len(),
         EXPECTED_TS_USING_FAILURES,
@@ -138,6 +196,12 @@ fn test_perf_fixture_ts_using_failures_remain() {
          (the `using`-declaration gap; JS/TS grammars are unchanged by this swap), found \
          {}: {ts_failures:?}",
         ts_failures.len()
+    );
+    let ts_failure_strs: Vec<&str> = ts_failures.iter().map(String::as_str).collect();
+    assert_eq!(
+        ts_failure_strs, EXPECTED_TS_USING_FAILURE_PATHS,
+        "expected exactly the three angular `using`-declaration paths named in \
+         docs/deferred-work.md, found a different set: {ts_failures:?}"
     );
 }
 
