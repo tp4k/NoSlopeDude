@@ -94,7 +94,7 @@ fn test_identical_inputs_give_identical_fingerprints() {
 
 /// "changing the IR version, either lowering version, or any grammar
 /// version changes the measurement fingerprint" (`nsd-plan-final.md`, *Test
-/// and acceptance plan*), extended here to the two inputs the *Settled
+/// and acceptance plan*), extended here to the three inputs the *Settled
 /// decisions* / *Corrections applied* text adds on top of that list: the
 /// `tree-sitter` runtime version, the rule catalog, and
 /// `measurement.min_clone_lines` (`nsd-plan-implementation.md`).
