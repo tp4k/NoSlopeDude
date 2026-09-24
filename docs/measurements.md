@@ -152,3 +152,101 @@ exclusions combined).
 | 2026-09-23 (a370e3d, fusion's parent commit — control, cold-build warm-up run, discarded from the ceiling comparison above; block input operations not recorded) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 6.90s | 1779.59 MB | true | 7720 |
 | 2026-09-23 (a370e3d, fusion's parent commit — control rerun 1, warm, block input operations: 0) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 6.77s | 1778.98 MB | true | 7720 |
 | 2026-09-23 (a370e3d, fusion's parent commit — control rerun 2, warm, block input operations: 0) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 5.68s | 1777.41 MB | true | 7720 |
+| 2026-09-24 (M0c-10, `3dd9ae2` — control, `tree-sitter-java` 0.23.5, built in a separate scratch clone outside this tree so the swap's own Cargo.toml edit never touched this binary) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584349 | 4.52s | 1810.38 MB | true | 7662 |
+| 2026-09-24 (M0c-10, this branch — `tree-sitter-java-orchard` 0.5.18) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.24s | 1822.98 MB | true | 7662 |
+
+## M0c-10: the Java grammar swap's own measured effect
+
+Both rows immediately above scan the same already-fetched fixture root, at
+the same pins, one after the other in the same session: the control row was
+built with `cargo build --release` in a `git clone` of this worktree
+checked out to `3dd9ae2` (this branch's own base, one commit before the
+`Cargo.toml` edit) in a directory entirely outside this repository's tree,
+so the swap commit never touched the binary that produced it; the second
+row is this branch's own release build. Neither `skipped_files` count
+(7662, unchanged) reflects the parse-failure clearance below —
+`src/report/mod.rs::build_skipped_files` already filters
+`ParseFailureReason::SyntaxError` out of that list (a WS-6 salvage-era
+change: a syntax-error file is no longer a whole-file skip, only its
+touched callables are fail-closed excluded), so `report.json`'s
+`skipped_files` cannot answer "did the gate clear" either way — this is
+exactly why `tests/grammar_gate.rs` reads `PipelineOutput::parse_failures`
+directly instead. (The two much older `2026-09-18`/`2026-09-23` rows above
+read `7720`, i.e. `7662 + 58`, at this same pin because they predate the
+WS-6 change entirely: back then the 55 Java + 3 TS syntax-error files were
+still whole-file skips. That -58 is WS-6's own delta, already explained by
+`tests/neutrality.rs::DECLARED_DELTAS`'s comment on the malformed corpus,
+and unrelated to this swap.)
+
+**Parse-failure count** (`tests/grammar_gate.rs`, `NSD_PERF_FIXTURE` run,
+and independently cross-checked with a throwaway `cargo run --example`
+probe built against the `3dd9ae2` control clone reading the same
+`PipelineOutput::parse_failures` field): 55 Java `SyntaxError` failures
+under 0.23.5, all a `tree-sitter-java` misparse of a type-use annotation
+immediately before a varargs ellipsis (`Class<?> @Nullable ... cs` —
+`@Nullable`'s `.` lookalike inside `...` gets consumed as a
+`scoped_identifier`, producing an `ERROR` node under `formal_parameters`);
+**0 under orchard 0.5.18** — the gate clears. **3 TS `SyntaxError` failures
+remain unchanged** (a `tree-sitter-typescript` gap on a parameter literally
+named `using`; JS/TS grammars are untouched by this swap, confirmed below).
+
+**Corpus-wide score delta** (full-fixture scan, both binaries, this
+session; `overall`/`java`/`js_ts` blocks of `report.json`):
+
+| metric | before (0.23.5) | after (orchard) | delta |
+| --- | --- | --- | --- |
+| java `verbosity.scanned_lines` | 289,447 | 289,877 | +430 |
+| java `verbosity.flagged_lines` | 6,901 | 6,906 | +5 |
+| java `erosion` | 0.36215223499124904 | 0.3619381396927912 | -0.00021 |
+| findings total | 3,171 | 3,173 | +2 |
+| `JAVA-REDUNDANT-ELSE-AFTER-RETURN` | 2,062 | 2,064 | +2 |
+| `JAVA-EMPTY-CATCH` | 60 | 60 | 0 |
+| duplicate groups | 258 | 258 | 0 |
+| js\_ts `verbosity.scanned_lines` | 294,902 | 294,902 | 0 |
+| js\_ts `erosion` | 0.45137589185379046 | 0.45137589185379046 | 0 |
+
+The `js_ts` row being bit-for-bit identical on both sides is itself a
+neutrality proof: this swap changes nothing observable for JS/TS, as
+required (JS/TS grammar deps are untouched in `Cargo.toml`).
+
+**What the +430/+5/+2 java deltas are attributable to.** Not, contrary to
+this workstream's own planning brief, `modifier`/`visibility` node
+wrapping: a direct AST dump (`tree-sitter-java-orchard` 0.5.18, node-types
+and a real parse of `tests/fixtures/rules/broken/Broken.java`) shows
+`modifiers`'s former anonymous keyword children (`public`, `static`, ...)
+are now wrapped in a named `modifier`/`visibility` node, but that wrapper
+node always has exactly one child (the still-anonymous keyword token
+itself) — so `src/exec_lines.rs::is_executable_leaf`'s `child_count() == 0`
+leaf test never accepts it, on any line, in any file. Confirmed
+empirically, not just structurally: a corpus-wide before/after diff of
+every local golden baseline (`tests/golden/neutrality/{clean,malformed}
+.report.json`) and a per-file isolated-scan sweep of every non-malformed
+Java fixture found exactly one file with any scanned-line delta at all
+(`tests/fixtures/ir/JavaVarargsAnnotation.java`, `+1`), and zero files
+where a `modifier`/`visibility` node changed anything.
+
+The actual mechanism, on both the local fixture and the real Spring files
+above, is M0c-10's own headline effect: **fail-closed damage exclusion
+lifting**. Before the swap, any callable whose `formal_parameters`
+contained the varargs-annotation `ERROR` node was entirely excluded from
+measurement (`src/lower/mod.rs`'s `cascade_exclusions`/`prune_damage`,
+fail-closed at the callable boundary) — contributing zero `sloc`/`cc`/
+`mass`/scanned-lines/findings, no matter how large its real body. After the
+swap the same callable parses clean and is fully measured. Two real
+callables, hand-checked by copying each verbatim into an isolated
+single-file scan (scratch fixtures scanned with both release binaries;
+paths below are the pinned public fixture's own, not privacy-sensitive):
+
+| callable | before (0.23.5) | after (orchard) |
+| --- | --- | --- |
+| `org.springframework.util.ClassUtils#getMethodIfAvailable` (`Class<?> clazz, String methodName, @Nullable Class<?> @Nullable ... paramTypes`) | excluded: file `incomplete=true`, callable absent from every measurement (`sloc`/`cc`/`mass` = 0/unmeasured) | `cc=3`, `sloc=8`, `mass=8.485281374238571` |
+| `org.springframework.util.ReflectionUtils#findMethod` (`Class<?> clazz, String name, Class<?> @Nullable ... paramTypes`) | excluded: file `incomplete=true`, callable absent from every measurement | `cc=7`, `sloc=11`, `mass=23.2163735324878` |
+
+Both methods contain an `if`/`while`/`for` (hence a nonzero post-swap `cc`)
+that was previously invisible to every rule and score entirely — which is
+also where the `+2 JAVA-REDUNDANT-ELSE-AFTER-RETURN` findings and `+5`
+Java `flagged_lines` come from: newly-measured callables across the other
+53 files carrying the same pattern, not a changed rule or a changed
+verdict on already-measured code. No callable that was already measured
+before the swap changed its `sloc`/`cc`/`mass` value; the entire delta is
+newly-measured code that was previously invisible.
