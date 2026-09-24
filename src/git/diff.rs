@@ -6,6 +6,7 @@
 //! attribution" (`nsd-plan-final.md` *M1-M2*).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use git2::{
@@ -443,7 +444,11 @@ pub fn diff_commit_to_worktree(
 /// Phase 1's real object id for a Regular/Executable worktree entry, with no
 /// ODB write: `Oid::hash_object` on its bytes when they read within
 /// `SOURCE_CEILING_BYTES`, or, over that ceiling, row 1's raw fd hash of the
-/// real on-disk bytes (no filters, D5; no ODB write, D2).
+/// real on-disk bytes (no filters, D5; no ODB write, D2). `worktree.read`'s
+/// `None` also covers a Regular entry swapped for a non-regular file after
+/// enumeration (D25's re-check): the `fs::symlink_metadata` re-check here
+/// tells the two cases apart, so a swapped-in FIFO/socket is never handed to
+/// `Oid::hash_file`, which would `open(2)` it and block.
 fn worktree_blob_oid(
     repo: &Repository,
     workdir: &Path,
@@ -455,6 +460,18 @@ fn worktree_blob_oid(
             .map_err(|err| wrap_git_error("cannot hash worktree file content", &err)),
         None => {
             let fs_path = repo_path_to_fs(workdir, entry.path.as_bytes());
+            match fs::symlink_metadata(&fs_path) {
+                Ok(metadata) if metadata.is_file() => {}
+                _ => {
+                    return Err(GitError::new(
+                        CODE_SNAPSHOT_UNAVAILABLE,
+                        format!(
+                            "worktree entry {} is no longer a regular file",
+                            entry.path.render()
+                        ),
+                    ))
+                }
+            }
             Oid::hash_file(ObjectType::Blob, &fs_path)
                 .map_err(|err| wrap_git_error("cannot hash an over-ceiling worktree file", &err))
         }
