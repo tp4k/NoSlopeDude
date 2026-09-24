@@ -11,11 +11,9 @@ Every agent that finishes a piece of work updates its rows here in the same
 round; see *How to update this file* at the bottom and the matching rule in
 [`AGENTS.md`](../AGENTS.md).
 
-Last updated: 2026-09-24, from `main@a6b5037`,
-`feat/m1-snapshots@f23804f`, and `feat/m0c-grammar@e38be0a` (WS-1..WS-4
-landed; WS-5's own six commits — `beee958`, `4659fb9`, `b21b22e`,
-`f712d29`, `1a7e074`, and this round's doc-fix commit (its SHA is in the
-round-2 implementer report) — are on top; not yet merged to `main`).
+Last updated: 2026-09-24, from `main@a6b5037`, `feat/m1-snapshots@f23804f`,
+and `feat/m0c-grammar@1a665df` (M0c's WS-1..WS-5 and their follow-up fixes
+landed; not yet merged to `main`).
 
 ## Legend
 
