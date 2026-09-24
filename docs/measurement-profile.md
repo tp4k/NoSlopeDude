@@ -79,7 +79,25 @@ digest silently keep comparing against stale data. When that happens:
    updates it — the same way `IR_VERSION`'s and the lowering versions' own
    doc comments already name the change that bumped them.
 
-`test_version_constants_match_cargo_lock` is the standing guard against the
-one silent-drift path this freeze cannot otherwise catch: a `Cargo.lock`
-version bump for one of the three grammars or the `tree-sitter` runtime
-that nobody remembers to mirror into `src/profile.rs`.
+`test_version_constants_match_cargo_lock` is the standing guard against
+dependency-version drift: a `Cargo.lock` version bump for one of the three
+grammars or the `tree-sitter` runtime that nobody remembers to mirror into
+`src/profile.rs`.
+
+## Not covered
+
+Three other kinds of change leave the fingerprint unchanged, and nothing
+fails:
+
+(a) A lowering or IR behaviour change made without bumping the matching
+    `IR_VERSION` / `*_LOWERING_VERSION` constant — the author must bump it
+    by hand; the fingerprint has no way to detect that the behaviour
+    behind an unchanged version number moved.
+
+(b) A rule-logic change that keeps its id unchanged in
+    `rules::ALL_RULE_IDS` — only the ids are hashed (`src/profile.rs:103-105`),
+    not the rules' own logic, so this has no fingerprint input today.
+
+(c) A clone-algorithm change, e.g. `src/clones/mod.rs`'s
+    `MIN_CANDIDATE_STATEMENTS` or its token normalization — this, too, has
+    no fingerprint input today.
