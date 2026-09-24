@@ -1,25 +1,16 @@
 # Duplicate-block detection (clones)
 
-Clone detection is grammar-derived, like CC and SLOC (see `docs/cc-rules.md`):
-candidate blocks come from the pinned Tree-sitter parse trees, never from a
+Clone detection is IR-derived, like CC and SLOC (see `docs/cc-rules.md`):
+candidate blocks come from the IR's own clone-candidate flag (D15, named
+under Lowering below), computed once by each lowering, never from a
 textual/regex line matcher.
 
 ## Candidate blocks (D15)
 
-A candidate is any contiguous run of **two or more** sibling statements taken
-from one of these containers:
-
-- **Java** — the statements of a `block`, of a `constructor_body`, or of a
-  `switch_block_statement_group` (its `switch_label` children are not
-  statements and are excluded). `switch_block` itself is not a candidate
-  container: its own children are `switch_block_statement_group`/`switch_rule`
-  nodes, not statements. `program` is not a candidate container either: in
-  Java it holds type declarations, not statements.
-- **JS/TS** — the statements of a `statement_block`, the top-level statements
-  of a `program` (a file's own module-level statements, outside any
-  function), or the `body` field of a `switch_case`/`switch_default` (there
-  is no wrapper node around a switch arm's statements, so the `body` field is
-  read directly).
+A candidate is any contiguous run of **two or more** sibling `IrNode`s the
+lowering marked as clone candidates, taken from one container (the exact
+containers this covers, and the field/parent-kind test each language uses
+to set the flag, are named per language under Lowering below).
 
 Every contiguous sub-run of length ≥ 2 inside one of these containers is its
 own candidate — including the full container, which is simply the run of
@@ -33,22 +24,28 @@ A candidate only qualifies if its D11 source-line count (below) is at least
 
 A candidate's size is measured with the same per-line rule used for a
 callable's SLOC: the count of distinct 1-based source lines, within the
-candidate's statements, that contain at least one leaf token belonging to a
-named, non-comment node. A bare `break;`/`continue;`/`return;` (no expression)
-still counts as its own line, per the same documented exception as D11.
-Measuring duplicate size this way — not a raw `end_line - start_line + 1`
-span — means two occurrences that differ only in comments or blank lines
-still measure to the same size and stay comparable.
+candidate's statements, that contain at least one leaf `IrNode`
+(`IrNode::executable == true`). A bare `break`/`continue`/`return` (no
+expression) still counts as its own line, per the same documented exception
+as D11. Measuring duplicate size this way — not a raw
+`end_line - start_line + 1` span — means two occurrences that differ only
+in comments or blank lines still measure to the same size and stay
+comparable.
 
 ## Normalization and grouping (D14)
 
-Each candidate is reduced to a normalized token stream: the language family's
-prefix (`java` or `js_ts` — see D20), followed by one token per leaf
-descendant of its statements, in order:
+Each candidate is reduced to a normalized token stream from its `IrNode`
+subtree: the language family's prefix (`java` or `js_ts` — see D20),
+followed by one token per leaf `IrNode` (a node with no children), in
+order:
 
-- An **anonymous** leaf (punctuation, keywords) contributes its `node.kind()`.
-- A **named** leaf (identifiers, literals) contributes its exact source text.
-- Comment nodes are skipped entirely.
+- A **named** leaf (`IrNode::is_named`) contributes its exact source text.
+- An **anonymous** leaf contributes its own source text with internal
+  whitespace collapsed — the identity transform for the overwhelming
+  majority of anonymous tokens (whitespace-free ones, where this reproduces
+  `node.kind()` exactly), with one grammar-specific exception named under
+  Lowering below.
+- A comment leaf (`IrNode::is_comment`) is skipped entirely.
 
 Candidates are grouped by a **128-bit fingerprint of that exact normalized
 token stream**, not by the stream text itself: the byte content the
@@ -97,7 +94,8 @@ by `redundant_lines` descending, ties broken by the first occurrence's
 `redundant_occurrences(group)` returns exactly the slice of occurrences that
 `redundant_lines` was summed over (every location but the canonically first)
 — the single shared definition of "beyond first occurrence" that later
-stages (verbosity scoring) reuse rather than recomputing.
+stages (verbosity scoring, `docs/wasteful-rules.md`) reuse rather than
+recomputing.
 
 ### Worked example
 
@@ -117,3 +115,31 @@ same scan, it outranks the two-occurrence, 12-line group above:
 `(5 - 1) * 10 = 40 > 12`, even though each of its individual occurrences is
 smaller — redundant lines are summed over every occurrence past the first,
 not compared per-occurrence.
+
+## Lowering: Java (`tree-sitter-java-orchard` 0.5.18)
+
+`src/lower/java.rs::is_clone_statement` sets `IrNode::is_clone_statement`
+for a direct named, non-comment child of a `block` (a method/constructor
+body, or a nested `{ … }` scope), of a `constructor_body`, or of a
+`switch_block_statement_group` (its own `switch_label` children are
+excluded — they are not statements). `switch_block` itself is not a
+candidate container: its own children are `switch_block_statement_group`/
+`switch_rule` nodes, not statements. `program` (Java's file-level node) is
+not a candidate container either: in Java it holds type declarations, not
+statements.
+
+## Lowering: JS/TS
+
+`src/lower/jsts.rs::is_clone_statement` sets `IrNode::is_clone_statement`
+for a direct named, non-comment child of a `statement_block`, of the
+top-level `program` (a file's own module-level statements, outside any
+function), or the `body`-field child of a `switch_case`/`switch_default`
+(there is no wrapper node around a switch arm's statements, so the `body`
+field is read directly).
+
+The one grammar-specific exception the normalization section above names:
+`tree-sitter-javascript` 0.25.0 aliases `seq('static', /\s+/, 'get', /\s*\n/)`
+to the single anonymous kind `"static get"` (`grammar.js:1252`), whose own
+source text carries whatever internal whitespace and trailing newline the
+author wrote — collapsed before hashing so two copies differing only in
+that token's internal formatting still fingerprint identically.
