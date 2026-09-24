@@ -303,6 +303,38 @@ fn test_empty_catch_is_detected_through_ir_catch_body_membership() {
     );
 }
 
+/// L54: the false-negative sibling of the fixture above -- a genuinely
+/// *empty* catch nested inside another catch's (non-empty) body must still
+/// fire, once, at its own lines, and the enclosing non-empty catch must not.
+#[test]
+fn test_empty_catch_nested_inside_another_catch_body_still_fires() {
+    let java_source = "class C {\n    void m() {\n        try {\n            doOuter();\n        }\n        catch (Exception e) {\n            try {\n                doInner();\n            }\n            catch (Exception e2) {\n            }\n        }\n    }\n}\n";
+    let files = vec![parse_inline_java(java_source)];
+    let findings = rules::find_findings(&files);
+    let catch_findings: Vec<_> = findings
+        .iter()
+        .filter(|f| f.rule_id == rules::JAVA_EMPTY_CATCH)
+        .collect();
+    assert_eq!(catch_findings.len(), 1, "{catch_findings:?}");
+    let hit = catch_findings[0];
+    assert_eq!(hit.start_line, 10, "{hit:?}");
+    assert_eq!(hit.end_line, 11, "{hit:?}");
+    assert_eq!(hit.flagged_lines, vec![10], "{hit:?}");
+
+    let js_source = "function m() {\n    try {\n        doOuter();\n    }\n    catch (e) {\n        try {\n            doInner();\n        }\n        catch (e2) {\n        }\n    }\n}\n";
+    let jsts_files = vec![parse_inline_jsts(js_source)];
+    let jsts_findings = rules::find_findings(&jsts_files);
+    let jsts_catch_findings: Vec<_> = jsts_findings
+        .iter()
+        .filter(|f| f.rule_id == rules::JSTS_EMPTY_CATCH)
+        .collect();
+    assert_eq!(jsts_catch_findings.len(), 1, "{jsts_catch_findings:?}");
+    let jsts_hit = jsts_catch_findings[0];
+    assert_eq!(jsts_hit.start_line, 9, "{jsts_hit:?}");
+    assert_eq!(jsts_hit.end_line, 10, "{jsts_hit:?}");
+    assert_eq!(jsts_hit.flagged_lines, vec![9], "{jsts_hit:?}");
+}
+
 /// D22 IR retarget: the documented JS/TS-only exemption
 /// (`IrNode::is_hoisted_or_type_only`) survives the retarget and does not
 /// leak into Java — this is a plain regression test for the retarget, not
