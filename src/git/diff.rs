@@ -5,15 +5,17 @@
 //! primitive for parse errors, findings, suppressions, callables and clone
 //! attribution" (`nsd-plan-final.md` *M1-M2*).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use git2::{
     Delta, Diff, DiffDelta, DiffFile, DiffFindOptions, DiffLineType, DiffOptions, ErrorCode, Index,
-    IndexEntry, IndexTime, ObjectType, Oid, Patch, Repository, Tree,
+    IndexEntry, IndexTime, ObjectType, Oid, Patch, Repository, Tree, TreeWalkMode, TreeWalkResult,
 };
+use ignore::overrides::Override;
 
+use super::discovery;
 use super::path::RepoPath;
 use super::snapshot::{
     conflicted_index_error, repo_path_to_fs, Entry, EntryKind, WorktreeSnapshot,
@@ -162,6 +164,17 @@ pub fn diff_commit_to_index(repo: &Repository, base: Option<Oid>) -> Result<Vec<
 /// A `Special` entry (D27) is masked to its base tree entry, if any, and
 /// reported directly by kind; its content is never read.
 ///
+/// D28 (user decision (b)): before any of that, every built-in-excluded
+/// path (`discovery::is_builtin_excluded`'s D19 predicate: `target/`,
+/// `node_modules/`, a nested `.git`, …) is masked out on both sides, for
+/// every entry kind and extension. A worktree entry there is left out of
+/// the in-memory index and never read; a base-tree entry there is copied
+/// into the in-memory index with its own mode and oid via `Tree::walk` (no
+/// blob read). No `Change` ever names a built-in path, such a path is never
+/// a rename source or target, and an over-ceiling entry there never reaches
+/// Phase 2's mempack write — bounding Phase 2's RSS and the reconciliation's
+/// K to the non-excluded worktree.
+///
 /// Two phases keep the ODB write (and its `git_odb__freshen` readdir/utime
 /// cost, perf HIGH) proportional to what rename detection actually needs,
 /// not to the worktree's total size:
@@ -209,6 +222,17 @@ pub fn diff_commit_to_worktree(
     // Phase 1: every entry's real object id, with no ODB write anywhere.
     let mut index =
         Index::new().map_err(|err| wrap_git_error("cannot create an in-memory index", &err))?;
+
+    // D28: mask every built-in-excluded base-tree entry into the index
+    // before looking at a single worktree entry, so such a path produces no
+    // delta regardless of the worktree's own state there (deleted, edited,
+    // or unrelated to the base entirely).
+    let builtins = discovery::builtin_override();
+    if let Some(tree) = base_tree.as_ref() {
+        mask_builtin_base_entries(tree, &builtins, &mut index)?;
+    }
+    let mut builtin_dir_verdicts: HashMap<&[u8], bool> = HashMap::new();
+
     let mut nested_checkouts = Vec::new();
     // D27: a `Special` path is never given its own content in the in-memory
     // index; masked to the base tree's entry (if any) instead, so libgit2's
@@ -217,6 +241,13 @@ pub fn diff_commit_to_worktree(
     let mut special_changes = Vec::new();
 
     for entry in &worktree.entries {
+        if discovery::is_builtin_excluded(&entry.path, &builtins, &mut builtin_dir_verdicts) {
+            // D28: never read, never given its own index entry — the base
+            // side, if any, was already masked in above. Checked ahead of
+            // `entry.kind` so a built-in-excluded `NestedCheckout` or
+            // `Special` entry is masked too, exactly like every other kind.
+            continue;
+        }
         match entry.kind {
             EntryKind::NestedCheckout => {
                 // D24/D7: surfaced by kind, never added to the libgit2 diff.
@@ -635,6 +666,46 @@ fn old_side_blob_oid(base_tree: Option<&Tree<'_>>, path_bytes: &[u8]) -> Option<
         .get_path(&bytes_to_path(path_bytes))
         .ok()
         .map(|entry| entry.id())
+}
+
+/// D28: copies every base-tree entry whose path matches the D19 built-in
+/// exclusion predicate into `index`, with its own mode and object id and
+/// nothing else — no blob is ever read, since `Tree::walk` reports a leaf
+/// entry's mode and oid straight from the tree object itself. Runs once,
+/// before Phase 1 looks at a single worktree entry, so a built-in path
+/// produces no delta on either side regardless of what the worktree holds
+/// there: deleted, edited, or with no worktree entry related to it at all.
+/// A directory entry (`ObjectType::Tree`) is never itself an index row, so
+/// it is skipped; every other kind (blob or gitlink) is a candidate.
+fn mask_builtin_base_entries(
+    base_tree: &Tree<'_>,
+    builtins: &Override,
+    index: &mut Index,
+) -> Result<(), GitError> {
+    let mut leaves: Vec<(RepoPath, i32, Oid)> = Vec::new();
+    base_tree
+        .walk(TreeWalkMode::PreOrder, |root, tree_entry| {
+            if tree_entry.kind() == Some(ObjectType::Tree) {
+                return TreeWalkResult::Ok;
+            }
+            let mut path_bytes = root.as_bytes().to_vec();
+            path_bytes.extend_from_slice(tree_entry.name_bytes());
+            leaves.push((
+                RepoPath::from_bytes(path_bytes),
+                tree_entry.filemode(),
+                tree_entry.id(),
+            ));
+            TreeWalkResult::Ok
+        })
+        .map_err(|err| wrap_git_error("cannot walk the base tree for built-in exclusions", &err))?;
+
+    let mut dir_verdicts: HashMap<&[u8], bool> = HashMap::new();
+    for (path, mode, oid) in &leaves {
+        if discovery::is_builtin_excluded(path, builtins, &mut dir_verdicts) {
+            insert_index_entry(index, path, *mode as u32, 0, *oid)?;
+        }
+    }
+    Ok(())
 }
 
 /// The old-side entry (kind, raw mode, object id) at `path_bytes` in

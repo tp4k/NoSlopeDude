@@ -212,8 +212,10 @@ fn skip(entry: &Entry, reason: SkipReason) -> SkippedEntry {
 
 /// Whether `path` is a built-in exclusion (D19): any `.git` path
 /// component, or a match (direct or via an ancestor directory) against the
-/// dependency/build, generated or WebJar glob lists.
-fn is_builtin_excluded<'e>(
+/// dependency/build, generated or WebJar glob lists. D29: exposed to
+/// `diff.rs` so WS-4's worktree-diff mask (D28) and `discover` share one
+/// predicate, never a second copy of the glob lists.
+pub(super) fn is_builtin_excluded<'e>(
     path: &'e RepoPath,
     builtins: &Override,
     dir_verdicts: &mut HashMap<&'e [u8], bool>,
@@ -331,8 +333,9 @@ fn extension_of(path: &[u8]) -> Option<&str> {
 /// dependency/build, generated and WebJar glob lists above. These are
 /// fixed, already-tested glob strings (verbatim copies of a working
 /// module's own constants), so a compile failure here can only be an
-/// internal defect caught by this module's own tests.
-fn builtin_override() -> Override {
+/// internal defect caught by this module's own tests. D29: exposed to
+/// `diff.rs`, same reason as `is_builtin_excluded` above.
+pub(super) fn builtin_override() -> Override {
     let mut builder = OverrideBuilder::new(Path::new(GLOB_VALIDATION_ROOT));
     let globs = DEPENDENCY_BUILD_GLOBS
         .iter()
