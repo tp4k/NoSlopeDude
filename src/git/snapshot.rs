@@ -300,6 +300,19 @@ fn worktree_dir(repo: &Repository) -> Result<PathBuf, GitError> {
         .to_path_buf())
 }
 
+/// D4/D32: the "required snapshot unavailable" error for a Git index
+/// holding unresolved merge conflicts (stage 1-3 entries) — shared by
+/// `read_index_entries` here and `diff::diff_commit_to_index`, so both call
+/// sites report the exact same message from one function, never a second
+/// copied string.
+pub(super) fn conflicted_index_error() -> GitError {
+    GitError::new(
+        CODE_SNAPSHOT_UNAVAILABLE,
+        "the Git index has unresolved merge conflicts (stage 1-3 entries); resolve them \
+         before a snapshot can be taken",
+    )
+}
+
 /// The index's bare rows (path, kind, gitlink/blob oid), with no ODB read:
 /// no blob header and no inflate (perf MEDIUM: `WorktreeSnapshot::open`
 /// re-derives every size from disk, so reading a header for it here would
@@ -310,11 +323,7 @@ fn read_index_entries(repo: &Repository) -> Result<Vec<(RepoPath, EntryKind, Oid
         .index()
         .map_err(|err| wrap_git_error("cannot read the Git index", &err))?;
     if index.has_conflicts() {
-        return Err(GitError::new(
-            CODE_SNAPSHOT_UNAVAILABLE,
-            "the Git index has unresolved merge conflicts (stage 1-3 entries); resolve them \
-             before a snapshot can be taken",
-        ));
+        return Err(conflicted_index_error());
     }
 
     let mut entries = Vec::with_capacity(index.len());

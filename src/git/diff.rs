@@ -15,7 +15,10 @@ use git2::{
 };
 
 use super::path::RepoPath;
-use super::snapshot::{repo_path_to_fs, Entry, EntryKind, WorktreeSnapshot, SOURCE_CEILING_BYTES};
+use super::snapshot::{
+    conflicted_index_error, repo_path_to_fs, Entry, EntryKind, WorktreeSnapshot,
+    SOURCE_CEILING_BYTES,
+};
 use super::{wrap_git_error, GitError, CODE_SNAPSHOT_UNAVAILABLE};
 
 const MODE_REGULAR: u32 = 0o100644;
@@ -124,12 +127,17 @@ pub fn diff_commit_to_commit(
 }
 
 /// Diffs a base commit (`None` for an unborn `HEAD`'s empty tree, D2) to the
-/// repository's on-disk Git index (`--staged`).
+/// repository's on-disk Git index (`--staged`). D32: rejects a conflicted
+/// index (stage 1-3 entries) up front with the D4 `NSD-G101` error, before
+/// any diff is computed.
 pub fn diff_commit_to_index(repo: &Repository, base: Option<Oid>) -> Result<Vec<Change>, GitError> {
     let base_tree = resolve_tree(repo, base)?;
     let index = repo
         .index()
         .map_err(|err| wrap_git_error("cannot read the Git index", &err))?;
+    if index.has_conflicts() {
+        return Err(conflicted_index_error());
+    }
 
     let mut opts = diff_options();
     let mut diff = repo
