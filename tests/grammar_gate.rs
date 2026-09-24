@@ -80,13 +80,6 @@ fn is_java(path: &Path) -> bool {
     path.extension().and_then(|ext| ext.to_str()) == Some("java")
 }
 
-fn is_ts(path: &Path) -> bool {
-    matches!(
-        path.extension().and_then(|ext| ext.to_str()),
-        Some("ts") | Some("tsx")
-    )
-}
-
 /// One full-fixture scan's worth of gate data: the discovered-file count
 /// for the row-1 anchor (`EXPECTED_JAVA_DISCOVERED`) alongside every
 /// `SyntaxError`-reason parse failure, unfiltered.
@@ -180,7 +173,7 @@ fn test_perf_fixture_ts_using_failures_remain() {
     let mut ts_failures: Vec<String> = scan
         .failures
         .iter()
-        .filter(|path| is_ts(path))
+        .filter(|path| !is_java(path))
         .map(|path| {
             path.to_str()
                 .expect("perf fixture paths are valid UTF-8")
