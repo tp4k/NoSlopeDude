@@ -136,10 +136,9 @@ fn decision_sequence(root: &IrNode) -> Vec<DecisionKind> {
 
 #[test]
 fn test_version_constants_are_exported() {
-    // M0c-9: both bumped 2 -> 3 (removing `DamageKind::JavaVarargsAnnotation`
-    // and switching `IrBlock::kind` to a `'static` literal both change what
-    // the Java lowering carries); `JSTS_LOWERING_VERSION` is untouched by
-    // the grammar swap.
+    // M0c-9: `IR_VERSION`/`JAVA_LOWERING_VERSION` bumped 2 -> 3 (removing
+    // `DamageKind::JavaVarargsAnnotation` changes what the Java lowering
+    // carries); `JSTS_LOWERING_VERSION` is untouched by the grammar swap.
     assert_eq!(nsd::ir::IR_VERSION, 3);
     assert_eq!(lower::JAVA_LOWERING_VERSION, 3);
     assert_eq!(lower::JSTS_LOWERING_VERSION, 2);

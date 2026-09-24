@@ -32,9 +32,7 @@ use crate::parse::ParsedFile;
 /// whenever the Java lowering's classification changes what an `IrNode`
 /// carries for a Java file. Bumped 2 -> 3 for M0c-9: orchard's grammar
 /// changes what a Java `ERROR`/`MISSING` node classifies as (`ir::DamageKind`'s
-/// `JavaVarargsAnnotation` variant is gone) and what block-kind literal a
-/// Java `IrBlock` carries (`java::is_block_kind`'s own `'static` literal, not
-/// `node.kind()`).
+/// `JavaVarargsAnnotation` variant is gone).
 pub const JAVA_LOWERING_VERSION: u32 = 3;
 
 /// The JS/TS counterpart of `JAVA_LOWERING_VERSION`.
