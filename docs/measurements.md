@@ -234,9 +234,12 @@ measurement (`src/lower/mod.rs`'s `cascade_exclusions`/`prune_damage`,
 fail-closed at the callable boundary) — contributing zero `sloc`/`cc`/
 `mass`/scanned-lines/findings, no matter how large its real body. After the
 swap the same callable parses clean and is fully measured. Three real
-callables, hand-checked by copying each verbatim into an isolated
-single-file scan (scratch fixtures scanned with both release binaries;
-paths below are the pinned public fixture's own, not privacy-sensitive):
+callables, hand-checked (paths below are the pinned public fixture's own,
+not privacy-sensitive): `getMethodIfAvailable` and `findMethod` by copying
+each verbatim into an isolated single-file scan (scratch fixtures scanned
+with both release binaries); `readCode`'s `cc`/`sloc`/`mass` read from the
+`top25` entry of both binaries' full-fixture `report.json` instead, since
+it was already measured pre-swap and needs no isolation to observe:
 
 | callable | before (0.23.5) | after (orchard) |
 | --- | --- | --- |
