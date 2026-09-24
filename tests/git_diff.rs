@@ -753,6 +753,81 @@ fn worktree_diff_tolerates_non_utf8_base_directory() {
     );
 }
 
+/// WS-4 r3 row 1: a worktree *leaf* (Regular) whose own path equals a masked
+/// base **gitlink**'s own path must not un-mask that gitlink. Pre-fix,
+/// `masked_dirs` held only *proper* ancestors of a masked path, so a masked
+/// gitlink at `vendor` — which has no ancestor of its own — was absent from
+/// it, and inserting the leaf's own index entry replaced the gitlink's
+/// masked row, producing `Typechange{vendor, Submodule -> Regular}`.
+#[test]
+fn worktree_diff_leaf_at_masked_base_gitlink_keeps_mask() {
+    let (dir, repo) = common::init_repo();
+    let gitlink = [0xBBu8; 20];
+    let base_oid = common::commit_entries(
+        &repo,
+        &[
+            (b"a.ts".to_vec(), MODE_REGULAR, b"unchanged\n".to_vec()),
+            (b"vendor".to_vec(), MODE_SUBMODULE, gitlink.to_vec()),
+        ],
+    );
+    sync_index_to_commit(&repo, base_oid);
+    std::fs::write(dir.path().join("a.ts"), b"unchanged\n").expect("write a.ts unchanged");
+    // No `vendor` directory on disk at all: `vendor` itself is a regular
+    // file, replacing the masked base gitlink at the very same path.
+    std::fs::write(dir.path().join("vendor"), b"x\n").expect("write leaf vendor file");
+
+    let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let changes = diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree)
+        .expect("diff commit to worktree");
+
+    assert_eq!(
+        changes,
+        vec![Change::Added {
+            path: RepoPath::from_bytes(b"vendor".to_vec()),
+            kind: EntryKind::Regular,
+        }],
+        "a leaf replacing a masked base gitlink at its own path must never \
+         un-mask it or surface a Typechange: {changes:?}"
+    );
+}
+
+/// FIFO variant of `worktree_diff_leaf_at_masked_base_gitlink_keeps_mask`: a
+/// `Special` worktree entry at the same path as a masked base gitlink.
+#[test]
+#[cfg(unix)]
+fn worktree_diff_special_leaf_at_masked_base_gitlink_keeps_mask() {
+    let (dir, repo) = common::init_repo();
+    let gitlink = [0xBBu8; 20];
+    let base_oid = common::commit_entries(
+        &repo,
+        &[
+            (b"a.ts".to_vec(), MODE_REGULAR, b"unchanged\n".to_vec()),
+            (b"vendor".to_vec(), MODE_SUBMODULE, gitlink.to_vec()),
+        ],
+    );
+    sync_index_to_commit(&repo, base_oid);
+    std::fs::write(dir.path().join("a.ts"), b"unchanged\n").expect("write a.ts unchanged");
+    let status = Command::new("/usr/bin/mkfifo")
+        .arg(dir.path().join("vendor"))
+        .status()
+        .expect("spawn mkfifo for vendor");
+    assert!(status.success(), "mkfifo vendor must succeed");
+
+    let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let changes = diff::diff_commit_to_worktree(&repo, Some(base_oid), &worktree)
+        .expect("diff commit to worktree");
+
+    assert_eq!(
+        changes,
+        vec![Change::Added {
+            path: RepoPath::from_bytes(b"vendor".to_vec()),
+            kind: EntryKind::Special,
+        }],
+        "a FIFO replacing a masked base gitlink at its own path must never \
+         un-mask it or surface a Typechange: {changes:?}"
+    );
+}
+
 #[test]
 fn worktree_over_ceiling_unchanged_file_is_not_reported() {
     let (dir, repo) = common::init_repo();
