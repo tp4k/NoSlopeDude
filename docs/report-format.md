@@ -114,8 +114,8 @@ skip are told apart in one merged list.
 real `[start_line, end_line]` region — the callable's whole declaration
 and body, not just its first line — and `excerpt` fully brackets it, read
 back off disk, the same as every finding's and every duplicate-group
-location's span. A single-line callable (an empty-body arrow function
-declared and closed on one line) still has `start_line == end_line`, same
+location's span. A single-line callable (a one-line arrow function, e.g.
+an expression-bodied `(b) => b`) still has `start_line == end_line`, same
 as any other one-line region.
 
 ## `report.html` sections

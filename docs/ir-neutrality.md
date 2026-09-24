@@ -405,9 +405,12 @@ grepped for every changed key name to confirm only three keys ever
 appear: `end_line`, `excerpt`, `link` — 66 additions paired with 66
 deletions, i.e. 22 of the corpus's 25 top-25 entries, three fields each).
 The three entries that did **not** move are single-line callables whose
-`end_line` already equalled `start_line` before this change (an
-empty-body callable declared and closed on one line has nothing to
-widen). Every moved entry:
+`end_line` already equalled `start_line` before this change: one-line
+expression-bodied arrows (`<anonymous>@1` and `<anonymous>@4` in
+`metrics/__tests__/NestedExpressionCallable.js`, `inner` in
+`metrics/__tests__/NestedCallable.js`, e.g. `(b) => (b > 0 ? b : -b)`)
+declared and closed on the line they start on, so there is nothing to
+widen. Every moved entry:
 
 | callable | file | start_line | end_line before | end_line after |
 | --- | --- | --- | --- | --- |
