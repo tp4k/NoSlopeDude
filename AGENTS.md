@@ -8,19 +8,58 @@ order, configuration details, and acceptance checks. The final plan wins
 on conflicts. Both include the approved final-review decisions; do not reopen
 settled choices without new evidence or a user request.
 
+Then read [docs/implementation-status.md](docs/implementation-status.md) — the
+living record of which plan steps are already done, on which branch, and on
+what evidence. It tells you where to start and what is blocked; the plans tell
+you what the step means. Never infer "not started" from the plans alone.
+
+## Recording progress
+
+Every agent updates its own rows in
+[docs/implementation-status.md](docs/implementation-status.md) as part of the
+round that does the work — not in a later pass, not "at the end of the
+milestone". The rules are in that file's *How to update this file* section;
+the ones that are non-negotiable:
+
+- Mark `[x]` only with a named check in this repository that passes, and cite
+  the commit SHA plus the test, script, or document that proves it. Code that
+  exists without a passing check is `[~]`.
+- Never mark a row `[x]` on a red or unrun check, and never on a missing
+  fixture or archive — that is `[!]`, with what is missing spelled out.
+- Touch only the rows your workstream owns. Disagreement with someone else's
+  row goes in your report, not into their row.
+- Add a new row for new scope rather than renumbering; run reports cite these
+  IDs.
+- Deferred work goes to [docs/deferred-work.md](docs/deferred-work.md), which
+  tracks consciously postponed items. The status file tracks plan steps only.
+
+A workstream is not finished until its status rows are accurate.
+
 ## Starting state and import
 
-This repository starts with plans and agent instructions only. Implementation
-has not started. Begin with M0a / implementation step 1.
+The engine was imported from `agent_slope` in M0a; that import is complete and
+is recorded in [README.md](README.md). Current position — see the status file
+for the per-step detail and evidence:
 
-- Import selectively from `~/pet/agent_slope` at commit
-  `912ec7a1ca2b9e5dd1ffa976a51f98d7d00d6704`, using `git archive` and the
-  allowlist in the implementation plan.
-- Preserve this repository's plans and instructions. Do not reinitialize or
-  replace its Git history. Keep the source repository as a read-only archive.
+- **M0a: done.** Import, `nsd` rename, D11 consolidation, versioned BLAKE3,
+  golden digest.
+- **M0b: done except its private-archive leg.** IR, both lowerings, all
+  analyzers retargeted, salvage, and the measurement-neutrality gate on the
+  suite fixtures. The `java-fixture-01` strict byte-identity leg is *pending*
+  on the private archive, and it blocks M0c.
+- **M0c, M3–M7: not started.** M1–M2 is partly done on a separate branch.
+- `main` still holds only the handoff commit; no implementation is merged.
+
+The import constraints still bind anything that touches imported material or
+reaches back into the archive:
+
+- `~/pet/agent_slope` at `912ec7a1ca2b9e5dd1ffa976a51f98d7d00d6704` is a
+  read-only archive. Do not modify it; do not reinitialize or replace this
+  repository's Git history. Any further selective import uses `git archive`
+  and the allowlist in the implementation plan.
 - Keep the two root plan files authoritative; link to them instead of
   creating a divergent `docs/plan.md` copy.
-- Do not import archived reports, private source, draft plans, build outputs,
+- Never import archived reports, private source, draft plans, build outputs,
   or unrelated untracked files. Preserve existing user changes.
 
 ## Implementation boundaries

@@ -1,0 +1,186 @@
+# Implementation status (living document)
+
+This file tracks **which plan steps are actually done, where, and on what
+evidence**. It is the single status surface for the work described in
+[`nsd-plan-final.md`](../nsd-plan-final.md) (authoritative) and
+[`nsd-plan-implementation.md`](../nsd-plan-implementation.md) (execution
+detail). It does not restate either plan — every row links back to the step it
+tracks by the plan's own numbering.
+
+Every agent that finishes a piece of work updates its rows here in the same
+round; see *How to update this file* at the bottom and the matching rule in
+[`AGENTS.md`](../AGENTS.md).
+
+Last updated: 2026-09-24, from `feat/m0a-import@24eb128` and
+`feat/m1-snapshots@f23804f`.
+
+## Legend
+
+| Mark | Meaning |
+|---|---|
+| `[x]` | Done: landed on the named branch, with a named check that passes |
+| `[~]` | In progress: part of the step has landed, the rest is named in *Evidence* |
+| `[!]` | Blocked or pending: implemented as far as possible, gated on something outside the repository |
+| `[ ]` | Not started |
+
+A row is only `[x]` when a test, script or recorded measurement in this
+repository proves it. "The code exists" is `[~]`, not `[x]`.
+
+## Branch map
+
+| Branch / worktree | HEAD | Holds |
+|---|---|---|
+| `main` (`~/pet/nsd`) | `1bea9f8` | Handoff only: both plans, `AGENTS.md`, `CLAUDE.md`. **No implementation.** |
+| `feat/m0a-import` (`~/pet/nsd-m0a-import`) | `24eb128`, 93 commits ahead of `main` | M0a complete, M0b complete except its private-archive leg |
+| `feat/m1-snapshots` (`~/pet/nsd-m1-snapshots`) | `f23804f`, branched from `c5267c0` | M1–M2 snapshots, config, diff, rename detection, Git-backed discovery |
+
+Neither feature branch is merged to `main`, and they have diverged:
+`feat/m1-snapshots` forked at `c5267c0` (mid-M0b, right after the cc/SLOC IR
+retarget) and is **missing 44 M0b commits** — the clone and rules retargets,
+all of WS-6's salvage work, and the `ir_isolation`/`salvage` suites. It must
+take those commits before its own M1 rows can be called green against the
+current M0b baseline.
+
+Test state on `feat/m0a-import@24eb128`: `cargo test` is green, 173 passed /
+0 failed / 1 ignored across 17 suites (local Homebrew toolchain; MSRV 1.90 is
+declared, not exercised — A4).
+
+## M0a — Port and consolidate
+
+Plan: `nsd-plan-final.md` *M0a — Port and consolidate*, steps 1–3.
+
+| ID | Step | Status | Branch | Evidence |
+|---|---|---|---|---|
+| M0a-1 | Selective `git archive` import from `agent_slope@912ec7a`, rename crate/bin/CLI/docs to `nsd`, record provenance, keep root plans authoritative | `[x]` | `feat/m0a-import` | `37829cb`, `dfff3e5`, `06b5ef5`; `tests/cli.rs::test_binary_name_is_nsd`, `tests/report_html.rs` `<title>`/`<h1>` pin (`6bc362f`) |
+| M0a-2 | Consolidate the three D11 executable-line implementations into one shared function | `[x]` | `feat/m0a-import` | `be3a586` → `src/exec_lines.rs`; unit tests `57ada8b`; ledger row closed `67a6f51` |
+| M0a-3 | Replace `DefaultHasher` with versioned BLAKE3 before anything persists a fingerprint | `[x]` | `feat/m0a-import` | `5d4a79f`, `2c49e7b` (`src/hashing.rs`, `RunFingerprint` rewritten, SipHash streams dropped); unit tests `78b3506` |
+| M0a-4 | Golden digest (A1) for `java-fixture-01`, numbers-and-hashes only, no private excerpts or paths | `[x]` | `feat/m0a-import` | `a92d5f2`, `f1bfc1b`, `5a9ac01`; `tests/golden_digest.rs`, `docs/golden-digest.md`; privacy test widened `1e60aa6`, `60ed9e1` |
+| M0a-5 | Declare `rust-version = "1.90"` (A4) | `[x]` | `feat/m0a-import` | `Cargo.toml:5` |
+
+Not a plan step, recorded for accuracy: `src/golden.rs` works around a
+`serde_json` float-rounding bug via raw-text recovery (`5e0f3d1`, guarded by
+`MAX_RELATIVE_CORRECTION`, `49e6597`).
+
+## M0b — IR, on the existing grammars
+
+Plan: `nsd-plan-final.md` *M0b — IR, on the existing grammars*, steps 4–8.
+Grammars deliberately unchanged here: `tree-sitter` 0.25.10,
+`tree-sitter-java` 0.23.5, `tree-sitter-javascript` 0.25.0,
+`tree-sitter-typescript` 0.23.2.
+
+| ID | Step | Status | Branch | Evidence |
+|---|---|---|---|---|
+| M0b-4 | Prototype clone lowering before freezing IR shape; `normalized_statement_tokens` from the IR must reproduce today's clone groups exactly | `[~]` | `feat/m0a-import` | Reproduction is proven — `tests/clones.rs::test_ir_backed_groups_match_the_pre_ir_groups_on_every_fixture` (`edbf309`), plus `test_statement_children_come_from_ir_block_membership` and `test_fingerprint_is_stable_across_two_runs_of_the_ir_path`. `[~]` because it was proven *after* the IR shape landed (`671060e` → `0401481`), not by a prototype ahead of it; the exact-group requirement itself is met on every suite fixture, and on `java-fixture-01` only through the pending leg in M0b-8 |
+| M0b-5 | Define `src/ir/`; Java and JS/TS lowerings in `src/lower/` as plain functions over tree-sitter trees, both emitting typed damage spans | `[x]` | `feat/m0a-import` | `c48fa70` (red), `671060e` (green), built per file in the pipeline `7d132ef`; six remaining IR capabilities `9400a23`/`5038473`; hardening `91475eb` (iterative `Drop`), `6ab7c44` (`Span` → u32), `e332181`; `tests/ir_lowering.rs`, `tests/ir_parity.rs` |
+| M0b-6 | Retarget `cc`, D11/SLOC, clones and the six rules onto the IR | `[x]` | `feat/m0a-import` | cc/SLOC `c5267c0`; D8/D10/block classification `a839679`; clones `0401481`; six rules + verbosity `9e3e7dd`. No analyzer names a grammar node kind: `tests/ir_isolation.rs::test_no_analyzer_names_a_grammar_node_kind`, with its own positive control (`f92c33c`) |
+| M0b-7 | Error-span salvage and the `SkipReason` split, IR-level and language-agnostic | `[x]` | `feat/m0a-import` | `aacca37` (salvage per callable instead of whole-file drop), redesigned as one coherent pass `35508d9`, bare-damage-span ancestors `75ec24d`; `tests/salvage.rs` (14 tests incl. the quadratic-blowup guard, `5bf9c34`); `SkipReason` at `src/model.rs:77` |
+| M0b-8a | Measurement-neutrality gate on the ten suites' fixtures: byte-identical `report.json`, pre-IR vs IR, same fixed checkout and identical settings | `[x]` | `feat/m0a-import` | `tests/neutrality.rs` + `scripts/neutrality_gate.sh` (`4ee26c2`, `2424019`, `502a358`); clean/malformed corpus partition `b2290ea`/`1ccfeac`; baselines recaptured `08e95ae`, `687a86b`, `8af5134`; documented in `docs/ir-neutrality.md` |
+| M0b-8b | Declared-delta exception: salvage and the `SkipReason` split change malformed fixtures only, asserted explicitly, unaffected measurements identical | `[x]` | `feat/m0a-import` | `bbdf429`, `f5655ad`, `4ec3d94` (`/skipped_files` delta tightened to an exact length); `docs/ir-neutrality.md` *Declared deltas* |
+| M0b-8c | Strict leg: byte-identical against the archived full `report.json` for `java-fixture-01@c6671504…`, run locally from the checkout path that report records | `[!]` | `feat/m0a-import` | **Pending, gated on the private archive.** Harness is complete and fails visibly when asked to: `docs/ir-neutrality.md` *The `java-fixture-01` strict leg*, `test_java_fixture_01_strict_leg_is_reported_pending_when_the_archive_is_absent`, and opt-in `NSD_REQUIRE_ARCHIVE_VERIFIED=1` (`2112ee6`). **This is the gate that blocks M0c** — do not start the grammar swap until it is run and recorded |
+
+## M0c — Grammar swap
+
+Plan: `nsd-plan-final.md` *M0c — Grammar swap, now a one-lowering change*,
+steps 9–12. **Not started.** Blocked on M0b-8c.
+
+| ID | Step | Status | Branch | Evidence |
+|---|---|---|---|---|
+| M0c-9 | Swap to `tree-sitter-java-orchard` 0.5.18, bump `tree-sitter` to 0.27.0 | `[ ]` | — | `Cargo.toml` still pins `tree-sitter` 0.25.10 / `tree-sitter-java` 0.23.5 |
+| M0c-10 | Quantify the re-baseline: re-run `scripts/perf_scan.sh` on the pinned Spring+Angular fixture, record parse-failure movement (55 Java → 0 required, 3 TS `using` remain) and the Java SLOC/mass/erosion delta, **explained** on ≥2 hand-checked callables | `[ ]` | — | Gate: stop M0 without freezing if the 55 do not clear |
+| M0c-11 | Re-baseline fixture expectations; update the three `docs/*.md` contracts to describe IR kinds, not grammar node names | `[ ]` | — | — |
+| M0c-12 | Freeze `nsd-v1`: fingerprint over IR version, both lowering versions, three grammar versions, `tree-sitter` runtime version, rule catalog, effective clone configuration incl. `min_clone_lines` | `[ ]` | — | — |
+| M0c-13 | Clear the cheap ledger rows named in the plan: `erosion` returning `-0.0`, `BTreeSet<usize>` → sorted `Vec`, the `rposition` and `always_returns` survivors, the `LanguageFamily::JsTs` guard at `src/rules/mod.rs:339`, `tests/report_html.rs`'s `#L1-L1` anchor, and `Callable::end_line` | `[ ]` | — | All still open in [`deferred-work.md`](deferred-work.md). `end_line` **must not** be cleared before M0b-8c passes — it widens Top-25 spans and would fail that gate by design |
+
+## M1–M2 — Snapshots, diffs, identity
+
+Plan: `nsd-plan-final.md` *M1–M2*, plus `nsd-plan-implementation.md`
+*Implementation sequence* step 3. All work below is on `feat/m1-snapshots`,
+which still needs the 44 M0b commits listed in *Branch map*; its rows are
+green against its own fork point, not against current M0b.
+
+| ID | Deliverable | Status | Branch | Evidence |
+|---|---|---|---|---|
+| M1-1 | `git2`-backed commit, index and worktree snapshots over repository-relative UTF-8 bytes; `--staged` reads the index, never the dirty worktree | `[x]` | `feat/m1-snapshots` | `a17822b`, `1126f1e` (lazy bounded reads, ODB-header sizing), `fb30bf0`; `tests/git_snapshots.rs`, `b9d0da4` |
+| M1-2 | Git-backed discovery from trees/indexes, independent of candidate `.gitignore`; worktree mode overlays tracked changes and eligible untracked files under base policy | `[x]` | `feat/m1-snapshots` | `28023f4` (red), `e938134` (green); `tests/git_discovery.rs`; immutable-exclusion glob compile failure fails closed `2c19e31` |
+| M1-3 | Merge-base resolution with an actionable shallow-clone error (`NSD-G101`) | `[x]` | `feat/m1-snapshots` | `src/git/mergebase.rs` (`a17822b`); `134c2d2` asserts the `NSD-G101` prefix and a non-vacuous version needle; `fbedfa2` keeps the git code through `ConfigError::from_git` |
+| M1-4 | Centralize line mapping as one shared primitive for parse errors, findings, suppressions, callables and clone attribution | `[~]` | `feat/m1-snapshots` | Primitive landed with the central diff (`2bce3f5`), full line-map coverage `22eba67`. `[~]` until the five consumers exist — findings, suppressions and clone attribution are M3–M5 |
+| M1-5 | Handle additions, deletions, modifications, renames, symlinks, submodules, invalid UTF-8 and large files deterministically | `[x]` | `feat/m1-snapshots` | `2bce3f5`; over-ceiling worktree entries hashed not emptied `e8bc84e`, typechange kept as one delta `f23804f`, non-UTF-8 similarity header parsed as bytes `e247638`, modes read from tree/index entries `8fb8457`, symlink/gitlink coverage `58f0110`/`22eba67` |
+| M1-6 | Rename detection: libgit2, fixed 50% similarity, configured threshold asserted plus one clear rename and one clear non-rename (A6) | `[x]` | `feat/m1-snapshots` | `1b2b199` (per-delta similarity), `ee1cfee`, `f3bea70` (exact rename = full similarity), `dfe73cc` (`max_size` capped at the ceiling), `b968aaf`/`2820c9c` (ignores `diff.renames`/`diff.renamelimit`) |
+| M1-7 | Replace `<anonymous>@<line>` with a line-independent callable identity | `[ ]` | — | Nothing on either branch |
+| M1-8 | Report mapped parser gaps and coverage explicitly; ratios use *analyzed* executable lines and carry completeness metadata | `[ ]` | — | Related: M0b-7's salvage removed the per-file `SyntaxError` provenance; restoring it is a [`deferred-work.md`](deferred-work.md) row explicitly deferred to this milestone |
+| M2-1 | Strict repository-root `nsd.yml` parsing, all `C102` cases, incl. `measurement.min_clone_lines` | `[x]` | `feat/m1-snapshots` | `44eb0fc` (red), `c1728cc` (green), blank/null include `a7c9b5c`, blank/comment-only globs `b7d00ef`; `tests/config.rs`; deps `serde_yaml_ng` 0.10, `git2` 0.21 |
+| M2-2 | Base-policy trust: trusted `--config` replaces repository policy; candidate config validated through `C101` but cannot affect its own check | `[ ]` | — | — |
+| M2-3 | Callable matching across snapshots | `[ ]` | — | Prerequisite for E101/E102 in M3 |
+| M2-4 | Deterministic snapshot IDs | `[ ]` | — | No `snapshot_id` in `src/git/` |
+
+## M3–M5 — Policy, suppressions, clones, cache
+
+Plan: `nsd-plan-final.md` *M3–M5*. **Not started** — no branch holds any of it.
+
+| ID | Deliverable | Status |
+|---|---|---|
+| M3-1 | E101/E102 after callable matching; deletions and improvements never fail | `[ ]` |
+| M3-2 | V101 after diff-aware finding matching, so line-only movement is not a regression | `[ ]` |
+| M3-3 | S101/S102: new suppressions via diff mapping and underlying finding matches; moving a finding with its unchanged directive is not new, transferring it to an unmatched finding raises `S101` (A9); invalid/unused raise `S102` | `[ ]` |
+| M4-1 | Required clone-index coverage for unchanged included files while `V102` is enabled: size, encoding, capability failures raise `A102` (A10); mapped legacy parse-damage tolerance preserved | `[ ]` |
+| M4-2 | V102 comparison: candidate changed occurrences vs unchanged base content and other candidate changes; exclude the replaced base version of a modified path; maximal-group reduction before emission; move mapping first (A3) | `[ ]` |
+| M5-1 | Per-blob cache under `$GIT_COMMON_DIR/nsd/cache/v1`, keyed blob OID + language/grammar + measurement fingerprint; atomic writes; corruption or version mismatch is a recomputable miss | `[ ]` |
+| M5-2 | Best-effort LRU eviction, 1 GiB / 30-day default | `[ ]` |
+| M5-3 | Exit aggregation over all twelve diagnostics | `[ ]` |
+
+## M6–M7 — Output, CI hardening
+
+Plan: `nsd-plan-final.md` *M6–M7*. **Not started.** The imported engine
+already emits a scan-scoped `report.json` and standalone HTML, but none of it
+has been brought to the v1 canonical contract (`schema_version: 1`,
+`result_scope`, snapshot IDs, per-reason skip counts, check scope).
+
+| ID | Deliverable | Status |
+|---|---|---|
+| M6-1 | Canonical report `schema_version: 1` distinguishing `scan` and `check` scopes | `[ ]` |
+| M6-2 | Canonical JSON: complete entity/diagnostic set, stable ordering, fixed numeric serialization, repo-relative paths, snapshot IDs, configuration and measurement fingerprints, per-reason skip counts, no timestamps/absolute paths/excerpts | `[ ]` |
+| M6-3 | Terminal (50) and agent (30) renderers with deterministic omitted counts; exit status always reflects the complete result | `[ ]` |
+| M6-4 | Scan HTML standalone, each excerpt capped at 20 lines / 4 KiB with an explicit truncation marker | `[~]` — HTML exists (`src/report/html.rs`), caps and truncation marker not implemented |
+| M7-1 | Built-in exclusions incl. nested `.git` checkouts; `scan` excludes test/fixture/`e2e`/QA paths unless requested, `check` has no default test exclusion | `[~]` — `src/discover.rs` has the scan-side set; nested-checkout exclusion is on `feat/m1-snapshots` for Git-backed discovery only |
+| M7-2 | `--allow-new-suppressions` plumbing, full-scan path, DoD sweep; documented copyable pre-commit and CI commands | `[ ]` |
+
+## Standing gates and known debt
+
+- **M0b-8c is the live blocker.** M0c must not begin until the
+  `java-fixture-01` strict leg has been run against the private archive and
+  its outcome recorded here. A missing fixture leaves the gate *pending* — it
+  is never substituted with an invented result or silently re-baselined.
+- **`feat/m1-snapshots` is 44 M0b commits behind.** Bring it up to
+  `feat/m0a-import` before treating its rows as green against current M0b,
+  and re-run `scripts/neutrality_gate.sh` afterwards.
+- **Neither branch is on `main`.** `main` is the untouched handoff commit.
+- [`deferred-work.md`](deferred-work.md) is the companion ledger: consciously
+  postponed items, not defects. It currently has uncommitted rows in the
+  working tree of `feat/m0a-import`. Rows named in M0c-13 are scheduled; the
+  rest are unscheduled.
+- Recorded measurements live in [`measurements.md`](measurements.md); its
+  "Known caveats" paragraph is stale after salvage (a ledger row tracks it).
+
+## How to update this file
+
+1. **Update it in the round that does the work**, not afterwards. If a
+   commit closes part of a row, the same commit or the round's final commit
+   updates the row.
+2. **Only your own rows.** Do not change a row another workstream owns, and
+   do not re-mark a row someone else marked. If you believe another row is
+   wrong, say so in your report instead of editing it.
+3. **`[x]` requires evidence in this repository.** Put the commit SHA and the
+   test, script or document that proves it in *Evidence*. A row with no named
+   check stays `[~]`.
+4. **Never mark a row `[x]` on a red check.** If the work landed but its check
+   fails or could not be run, use `[~]` or `[!]` and say why in *Evidence*.
+5. **A missing fixture or archive is `[!]`, never `[x]`.** Record what is
+   missing and what would close it.
+6. **New scope gets a new row**, with an ID that extends its milestone
+   (`M4-3`, `M2-5`, …). Do not renumber existing rows — other documents and
+   run reports cite these IDs.
+7. **Refresh the header line** (`Last updated:` with the date and the branch
+   HEADs you verified against) whenever you touch the file.
+8. **Deferred work goes to [`deferred-work.md`](deferred-work.md)**, not here.
+   This file tracks plan steps; that one tracks what was consciously
+   postponed.
