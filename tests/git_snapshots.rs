@@ -841,6 +841,7 @@ fn worktree_special_files_are_special_and_never_opened() {
             "{path:?} must be classified Special"
         );
         assert_eq!(entry.size, 0, "{path:?} must carry size 0");
+        assert_eq!(entry.oid, None, "{path:?} must carry no object id (D25)");
     }
 
     let repo_path = dir.path().to_path_buf();
@@ -888,6 +889,56 @@ fn worktree_special_files_are_special_and_never_opened() {
             "{path:?} must never be read as a symlink target"
         );
     }
+}
+
+/// D25/row 2: `WorktreeSnapshot::read` re-checks `fs::symlink_metadata(..)
+/// .is_file()` immediately before `File::open`, so a tracked regular file
+/// swapped for a FIFO between enumeration and `read` is caught here too,
+/// not just at enumeration time. This asserts code already on the branch
+/// (`src/git/snapshot.rs:239-242`); it is expected to pass without a code
+/// change (see the implementer report for the mutant that kills it).
+#[test]
+#[cfg(unix)]
+fn worktree_read_rechecks_regular_file_before_open() {
+    let (dir, repo) = common::init_repo();
+    let commit_oid = common::commit_entries(
+        &repo,
+        &[(b"src/c.ts".to_vec(), MODE_REGULAR, b"tracked".to_vec())],
+    );
+    sync_index_to_commit(&repo, commit_oid);
+    std::fs::create_dir_all(dir.path().join("src")).expect("create src dir");
+    std::fs::write(dir.path().join("src/c.ts"), b"tracked").expect("write tracked src/c.ts");
+
+    let snapshot = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let entry = snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.path.as_bytes() == b"src/c.ts")
+        .expect("src/c.ts entry present")
+        .clone();
+    assert_eq!(
+        entry.kind,
+        EntryKind::Regular,
+        "classified before the swap, at enumeration time"
+    );
+
+    std::fs::remove_file(dir.path().join("src/c.ts")).expect("remove tracked src/c.ts from disk");
+    let status = Command::new("/usr/bin/mkfifo")
+        .arg(dir.path().join("src/c.ts"))
+        .status()
+        .expect("spawn mkfifo for the swapped src/c.ts");
+    assert!(status.success(), "mkfifo src/c.ts must succeed");
+
+    let repo_path = dir.path().to_path_buf();
+    let result = with_timeout("WorktreeSnapshot::read after a swap to FIFO", move || {
+        let repo = Repository::open(&repo_path).expect("reopen repo for read");
+        snapshot.read(&repo, &entry)
+    });
+    assert_eq!(
+        result.expect("read must not error"),
+        None,
+        "a Regular entry swapped to a FIFO before read must not be opened"
+    );
 }
 
 /// Creates a single-file, parentless commit under `update_ref`, independent
