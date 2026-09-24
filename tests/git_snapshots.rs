@@ -825,7 +825,11 @@ fn worktree_special_files_are_special_and_never_opened() {
 
     let snapshot = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
 
-    for path in [b"src/a.ts".as_slice(), b"src/s.ts".as_slice(), b"src/b.ts".as_slice()] {
+    for path in [
+        b"src/a.ts".as_slice(),
+        b"src/s.ts".as_slice(),
+        b"src/b.ts".as_slice(),
+    ] {
         let entry = snapshot
             .entries
             .iter()
@@ -840,7 +844,11 @@ fn worktree_special_files_are_special_and_never_opened() {
     }
 
     let repo_path = dir.path().to_path_buf();
-    for path in [b"src/a.ts".as_slice(), b"src/s.ts".as_slice(), b"src/b.ts".as_slice()] {
+    for path in [
+        b"src/a.ts".as_slice(),
+        b"src/s.ts".as_slice(),
+        b"src/b.ts".as_slice(),
+    ] {
         let entry = snapshot
             .entries
             .iter()
