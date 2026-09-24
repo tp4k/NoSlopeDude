@@ -12,7 +12,7 @@ round; see *How to update this file* at the bottom and the matching rule in
 [`AGENTS.md`](../AGENTS.md).
 
 Last updated: 2026-09-24, from `main@a6b5037`,
-`feat/m1-snapshots@f23804f`, and `feat/m0c-grammar@3dd9ae2` (WS-1, round 1;
+`feat/m1-snapshots@f23804f`, and `feat/m0c-grammar@eab001f` (WS-1, round 2;
 not yet merged to `main`).
 
 ## Legend
