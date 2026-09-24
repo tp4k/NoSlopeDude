@@ -512,10 +512,14 @@ mod tests {
     }
 
     /// L24: `overwrite_checked`'s callers used to reach their slot through
-    /// `IndexMut` (`language["erosion"]`, `entry["mass"]`), which panics on
-    /// a non-object container instead of returning the designed `anyhow`
-    /// error. Covers both named call sites: a non-object `scores.java`, and
-    /// a non-object `top25` entry.
+    /// `IndexMut` (`language["erosion"]`, `language["verbosity"]["ratio"]`,
+    /// `entry["mass"]`), which panics on a non-object container instead of
+    /// returning the designed `anyhow` error. Covers all three named call
+    /// sites: a non-object `scores.java`, a non-object `scores.java.verbosity`,
+    /// and a non-object `top25` entry. Each assertion pins the `get_mut`
+    /// branch's own distinguishing error text (not just a keyword that could
+    /// also appear in `find_key_pos`'s "could not find key" error for a
+    /// different key), so the test cannot pass on the wrong path.
     #[test]
     fn test_raw_text_recovery_rejects_a_non_object_container_without_panicking() {
         let non_object_scores_java = r#"{
@@ -533,7 +537,32 @@ mod tests {
         let err = parse_report(non_object_scores_java).expect_err(
             "a non-object scores.java container must be rejected with an error, not a panic",
         );
-        assert!(err.to_string().contains("java"), "error was: {err}");
+        assert!(
+            err.to_string()
+                .contains("scores.java is not an object with an `erosion` field"),
+            "error was: {err}"
+        );
+
+        let non_object_scores_java_verbosity = r#"{
+            "scan": { "target": "/x", "revision": { "sha": "deadbeef", "dirty": false, "unavailable_reason": null } },
+            "scores": {
+                "overall": { "erosion": 0.1, "verbosity": { "flagged_lines": 1, "scanned_lines": 1, "ratio": 0.1 } },
+                "java": { "erosion": 0.1, "verbosity": 5 },
+                "js_ts": { "erosion": 0.1, "verbosity": { "flagged_lines": 1, "scanned_lines": 1, "ratio": 0.1 } }
+            },
+            "findings": [],
+            "duplicates": [],
+            "top25": [],
+            "skipped_files": []
+        }"#;
+        let err = parse_report(non_object_scores_java_verbosity).expect_err(
+            "a non-object scores.java.verbosity container must be rejected with an error, not a panic",
+        );
+        assert!(
+            err.to_string()
+                .contains("scores.java.verbosity is not an object with a `ratio` field"),
+            "error was: {err}"
+        );
 
         let non_object_top25_entry = r#"{
             "scan": { "target": "/x", "revision": { "sha": "deadbeef", "dirty": false, "unavailable_reason": null } },
@@ -550,7 +579,11 @@ mod tests {
         }"#;
         let err = parse_report(non_object_top25_entry)
             .expect_err("a non-object top25 entry must be rejected with an error, not a panic");
-        assert!(err.to_string().contains("mass"), "error was: {err}");
+        assert!(
+            err.to_string()
+                .contains("a top25 entry is not an object with a `mass` field"),
+            "error was: {err}"
+        );
     }
 
     fn location_with_excerpt(relative_path: &str) -> serde_json::Value {
