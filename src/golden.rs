@@ -88,8 +88,17 @@ fn correct_scores_floats(report: &mut Value, raw: &str) -> Result<()> {
             .get_mut("scores")
             .and_then(|scores| scores.get_mut(lang))
             .with_context(|| format!("normalized report is missing scores.{lang}"))?;
-        overwrite_checked(&mut language["erosion"], erosion)?;
-        overwrite_checked(&mut language["verbosity"]["ratio"], ratio)?;
+        let erosion_slot = language
+            .get_mut("erosion")
+            .with_context(|| format!("scores.{lang} is not an object with an `erosion` field"))?;
+        overwrite_checked(erosion_slot, erosion)?;
+        let ratio_slot = language
+            .get_mut("verbosity")
+            .and_then(|verbosity| verbosity.get_mut("ratio"))
+            .with_context(|| {
+                format!("scores.{lang}.verbosity is not an object with a `ratio` field")
+            })?;
+        overwrite_checked(ratio_slot, ratio)?;
     }
     Ok(())
 }
@@ -119,7 +128,10 @@ fn correct_top25_masses_keyed(report: &mut Value, raw: &str) -> Result<()> {
         .and_then(Value::as_array_mut)
         .context("report is missing a `top25` array")?;
     for (entry, mass) in entries.iter_mut().zip(masses) {
-        overwrite_checked(&mut entry["mass"], mass)?;
+        let slot = entry
+            .get_mut("mass")
+            .context("a top25 entry is not an object with a `mass` field")?;
+        overwrite_checked(slot, mass)?;
     }
     Ok(())
 }
@@ -497,6 +509,49 @@ mod tests {
         let expected = format!("blake3:{:032x}", u128::from_le_bytes(leading));
 
         assert_eq!(body_blake3(body), expected);
+    }
+
+    /// L24: `overwrite_checked`'s callers used to reach their slot through
+    /// `IndexMut` (`language["erosion"]`, `entry["mass"]`), which panics on
+    /// a non-object container instead of returning the designed `anyhow`
+    /// error. Covers both named call sites: a non-object `scores.java`, and
+    /// a non-object `top25` entry.
+    #[test]
+    fn test_raw_text_recovery_rejects_a_non_object_container_without_panicking() {
+        let non_object_scores_java = r#"{
+            "scan": { "target": "/x", "revision": { "sha": "deadbeef", "dirty": false, "unavailable_reason": null } },
+            "scores": {
+                "overall": { "erosion": 0.1, "verbosity": { "flagged_lines": 1, "scanned_lines": 1, "ratio": 0.1 } },
+                "java": 5,
+                "js_ts": { "erosion": 0.1, "verbosity": { "flagged_lines": 1, "scanned_lines": 1, "ratio": 0.1 } }
+            },
+            "findings": [],
+            "duplicates": [],
+            "top25": [],
+            "skipped_files": []
+        }"#;
+        let err = parse_report(non_object_scores_java).expect_err(
+            "a non-object scores.java container must be rejected with an error, not a panic",
+        );
+        assert!(err.to_string().contains("java"), "error was: {err}");
+
+        let non_object_top25_entry = r#"{
+            "scan": { "target": "/x", "revision": { "sha": "deadbeef", "dirty": false, "unavailable_reason": null } },
+            "scores": {
+                "overall": { "erosion": 0.1, "verbosity": { "flagged_lines": 1, "scanned_lines": 1, "ratio": 0.1 } },
+                "java": { "erosion": 0.1, "verbosity": { "flagged_lines": 1, "scanned_lines": 1, "ratio": 0.1 } },
+                "js_ts": { "erosion": 0.1, "verbosity": { "flagged_lines": 1, "scanned_lines": 1, "ratio": 0.1 } }
+            },
+            "findings": [],
+            "duplicates": [],
+            "top25": [42],
+            "decoy": { "mass": 9.0 },
+            "skipped_files": []
+        }"#;
+        let err = parse_report(non_object_top25_entry).expect_err(
+            "a non-object top25 entry must be rejected with an error, not a panic",
+        );
+        assert!(err.to_string().contains("mass"), "error was: {err}");
     }
 
     fn location_with_excerpt(relative_path: &str) -> serde_json::Value {
