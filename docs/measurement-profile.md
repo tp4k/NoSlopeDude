@@ -84,6 +84,18 @@ dependency-version drift: a `Cargo.lock` version bump for one of the three
 grammars or the `tree-sitter` runtime that nobody remembers to mirror into
 `src/profile.rs`.
 
+## Moving the fingerprint's hash never renames the profile
+
+`PROFILE_NAME` names the measurement algorithm as a whole (see above), not
+any one fingerprint value. When one of the nine inputs moves — for example
+M1-7 bumping `ir::IR_VERSION` for `IrCallable`'s new identity-bearing
+fields — only the frozen hex literal in
+`tests/profile.rs::test_nsd_v1_fingerprint_is_frozen` changes; the profile
+keeps being called `nsd-v1`, because it is still the same algorithm being
+re-measured, not a new one. A future `nsd-v2` would mean the algorithm
+itself changed shape (e.g. dropping an input or changing what a finding
+count means), not that one of today's nine inputs moved.
+
 ## Not covered
 
 Three other kinds of change leave the fingerprint unchanged, and nothing
