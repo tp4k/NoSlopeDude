@@ -80,14 +80,18 @@ fn node_text(node: Node, source: &str) -> String {
 
 /// M1-7's JS/TS owner-chain segment for a node that is itself a named type or
 /// a namespace (never a callable -- see `java::owner_segment_for_type`'s own
-/// doc comment for why). `class_declaration` is always named in this
-/// grammar; the `class` expression form is optionally named, so it falls
-/// back to `AnonymousClassBody` when its own `name` field is absent.
-/// `internal_module` (TS's `namespace`/`module` keyword) always carries a
-/// required `name` field.
+/// doc comment for why). `class_declaration` and `abstract_class_declaration`
+/// are always named in this grammar; the `class` expression form is
+/// optionally named, so it falls back to `AnonymousClassBody` when its own
+/// `name` field is absent. `internal_module` (the `namespace` keyword) and
+/// `module` (the `module` keyword -- a distinct grammar node from
+/// `internal_module`, not an alternate spelling of it) both always carry a
+/// required `name` field, and both are TS's namespace concept (round 2, WS-1
+/// triage row 2: `module M { … }` used to fall through this match entirely
+/// and get no owner segment at all).
 fn owner_segment_for_type(kind: &str, node: Node, source: &str) -> Option<OwnerSegment> {
     match kind {
-        "class_declaration" | "class" => {
+        "class_declaration" | "class" | "abstract_class_declaration" => {
             let name = node
                 .child_by_field_name("name")
                 .map(|name_node| node_text(name_node, source));
@@ -102,7 +106,7 @@ fn owner_segment_for_type(kind: &str, node: Node, source: &str) -> Option<OwnerS
                 },
             })
         }
-        "internal_module" => {
+        "internal_module" | "module" => {
             let name = node
                 .child_by_field_name("name")
                 .map(|name_node| node_text(name_node, source));
