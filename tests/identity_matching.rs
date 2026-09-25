@@ -405,3 +405,85 @@ fn test_renamed_file_matches_at_tier_2() {
     assert_eq!(output.matches[0].candidate, callable_ref("src/New.java", 0));
     assert!(output.ambiguities.is_empty());
 }
+
+// ---------------------------------------------------------------------
+// Tier 3: pooled, exact 1:1 leftover body fingerprint.
+// ---------------------------------------------------------------------
+
+/// A method moved from `A.java` to `B.java` with an unchanged body matches
+/// at tier 3 -- no `Change::Renamed` is supplied, so tiers 1-2 cannot find
+/// it; only the pooled leftover fingerprint does.
+#[test]
+fn test_cross_file_move_matches_at_tier_3() {
+    let moved = synth_identity("run", &[]);
+    let base = vec![synth_file("A.java", &[(moved.clone(), "blake3:unchanged")])];
+    let candidate = vec![synth_file(
+        "B.java",
+        &[(moved.clone(), "blake3:unchanged")],
+    )];
+
+    let output = match_callables(&base, &candidate, &[]);
+
+    assert_eq!(output.matches.len(), 1, "{output:#?}");
+    assert_eq!(output.matches[0].tier, MatchTier::BodyFingerprint);
+    assert_eq!(output.matches[0].base, callable_ref("A.java", 0));
+    assert_eq!(output.matches[0].candidate, callable_ref("B.java", 0));
+    assert!(output.ambiguities.is_empty());
+}
+
+/// A method renamed in the same file with an unchanged body pairs at tier 3
+/// -- same path on both sides, but the name change gives it a different
+/// `CallableIdentity`, so tier 1 cannot pair it either.
+#[test]
+fn test_renamed_method_with_unchanged_body_matches_at_tier_3() {
+    let old_name = synth_identity("oldName", &[]);
+    let new_name = synth_identity("newName", &[]);
+    let base = vec![synth_file(
+        "A.java",
+        &[(old_name.clone(), "blake3:unchanged")],
+    )];
+    let candidate = vec![synth_file(
+        "A.java",
+        &[(new_name.clone(), "blake3:unchanged")],
+    )];
+
+    let output = match_callables(&base, &candidate, &[]);
+
+    assert_eq!(output.matches.len(), 1, "{output:#?}");
+    assert_eq!(output.matches[0].tier, MatchTier::BodyFingerprint);
+    assert_eq!(output.matches[0].base, callable_ref("A.java", 0));
+    assert_eq!(output.matches[0].candidate, callable_ref("A.java", 0));
+    assert!(output.ambiguities.is_empty());
+}
+
+/// A callable that tier 1 would match is never taken by tier 3, even when
+/// another file has an identical body: base has `A.java::x` (fingerprint
+/// "shared") matching the candidate's `A.java::x` at tier 1, and also
+/// `B.java::y` with the very same fingerprint "shared" but no counterpart on
+/// the candidate side. `y` must not be spuriously paired against `x`'s
+/// candidate, which tier 1 already consumed.
+#[test]
+fn test_tier_order_prefers_structural_identity() {
+    let x = synth_identity("x", &[]);
+    let y = synth_identity("y", &[]);
+    let base = vec![
+        synth_file("A.java", &[(x.clone(), "blake3:shared")]),
+        synth_file("B.java", &[(y.clone(), "blake3:shared")]),
+    ];
+    let candidate = vec![synth_file("A.java", &[(x.clone(), "blake3:shared")])];
+
+    let output = match_callables(&base, &candidate, &[]);
+
+    assert_eq!(output.matches.len(), 1, "{output:#?}");
+    assert_eq!(output.matches[0].tier, MatchTier::Structural);
+    assert_eq!(output.matches[0].base, callable_ref("A.java", 0));
+    assert_eq!(output.matches[0].candidate, callable_ref("A.java", 0));
+    assert!(
+        !output
+            .matches
+            .iter()
+            .any(|m| m.base == callable_ref("B.java", 0)),
+        "B.java's y must stay unmatched, not steal x's candidate: {output:#?}"
+    );
+    assert!(output.ambiguities.is_empty());
+}
