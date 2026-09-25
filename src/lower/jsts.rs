@@ -290,7 +290,14 @@ pub(super) fn classify(
                 Some(info.name.clone())
             },
         }),
-        None => owner_segment_for_type(kind, node, source),
+        // WS-1 triage row 1 (round 3): `class`/`module` are also the kind
+        // strings of the anonymous keyword leaf tokens (`is_named() ==
+        // false`), which share their kind string with the named
+        // `class_declaration`/`class` expression/`module` arms above --
+        // gating on `is_named` keeps the keyword leaf from getting a
+        // phantom owner segment of its own.
+        None if is_named => owner_segment_for_type(kind, node, source),
+        None => None,
     };
     Classification {
         decision: decision_kind(node, kind),
