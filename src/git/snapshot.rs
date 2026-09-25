@@ -288,7 +288,7 @@ impl WorktreeSnapshot {
 
 /// The repository's worktree directory, or `NSD-G101` for a bare
 /// repository.
-fn worktree_dir(repo: &Repository) -> Result<PathBuf, GitError> {
+pub(super) fn worktree_dir(repo: &Repository) -> Result<PathBuf, GitError> {
     Ok(repo
         .workdir()
         .ok_or_else(|| {

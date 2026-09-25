@@ -529,7 +529,7 @@ pub fn diff_commit_to_worktree(
 /// enumeration (D25's re-check): the `fs::symlink_metadata` re-check here
 /// tells the two cases apart, so a swapped-in FIFO/socket is never handed to
 /// `Oid::hash_file`, which would `open(2)` it and block.
-fn worktree_blob_oid(
+pub(super) fn worktree_blob_oid(
     repo: &Repository,
     workdir: &Path,
     worktree: &WorktreeSnapshot,
