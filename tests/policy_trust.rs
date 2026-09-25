@@ -1,0 +1,423 @@
+//! Base-policy trust resolution (M2-2): the effective `Config` always
+//! comes from a trusted `--config` file or the **base** snapshot, never
+//! from the candidate under inspection (`nsd-plan-implementation.md:76`).
+
+mod common;
+
+use git2::{IndexEntry, IndexTime, Oid, Repository};
+
+use nsd::config::{Config, Severity, CODE_CONFIG_CHANGED, CODE_INVALID_CONFIG};
+use nsd::git::snapshot::{CommitSnapshot, IndexSnapshot, WorktreeSnapshot, SOURCE_CEILING_BYTES};
+use nsd::policy::{self, Candidate, ConfigSource, Diagnostic};
+
+/// This suite's own fixture constant (D22): a regular file's Git mode,
+/// used only here.
+const MODE_REGULAR: i32 = 0o100644;
+
+/// Overwrites the Git index to exactly mirror `commit_oid`'s tree (D22,
+/// copied from `tests/git_snapshots.rs`'s own helper of the same name):
+/// `common::commit_entries` never touches the index itself.
+fn sync_index_to_commit(repo: &Repository, commit_oid: Oid) {
+    let commit = repo.find_commit(commit_oid).expect("find commit");
+    let tree = commit.tree().expect("commit tree");
+    let mut index = repo.index().expect("open index");
+    index.read_tree(&tree).expect("read tree into index");
+    index.write().expect("write index");
+}
+
+/// Stages `content` at `path` directly into the Git index (D22, copied
+/// from `tests/git_snapshots.rs`'s own helper of the same name), without
+/// writing a blob to the ODB or a file to disk.
+fn stage_bytes(repo: &Repository, path: &[u8], mode: i32, content: &[u8]) {
+    let mut index = repo.index().expect("open index");
+    let entry = IndexEntry {
+        ctime: IndexTime::new(0, 0),
+        mtime: IndexTime::new(0, 0),
+        dev: 0,
+        ino: 0,
+        mode: mode as u32,
+        uid: 0,
+        gid: 0,
+        file_size: 0,
+        id: Oid::ZERO_SHA1,
+        flags: 0,
+        flags_extended: 0,
+        path: path.to_vec(),
+    };
+    index.add_frombuffer(&entry, content).expect("stage buffer");
+    index.write().expect("write index");
+}
+
+#[test]
+fn test_candidate_config_cannot_weaken_its_own_check() {
+    let (_dir, repo) = common::init_repo();
+    common::commit_entries(
+        &repo,
+        &[(
+            b"nsd.yml".to_vec(),
+            MODE_REGULAR,
+            b"version: 1\ninclude: [src/**]\nexclude: [vendor/**]\nmeasurement:\n  \
+              min_clone_lines: 10\npolicy:\n  NSD-E101: deny\n"
+                .to_vec(),
+        )],
+    );
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+    let base_config = nsd::config::load_from_commit(&repo, &base).expect("base config is valid");
+
+    common::commit_entries(
+        &repo,
+        &[(
+            b"nsd.yml".to_vec(),
+            MODE_REGULAR,
+            b"version: 1\ninclude: [tests/**]\nexclude: [dist/**]\nmeasurement:\n  \
+              min_clone_lines: 3\npolicy:\n  NSD-E101: off\n"
+                .to_vec(),
+        )],
+    );
+    let candidate = CommitSnapshot::head_or_empty(&repo).expect("snapshot candidate commit");
+
+    let resolution = policy::resolve(&repo, None, &base, Candidate::Commit(&candidate))
+        .expect("a valid base and a shape-valid candidate resolve");
+
+    assert_eq!(
+        resolution.config, base_config,
+        "the whole effective Config must equal the base's, not a blend with the candidate"
+    );
+    assert_eq!(resolution.config.policy.nsd_e101, Severity::Deny);
+    assert_eq!(resolution.source, ConfigSource::Base);
+    assert_eq!(
+        resolution.diagnostics,
+        vec![Diagnostic {
+            code: CODE_CONFIG_CHANGED
+        }]
+    );
+}
+
+#[test]
+fn test_first_config_uses_builtin_defaults() {
+    let (_dir, repo) = common::init_repo();
+    common::commit_entries(
+        &repo,
+        &[(b"README.md".to_vec(), MODE_REGULAR, b"hi".to_vec())],
+    );
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+
+    common::commit_entries(
+        &repo,
+        &[
+            (b"README.md".to_vec(), MODE_REGULAR, b"hi".to_vec()),
+            (b"nsd.yml".to_vec(), MODE_REGULAR, b"version: 1\n".to_vec()),
+        ],
+    );
+    let candidate = CommitSnapshot::head_or_empty(&repo).expect("snapshot candidate commit");
+
+    let resolution = policy::resolve(&repo, None, &base, Candidate::Commit(&candidate))
+        .expect("no config anywhere plus a valid new one resolves");
+
+    assert_eq!(resolution.config, Config::default());
+    assert_eq!(resolution.source, ConfigSource::BuiltInDefaults);
+    assert_eq!(
+        resolution.diagnostics,
+        vec![Diagnostic {
+            code: CODE_CONFIG_CHANGED
+        }]
+    );
+}
+
+#[test]
+fn test_removed_candidate_config_still_uses_base() {
+    let (_dir, repo) = common::init_repo();
+    common::commit_entries(
+        &repo,
+        &[(
+            b"nsd.yml".to_vec(),
+            MODE_REGULAR,
+            b"version: 1\nmeasurement:\n  min_clone_lines: 20\n".to_vec(),
+        )],
+    );
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+    let base_config = nsd::config::load_from_commit(&repo, &base).expect("base config is valid");
+
+    common::commit_entries(
+        &repo,
+        &[(b"README.md".to_vec(), MODE_REGULAR, b"hi".to_vec())],
+    );
+    let candidate = CommitSnapshot::head_or_empty(&repo).expect("snapshot candidate commit");
+
+    let resolution = policy::resolve(&repo, None, &base, Candidate::Commit(&candidate))
+        .expect("a removed candidate config still resolves through the base");
+
+    assert_eq!(resolution.config, base_config);
+    assert_eq!(resolution.source, ConfigSource::Base);
+    assert_eq!(
+        resolution.diagnostics,
+        vec![Diagnostic {
+            code: CODE_CONFIG_CHANGED
+        }]
+    );
+}
+
+#[test]
+fn test_trusted_config_replaces_repository_policy() {
+    let (_dir, repo) = common::init_repo();
+    common::commit_entries(
+        &repo,
+        &[(
+            b"nsd.yml".to_vec(),
+            MODE_REGULAR,
+            b"version: 1\nmeasurement:\n  min_clone_lines: 20\n".to_vec(),
+        )],
+    );
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+    let candidate = base.clone();
+
+    let trusted_dir = tempfile::TempDir::new().expect("create a temp dir for the trusted config");
+    let trusted_path = trusted_dir.path().join("trusted.yml");
+    std::fs::write(
+        &trusted_path,
+        b"version: 1\nmeasurement:\n  min_clone_lines: 99\n",
+    )
+    .expect("write trusted config");
+
+    let resolution = policy::resolve(
+        &repo,
+        Some(trusted_path.as_path()),
+        &base,
+        Candidate::Commit(&candidate),
+    )
+    .expect("a valid trusted config resolves");
+
+    assert_eq!(resolution.config.measurement.min_clone_lines, 99);
+    assert_eq!(resolution.source, ConfigSource::Trusted);
+}
+
+#[test]
+fn test_trusted_config_overrides_an_invalid_base() {
+    let (_dir, repo) = common::init_repo();
+    common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_REGULAR, b"version: 2\n".to_vec())],
+    );
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+    let candidate = base.clone();
+
+    let trusted_dir = tempfile::TempDir::new().expect("create a temp dir for the trusted config");
+    let trusted_path = trusted_dir.path().join("trusted.yml");
+    std::fs::write(&trusted_path, b"version: 1\n").expect("write trusted config");
+
+    let resolution = policy::resolve(
+        &repo,
+        Some(trusted_path.as_path()),
+        &base,
+        Candidate::Commit(&candidate),
+    )
+    .expect("a trusted config overrides an invalid base");
+
+    assert_eq!(resolution.source, ConfigSource::Trusted);
+    assert_eq!(resolution.config, Config::default());
+}
+
+#[test]
+fn test_invalid_or_missing_trusted_config_is_c102() {
+    let (_dir, repo) = common::init_repo();
+    common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_REGULAR, b"version: 1\n".to_vec())],
+    );
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+    let candidate = base.clone();
+
+    let trusted_dir = tempfile::TempDir::new().expect("create a temp dir for the trusted config");
+
+    let missing_path = trusted_dir.path().join("missing.yml");
+    let err = policy::resolve(
+        &repo,
+        Some(missing_path.as_path()),
+        &base,
+        Candidate::Commit(&candidate),
+    )
+    .expect_err("a missing trusted config is C102");
+    assert_eq!(err.code(), CODE_INVALID_CONFIG);
+
+    let invalid_path = trusted_dir.path().join("invalid.yml");
+    std::fs::write(&invalid_path, b"version: 2\n").expect("write invalid trusted config");
+    let err = policy::resolve(
+        &repo,
+        Some(invalid_path.as_path()),
+        &base,
+        Candidate::Commit(&candidate),
+    )
+    .expect_err("an invalid trusted config is C102");
+    assert_eq!(err.code(), CODE_INVALID_CONFIG);
+
+    let oversized_path = trusted_dir.path().join("oversized.yml");
+    let oversized = vec![b'#'; (SOURCE_CEILING_BYTES + 1) as usize];
+    std::fs::write(&oversized_path, &oversized).expect("write oversized trusted config");
+    let err = policy::resolve(
+        &repo,
+        Some(oversized_path.as_path()),
+        &base,
+        Candidate::Commit(&candidate),
+    )
+    .expect_err("an over-ceiling trusted config is C102");
+    assert_eq!(err.code(), CODE_INVALID_CONFIG);
+}
+
+#[test]
+fn test_invalid_base_config_is_c102() {
+    let (_dir, repo) = common::init_repo();
+    common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_REGULAR, b"version: 2\n".to_vec())],
+    );
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+    let candidate = base.clone();
+
+    let err = policy::resolve(&repo, None, &base, Candidate::Commit(&candidate))
+        .expect_err("an invalid base config with no trusted override is C102");
+    assert_eq!(err.code(), CODE_INVALID_CONFIG);
+}
+
+#[test]
+fn test_invalid_candidate_config_is_reported_but_base_still_applies() {
+    let (_dir, repo) = common::init_repo();
+    common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_REGULAR, b"version: 1\n".to_vec())],
+    );
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+    let base_config = nsd::config::load_from_commit(&repo, &base).expect("base config is valid");
+
+    common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_REGULAR, b"version: 2\n".to_vec())],
+    );
+    let candidate = CommitSnapshot::head_or_empty(&repo).expect("snapshot candidate commit");
+
+    let resolution = policy::resolve(&repo, None, &base, Candidate::Commit(&candidate))
+        .expect("an invalid candidate must not fail the whole resolution");
+
+    assert_eq!(resolution.config, base_config);
+    assert_eq!(resolution.source, ConfigSource::Base);
+    assert_eq!(
+        resolution.diagnostics,
+        vec![
+            Diagnostic {
+                code: CODE_CONFIG_CHANGED
+            },
+            Diagnostic {
+                code: CODE_INVALID_CONFIG
+            },
+        ]
+    );
+}
+
+#[test]
+fn test_unchanged_candidate_config_reports_nothing() {
+    let (_dir, repo) = common::init_repo();
+    common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_REGULAR, b"version: 1\n".to_vec())],
+    );
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+    let candidate = base.clone();
+
+    let resolution = policy::resolve(&repo, None, &base, Candidate::Commit(&candidate))
+        .expect("an identical candidate resolves cleanly");
+
+    assert!(resolution.diagnostics.is_empty());
+}
+
+#[test]
+fn test_c101_is_informational_not_an_error() {
+    let (_dir, repo) = common::init_repo();
+    common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_REGULAR, b"version: 1\n".to_vec())],
+    );
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+
+    common::commit_entries(
+        &repo,
+        &[(
+            b"nsd.yml".to_vec(),
+            MODE_REGULAR,
+            b"version: 1\nmeasurement:\n  min_clone_lines: 5\n".to_vec(),
+        )],
+    );
+    let candidate = CommitSnapshot::head_or_empty(&repo).expect("snapshot candidate commit");
+
+    let resolution = policy::resolve(&repo, None, &base, Candidate::Commit(&candidate))
+        .expect("a changed but valid candidate is Ok, since C101 is informational (M5-3 maps exit codes)");
+
+    assert_eq!(
+        resolution.diagnostics,
+        vec![Diagnostic {
+            code: CODE_CONFIG_CHANGED
+        }]
+    );
+}
+
+#[test]
+fn test_staged_candidate_reads_the_index_not_the_worktree() {
+    let (dir, repo) = common::init_repo();
+    let commit_oid = common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_REGULAR, b"version: 1\n".to_vec())],
+    );
+    sync_index_to_commit(&repo, commit_oid);
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+
+    // The worktree copy diverges from both the base and the (unmodified)
+    // index.
+    std::fs::write(
+        dir.path().join("nsd.yml"),
+        b"version: 1\nmeasurement:\n  min_clone_lines: 5\n",
+    )
+    .expect("write a diverging worktree nsd.yml");
+
+    let index_snapshot = IndexSnapshot::open(&repo).expect("open index snapshot");
+    let worktree_snapshot = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+
+    let staged = policy::resolve(&repo, None, &base, Candidate::Index(&index_snapshot))
+        .expect("the index candidate resolves");
+    assert!(
+        staged.diagnostics.is_empty(),
+        "--staged reads the index, which still matches the base"
+    );
+
+    let worktree = policy::resolve(&repo, None, &base, Candidate::Worktree(&worktree_snapshot))
+        .expect("the worktree candidate resolves");
+    assert_eq!(
+        worktree.diagnostics,
+        vec![Diagnostic {
+            code: CODE_CONFIG_CHANGED
+        }],
+        "the worktree copy has diverged from the base"
+    );
+}
+
+#[test]
+fn test_unborn_repository_uses_builtin_policy() {
+    let (_dir, repo) = common::init_repo();
+    let base = CommitSnapshot::head_or_empty(&repo).expect("resolve the empty-tree base");
+    assert!(
+        base.entries.is_empty(),
+        "an unborn HEAD resolves to the empty tree"
+    );
+
+    stage_bytes(&repo, b"nsd.yml", MODE_REGULAR, b"version: 1\n");
+    let index_snapshot = IndexSnapshot::open(&repo).expect("open index snapshot");
+
+    let resolution = policy::resolve(&repo, None, &base, Candidate::Index(&index_snapshot))
+        .expect("an unborn base plus a staged config resolves");
+
+    assert_eq!(resolution.config, Config::default());
+    assert_eq!(resolution.source, ConfigSource::BuiltInDefaults);
+    assert_eq!(
+        resolution.diagnostics,
+        vec![Diagnostic {
+            code: CODE_CONFIG_CHANGED
+        }]
+    );
+}
