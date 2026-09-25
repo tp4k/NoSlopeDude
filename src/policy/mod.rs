@@ -52,19 +52,36 @@ pub struct Resolution {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-/// The candidate diagnostics for one invocation (M2-2's diff seam): `Ok`
-/// when the candidate's raw bytes were read, whatever they compare to.
-/// Row 2 (triage-ws2-r1.md) narrows this further for a candidate read
-/// error.
+/// The candidate diagnostics for one invocation (M2-2's diff seam): an
+/// over-ceiling or non-regular candidate `nsd.yml` is reported as
+/// `[NSD-C101, NSD-C102]` rather than failing the whole resolution — "only
+/// a changed candidate is validated ... cannot affect its own check"
+/// applies to that read failure too. Any other (Git-domain) candidate
+/// read error still propagates, since it is not the candidate's shape at
+/// fault.
 fn diagnostics_for_candidate(
     repo: &Repository,
     candidate: Candidate<'_>,
     base_bytes: Option<&Vec<u8>>,
 ) -> Result<Vec<Diagnostic>, ConfigError> {
     let candidate_bytes = match candidate {
-        Candidate::Commit(snapshot) => config::root_config_bytes_from_commit(repo, snapshot)?,
-        Candidate::Index(snapshot) => config::root_config_bytes_from_index(repo, snapshot)?,
-        Candidate::Worktree(snapshot) => config::root_config_bytes_from_worktree(repo, snapshot)?,
+        Candidate::Commit(snapshot) => config::root_config_bytes_from_commit(repo, snapshot),
+        Candidate::Index(snapshot) => config::root_config_bytes_from_index(repo, snapshot),
+        Candidate::Worktree(snapshot) => config::root_config_bytes_from_worktree(repo, snapshot),
+    };
+    let candidate_bytes = match candidate_bytes {
+        Ok(bytes) => bytes,
+        Err(err) if err.code() == CODE_INVALID_CONFIG => {
+            return Ok(vec![
+                Diagnostic {
+                    code: CODE_CONFIG_CHANGED,
+                },
+                Diagnostic {
+                    code: CODE_INVALID_CONFIG,
+                },
+            ]);
+        }
+        Err(err) => return Err(err),
     };
 
     let mut diagnostics = Vec::new();
