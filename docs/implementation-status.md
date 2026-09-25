@@ -13,8 +13,9 @@ round; see *How to update this file* at the bottom and the matching rule in
 
 Last updated: 2026-09-25, from `main@4a36680` (M1–M2 merged at `5912e63`,
 M0c and its follow-up fixes merged at `4a36680`), plus M1-7 verified on
-`feat/m1m2-remaining@a065695` and M2-2 verified on
-`feat/m1m2-remaining@c53b861` (both unmerged).
+`feat/m1m2-remaining@a065695`, M2-2 verified on
+`feat/m1m2-remaining@c53b861` and M2-3 verified on
+`feat/m1m2-remaining@a0c6a15` (all three unmerged).
 
 ## Legend
 
@@ -113,7 +114,7 @@ Plan: `nsd-plan-final.md` *M1–M2*, plus `nsd-plan-implementation.md`
 | M1-8 | Report mapped parser gaps and coverage explicitly; ratios use *analyzed* executable lines and carry completeness metadata | `[ ]` | — | Related: M0b-7's salvage removed the per-file `SyntaxError` provenance; restoring it is a [`deferred-work.md`](deferred-work.md) row explicitly deferred to this milestone |
 | M2-1 | Strict repository-root `nsd.yml` parsing, all `C102` cases, incl. `measurement.min_clone_lines` | `[x]` | `main` | `44eb0fc` (red), `c1728cc` (green), blank/null include `a7c9b5c`, blank/comment-only globs `b7d00ef`; `tests/config.rs`; deps `serde_yaml_ng` 0.10, `git2` 0.21 |
 | M2-2 | Base-policy trust: trusted `--config` replaces repository policy; candidate config validated through `C101` but cannot affect its own check | `[x]` | `feat/m1m2-remaining` | NEW `src/policy::resolve` picks `Trusted`/`Base`/`BuiltInDefaults` and reports `NSD-C101`/`NSD-C102` from raw-byte diffs, never from the candidate (`0b83b6a` red, `c53b861` green); `src/config/mod.rs` gains `CODE_CONFIG_CHANGED`, a raw-bytes accessor per snapshot kind and a bounded trusted-path loader; `tests/policy_trust.rs` (12/12: weakening, first-config/removed/unchanged candidates, trusted override incl. over an invalid base, invalid trusted/base/candidate, `C101` as `Ok`, `--staged` vs worktree divergence, unborn repository). `cargo test --locked --no-fail-fast`, `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` all clean on `feat/m1m2-remaining@c53b861`. Exit-code mapping for `C101`/`C102` is M5-3; no `check` subcommand or `--config` CLI flag here |
-| M2-3 | Callable matching across snapshots | `[ ]` | — | Prerequisite for E101/E102 in M3 |
+| M2-3 | Callable matching across snapshots | `[x]` | `feat/m1m2-remaining` | NEW `src/identity::matching::match_callables` matches tiers in order -- (1) same path + equal `CallableIdentity` (`0b4dab0` red, `4ba64c1` green); (2) a `git::diff::Change::Renamed` pair + equal identity (`4d83db4` red, `7094bb2` green); (3) pooled leftovers, an exactly-1:1 body fingerprint, the same file included so an in-place rename matches (`0c6b486` red, `1b74621` green) -- plus ambiguity: a tier-3 fingerprint bucket with more than one leftover on either side becomes one `Ambiguity` record instead of a match (`a37ed8b` red, `044aed8` green). Every same-key group pairs equal fingerprints first in source order, then falls back to order-preserving greedy matching in source order (the spec's finding-matching rule); every group and the tier-3 pool are hash-keyed, never an O(n²) comparison. Output is deterministic, sorted by (path bytes, callable index). `tests/identity_matching.rs` (13/13: line-only change, inserted anonymous callback, git rename with an edited body, cross-file move, in-place rename, inserted same-key sibling, same-key source-order fallback, exact-body ambiguity, overload reorder, deleted/added callables, tier order preferring structural identity over a same-fingerprint decoy, determinism under shuffled input order, 2,000-callable ambiguity group). `cargo test --locked --no-fail-fast`, `cargo clippy --locked --all-targets -- -D warnings` and `cargo fmt --check` all clean on `feat/m1m2-remaining@a0c6a15`; `git diff --stat main -- tests/golden/` empty. `NSD-G102` emission for an ambiguity is deferred to M3-1 (needs an E101/E102 verdict); no `pipeline.rs`/`report.json` wiring here |
 | M2-4 | Deterministic snapshot IDs | `[ ]` | — | No `snapshot_id` in `src/git/` |
 
 ## M3–M5 — Policy, suppressions, clones, cache
