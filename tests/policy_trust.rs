@@ -292,8 +292,8 @@ fn test_invalid_or_missing_trusted_config_is_c102() {
     assert_eq!(err.code(), CODE_INVALID_CONFIG);
 
     let oversized_path = trusted_dir.path().join("oversized.yml");
-    let oversized = vec![b'#'; (SOURCE_CEILING_BYTES + 1) as usize];
-    std::fs::write(&oversized_path, &oversized).expect("write oversized trusted config");
+    std::fs::write(&oversized_path, oversized_valid_config())
+        .expect("write oversized trusted config");
     let err = policy::resolve(
         &repo,
         Some(oversized_path.as_path()),
