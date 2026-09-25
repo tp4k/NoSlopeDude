@@ -203,6 +203,44 @@ class Overloads {
         identity::callable_identity(&swapped, swapped_string),
         identity_string
     );
+
+    // WS-1 triage row 4 (round 2): `f(int)` and a varargs overload
+    // `f(int... a)` must not share a signature -- the `...` used to be
+    // dropped from a `spread_parameter`'s own `type` field text.
+    let varargs_source = "\
+class Overloads {
+    void h(int a) {
+        System.out.println(a);
+    }
+
+    void h(int... a) {
+        System.out.println(a.length);
+    }
+}
+";
+    let varargs_ir = lower_java(varargs_source);
+    let h_fixed = callable_at_line(&varargs_ir, 2);
+    let h_varargs = callable_at_line(&varargs_ir, 6);
+    let h_fixed_identity = identity::callable_identity(&varargs_ir, h_fixed);
+    let h_varargs_identity = identity::callable_identity(&varargs_ir, h_varargs);
+    assert_ne!(h_fixed_identity, h_varargs_identity);
+    assert_eq!(h_fixed_identity.signature, vec!["int".to_string()]);
+    assert_eq!(h_varargs_identity.signature, vec!["int...".to_string()]);
+
+    // The C-style array-parameter spelling `int x[]` must give the same
+    // signature shape as `int[] x` -- the `dimensions` field used to be
+    // dropped entirely.
+    let array_dims_source = "\
+class Overloads {
+    void g(int x[]) {
+        System.out.println(x.length);
+    }
+}
+";
+    let array_dims_ir = lower_java(array_dims_source);
+    let g = callable_at_line(&array_dims_ir, 2);
+    let g_identity = identity::callable_identity(&array_dims_ir, g);
+    assert_eq!(g_identity.signature, vec!["int[]".to_string()]);
 }
 
 /// A method in an inner class and a lambda inside a method each carry
