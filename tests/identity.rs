@@ -545,3 +545,64 @@ class Determinism {
     assert_eq!(first_identities, second_identities);
     assert_eq!(first_identities.len(), 2, "{first_identities:#?}");
 }
+
+/// WS-1 triage row 1 (round 2, security+perf HIGH): the owner table stores
+/// one `OwnerEntry` per nesting level, not a deep-copied `Vec<OwnerSegment>`
+/// per callable -- a 15,000-level nested `()=>` chain (the same depth
+/// `tests/metrics.rs::DEEP_NESTING_LEVELS` already exercises for the pre-M1-7
+/// tree build) must give exactly one owner entry per callable, not one entry
+/// times its own nesting depth.
+#[test]
+fn test_deeply_nested_callables_store_owners_linearly() {
+    const DEPTH: usize = 15_000;
+    let source = format!("const f = {}0;", "()=>".repeat(DEPTH));
+    let parsed = parse_inline(&source, Grammar::TypeScript, JS_TS);
+    let ir_file = lower::lower_file(&parsed);
+    assert_eq!(ir_file.callables.len(), DEPTH);
+    assert_eq!(ir_file.owners.len(), DEPTH);
+}
+
+/// WS-1 triage row 1 (round 2): a giant declared name shared by many sibling
+/// callables must be stored exactly once in the owner table, not once per
+/// sibling -- the concrete DoS shape the row's own memory estimate names (a
+/// large owner name times many sibling callables). 2,000 anonymous arrow
+/// statements share one 10,000-character enclosing function name; the owner
+/// table holds exactly 1 (the function) + 2,000 (each arrow's own segment,
+/// since every callable is itself a potential owner) entries -- never a
+/// multiple of the name's own length -- and every arrow's materialized
+/// `owner_chain` points back to that one shared entry.
+#[test]
+fn test_owner_segments_are_stored_once_per_owner() {
+    const NAME_LEN: usize = 10_000;
+    const ARROW_COUNT: usize = 2_000;
+    let name = "A".repeat(NAME_LEN);
+    let mut source = format!("function {name}() {{\n");
+    for _ in 0..ARROW_COUNT {
+        source.push_str("()=>0;\n");
+    }
+    source.push_str("}\n");
+
+    let parsed = parse_inline(&source, Grammar::JavaScript, JS_TS);
+    let ir_file = lower::lower_file(&parsed);
+
+    assert_eq!(
+        ir_file.owners.len(),
+        ARROW_COUNT + 1,
+        "{}",
+        ir_file.owners.len()
+    );
+
+    let arrows: Vec<&IrCallable> = ir_file
+        .callables
+        .iter()
+        .filter(|callable| callable.kind == CallableKind::JsArrowFunction)
+        .collect();
+    assert_eq!(arrows.len(), ARROW_COUNT);
+    let expected_owner_chain = vec![owner_callable(&name)];
+    for arrow in arrows {
+        assert_eq!(
+            identity::callable_identity(&ir_file, arrow).owner_chain,
+            expected_owner_chain
+        );
+    }
+}
