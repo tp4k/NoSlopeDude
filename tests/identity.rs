@@ -768,6 +768,24 @@ function f() {
     assert_ne!(module_identity, namespace_identity);
     assert_ne!(module_identity, top_level_identity);
     assert_ne!(namespace_identity, top_level_identity);
+
+    // WS-1 triage row 1 (round 3): `owner_segment_for_type` must not run on
+    // the anonymous `class`/`module` keyword leaves that share their node
+    // kind string with the named `class_declaration`/`module` arms -- each
+    // owner table below holds exactly one type/namespace entry plus one
+    // callable entry, never a phantom third entry for the keyword leaf.
+    assert_eq!(
+        lower_ts("class A {\n    m() {\n        return 1;\n    }\n}\n")
+            .owners
+            .len(),
+        2
+    );
+    assert_eq!(
+        lower_ts("module M {\n    function f() {\n        return 3;\n    }\n}\n")
+            .owners
+            .len(),
+        2
+    );
 }
 
 fn owner_anonymous_class_body() -> nsd::ir::OwnerSegment {
