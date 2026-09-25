@@ -5,9 +5,6 @@
 //! E101/E102 (M3) -- nothing here classifies a diff, emits a diagnostic, or
 //! wires into `pipeline.rs`; that is the next milestone's job (decision 13).
 //!
-//! Round 1 (this commit): tiers 1-3. Ambiguity lands in a later commit of
-//! the same round (strict TDD, one behaviour at a time).
-//!
 //! Every input is already computed by the caller: WS-1's `identity::
 //! identities` zipped with `identity::body_fingerprint` for the
 //! `(CallableIdentity, fingerprint)` pairs, `git::diff`'s own `Change` list
@@ -22,6 +19,12 @@
 //! then pair whatever remains by order-preserving greedy matching in source
 //! order. Every group is built with a hash map, never by comparing every
 //! base callable against every candidate one.
+//!
+//! Ambiguity: when a tier-3 fingerprint bucket has more than one leftover
+//! callable on either side, none of them match; they are reported together
+//! in one `Ambiguity` record instead (both sides' lists, either of which may
+//! be empty). Emitting `NSD-G102` for one is M3-1's job (decision 6: it needs
+//! an E101/E102 verdict to know whether the ambiguity could change one).
 
 use std::collections::{HashMap, HashSet};
 
@@ -67,7 +70,7 @@ pub struct CallableMatch {
 
 /// A tier-3 fingerprint bucket with more than one leftover callable on
 /// either side: nothing in `base` matches anything in `candidate` (either
-/// list may be empty). Not yet produced (tier 3 is a later commit).
+/// list may be empty).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ambiguity {
     pub fingerprint: String,
@@ -84,9 +87,9 @@ pub struct MatchOutput {
     pub ambiguities: Vec<Ambiguity>,
 }
 
-/// Matches `base`'s callables against `candidate`'s. Round 1: tiers 1-2
-/// (same path, then a `Change::Renamed` pair, both by equal identity). Tier
-/// 3 and ambiguity land in a later commit.
+/// Matches `base`'s callables against `candidate`'s, tiers 1-3 in order.
+/// `changes` is only consulted for its `Change::Renamed` entries (tier 2);
+/// every other variant is ignored.
 pub fn match_callables(
     base: &[FileCallables],
     candidate: &[FileCallables],
@@ -211,21 +214,37 @@ pub fn match_callables(
                 });
         }
     }
-    for (base_refs, candidate_refs) in pools.into_values() {
+    let mut ambiguities = Vec::new();
+    for (fingerprint, (base_refs, candidate_refs)) in pools {
         if let ([base_ref], [candidate_ref]) = (base_refs.as_slice(), candidate_refs.as_slice()) {
             matches.push(CallableMatch {
                 base: base_ref.clone(),
                 candidate: candidate_ref.clone(),
                 tier: MatchTier::BodyFingerprint,
             });
+        } else if base_refs.len() > 1 || candidate_refs.len() > 1 {
+            ambiguities.push(Ambiguity {
+                fingerprint: fingerprint.to_string(),
+                base: base_refs,
+                candidate: candidate_refs,
+            });
         }
     }
 
     matches.sort_by(|a, b| ref_order(&a.base).cmp(&ref_order(&b.base)));
+    for ambiguity in &mut ambiguities {
+        ambiguity
+            .base
+            .sort_by(|a, b| ref_order(a).cmp(&ref_order(b)));
+        ambiguity
+            .candidate
+            .sort_by(|a, b| ref_order(a).cmp(&ref_order(b)));
+    }
+    ambiguities.sort_by(|a, b| a.fingerprint.cmp(&b.fingerprint));
 
     MatchOutput {
         matches,
-        ambiguities: Vec::new(),
+        ambiguities,
     }
 }
 
