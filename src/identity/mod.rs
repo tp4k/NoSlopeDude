@@ -33,6 +33,10 @@ use crate::ir::{CallableKind, IrCallable, IrNode, OwnerSegment, Span};
 use crate::lower::IrFile;
 use crate::model::LanguageFamily;
 
+/// M2-3: matches callables across two snapshots by structural identity, git
+/// rename, then exact body fingerprint. See the module's own doc comment.
+pub mod matching;
+
 /// The display-name sentinel `CallableIdentity::name` carries for an
 /// undeclared callable -- deliberately not `IrCallable.name`'s own
 /// `<anonymous>@<line>` fallback, which embeds the declaration's line number
