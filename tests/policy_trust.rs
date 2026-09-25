@@ -347,8 +347,9 @@ fn test_c101_is_informational_not_an_error() {
     );
     let candidate = CommitSnapshot::head_or_empty(&repo).expect("snapshot candidate commit");
 
-    let resolution = policy::resolve(&repo, None, &base, Candidate::Commit(&candidate))
-        .expect("a changed but valid candidate is Ok, since C101 is informational (M5-3 maps exit codes)");
+    let resolution = policy::resolve(&repo, None, &base, Candidate::Commit(&candidate)).expect(
+        "a changed but valid candidate is Ok, since C101 is informational (M5-3 maps exit codes)",
+    );
 
     assert_eq!(
         resolution.diagnostics,
