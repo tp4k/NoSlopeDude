@@ -69,6 +69,66 @@ fn test_clean_checkout_ids_agree_across_modes() {
 }
 
 #[test]
+#[cfg(unix)]
+fn test_clean_checkout_ids_agree_across_modes_with_symlink_and_gitlink() {
+    let (dir, repo) = common::init_repo();
+    let commit_oid = common::commit_entries(
+        &repo,
+        &[
+            (b"a.ts".to_vec(), MODE_REGULAR, b"one\n".to_vec()),
+            (b"link".to_vec(), MODE_SYMLINK, b"a.ts".to_vec()),
+            (
+                b"vendor/lib".to_vec(),
+                MODE_SUBMODULE,
+                [0xCCu8; 20].to_vec(),
+            ),
+        ],
+    );
+    sync_index_to_commit(&repo, commit_oid);
+    std::fs::write(dir.path().join("a.ts"), b"one\n").expect("write a.ts");
+    std::os::unix::fs::symlink("a.ts", dir.path().join("link"))
+        .expect("create the on-disk symlink");
+    std::fs::create_dir_all(dir.path().join("vendor").join("lib"))
+        .expect("create the submodule directory");
+
+    let commit_id =
+        SnapshotId::of_commit(&CommitSnapshot::head_or_empty(&repo).expect("open commit snapshot"));
+    let index_id = SnapshotId::of_index(&IndexSnapshot::open(&repo).expect("open index snapshot"));
+    let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let worktree_id = SnapshotId::of_worktree(&repo, &worktree).expect("compute worktree id");
+
+    assert_eq!(
+        commit_id, index_id,
+        "commit and index IDs must agree with a symlink and a gitlink present"
+    );
+    assert_eq!(
+        index_id, worktree_id,
+        "index and worktree IDs must agree with a symlink and a gitlink present"
+    );
+
+    // Re-point the on-disk link; the worktree ID must move, the commit ID
+    // must not.
+    std::fs::remove_file(dir.path().join("link")).expect("remove the old on-disk symlink");
+    std::os::unix::fs::symlink("b.ts", dir.path().join("link"))
+        .expect("re-point the on-disk symlink");
+    let repointed_worktree =
+        WorktreeSnapshot::open(&repo).expect("open re-pointed worktree snapshot");
+    let repointed_worktree_id =
+        SnapshotId::of_worktree(&repo, &repointed_worktree).expect("compute re-pointed id");
+    assert_ne!(
+        worktree_id, repointed_worktree_id,
+        "re-pointing the on-disk symlink target must change the worktree ID"
+    );
+    let commit_id_after = SnapshotId::of_commit(
+        &CommitSnapshot::head_or_empty(&repo).expect("re-open commit snapshot"),
+    );
+    assert_eq!(
+        commit_id, commit_id_after,
+        "re-pointing the on-disk symlink must not move the commit ID"
+    );
+}
+
+#[test]
 fn test_id_is_deterministic_and_checkout_root_independent() {
     let entries: &[(Vec<u8>, i32, Vec<u8>)] = &[
         (
