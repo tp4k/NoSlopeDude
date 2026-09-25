@@ -17,8 +17,9 @@
 //! identical finding: pair equal fingerprints first, in source order (the
 //! k-th repeated fingerprint on one side pairs with the k-th on the other),
 //! then pair whatever remains by order-preserving greedy matching in source
-//! order. Every group is built with a hash map, never by comparing every
-//! base callable against every candidate one.
+//! order. Every group and every tier-3 fingerprint bucket is built with a
+//! hash map, never by comparing every base callable against every candidate
+//! one.
 //!
 //! Ambiguity: when a tier-3 fingerprint bucket has more than one leftover
 //! callable on either side, none of them match; they are reported together
