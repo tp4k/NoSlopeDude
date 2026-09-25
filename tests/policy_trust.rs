@@ -48,6 +48,17 @@ fn stage_bytes(repo: &Repository, path: &[u8], mode: i32, content: &[u8]) {
     index.write().expect("write index");
 }
 
+/// Valid `version: 1` YAML padded past `SOURCE_CEILING_BYTES` with a
+/// trailing comment line (triage-ws2-r1.md row 3): a ceiling guard that
+/// were deleted would still reject an all-`#` fixture for its missing
+/// `version` field, so the padding must stay parseable to actually
+/// exercise the byte-length check.
+fn oversized_valid_config() -> Vec<u8> {
+    let mut bytes = b"version: 1\n".to_vec();
+    bytes.resize((SOURCE_CEILING_BYTES + 1) as usize, b'#');
+    bytes
+}
+
 #[test]
 fn test_candidate_config_cannot_weaken_its_own_check() {
     let (_dir, repo) = common::init_repo();
@@ -215,6 +226,36 @@ fn test_trusted_config_overrides_an_invalid_base() {
 
     assert_eq!(resolution.source, ConfigSource::Trusted);
     assert_eq!(resolution.config, Config::default());
+}
+
+#[test]
+fn test_trusted_config_overrides_an_unreadable_base() {
+    let (_dir, repo) = common::init_repo();
+    common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_REGULAR, oversized_valid_config())],
+    );
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+    let candidate = base.clone();
+
+    let trusted_dir = tempfile::TempDir::new().expect("create a temp dir for the trusted config");
+    let trusted_path = trusted_dir.path().join("trusted.yml");
+    std::fs::write(&trusted_path, b"version: 1\n").expect("write trusted config");
+
+    let resolution = policy::resolve(
+        &repo,
+        Some(trusted_path.as_path()),
+        &base,
+        Candidate::Commit(&candidate),
+    )
+    .expect("a trusted config overrides an unreadable base");
+
+    assert_eq!(resolution.source, ConfigSource::Trusted);
+    assert_eq!(resolution.config, Config::default());
+    assert!(
+        resolution.diagnostics.is_empty(),
+        "an unreadable base skips the candidate diff entirely"
+    );
 }
 
 #[test]
