@@ -615,3 +615,73 @@ fn test_owner_segments_are_stored_once_per_owner() {
         );
     }
 }
+
+fn owner_namespace(name: &str) -> nsd::ir::OwnerSegment {
+    nsd::ir::OwnerSegment {
+        kind: OwnerKind::Namespace,
+        name: Some(name.to_string()),
+    }
+}
+
+/// WS-1 triage row 2: `abstract class` and `module`/`namespace` owner
+/// segments -- both used to fall through `owner_segment_for_type` entirely
+/// and give an empty owner chain, so two abstract classes' same-named method
+/// collided on identity, and `module M {}` gave no `Namespace` segment at
+/// all.
+#[test]
+fn test_ts_abstract_class_and_namespace_owner_segments() {
+    let source = "\
+abstract class A {
+    m() {
+        return 1;
+    }
+}
+
+abstract class B {
+    m() {
+        return 2;
+    }
+}
+
+module M {
+    function f() {
+        return 3;
+    }
+}
+
+namespace N {
+    function f() {
+        return 4;
+    }
+}
+
+function f() {
+    return 5;
+}
+";
+    let ir_file = lower_ts(source);
+    let a_m = callable_at_line(&ir_file, 2);
+    let b_m = callable_at_line(&ir_file, 8);
+    let module_f = callable_at_line(&ir_file, 14);
+    let namespace_f = callable_at_line(&ir_file, 20);
+    let top_level_f = callable_at_line(&ir_file, 25);
+
+    let a_identity = identity::callable_identity(&ir_file, a_m);
+    let b_identity = identity::callable_identity(&ir_file, b_m);
+    assert_eq!(a_identity.owner_chain, vec![owner_named_type("A")]);
+    assert_eq!(b_identity.owner_chain, vec![owner_named_type("B")]);
+    assert_ne!(
+        a_identity, b_identity,
+        "distinct abstract-class owner chains"
+    );
+
+    let module_identity = identity::callable_identity(&ir_file, module_f);
+    let namespace_identity = identity::callable_identity(&ir_file, namespace_f);
+    let top_level_identity = identity::callable_identity(&ir_file, top_level_f);
+    assert_eq!(module_identity.owner_chain, vec![owner_namespace("M")]);
+    assert_eq!(namespace_identity.owner_chain, vec![owner_namespace("N")]);
+    assert_eq!(top_level_identity.owner_chain, Vec::new());
+    assert_ne!(module_identity, namespace_identity);
+    assert_ne!(module_identity, top_level_identity);
+    assert_ne!(namespace_identity, top_level_identity);
+}
