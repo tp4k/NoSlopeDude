@@ -15,6 +15,7 @@ const MODE_SYMLINK: i32 = 0o120000;
 const MODE_SUBMODULE: i32 = 0o160000;
 
 #[test]
+#[cfg(unix)]
 fn test_clean_checkout_ids_agree_across_modes() {
     let (dir, repo) = common::init_repo();
     let commit_oid = common::commit_entries(
@@ -341,6 +342,7 @@ fn test_over_ceiling_worktree_edit_changes_the_id() {
 }
 
 #[test]
+#[cfg(unix)]
 fn test_worktree_id_writes_nothing_to_the_odb() {
     let (dir, repo) = common::init_repo();
     let over_ceiling = vec![b'b'; SOURCE_CEILING_BYTES as usize + 1];
@@ -451,6 +453,7 @@ fn write_worktree_files(root: &std::path::Path, entries: &[(Vec<u8>, i32, Vec<u8
     }
 }
 
+#[cfg(unix)]
 fn chmod_executable(path: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;
     let mut perms = std::fs::metadata(path).expect("stat file").permissions();
