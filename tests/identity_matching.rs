@@ -490,7 +490,7 @@ fn test_tier_order_prefers_structural_identity() {
 // either side.
 // ---------------------------------------------------------------------
 
-/// Two identical getters added where one existed: 2 base and 2 candidate
+/// Two pairs of identical getters, one on each side: 2 base and 2 candidate
 /// leftovers sharing one fingerprint give one `Ambiguity` and zero matches
 /// for that fingerprint. All four identities are kept distinct so tiers 1-2
 /// cannot place any of them first.
@@ -525,6 +525,62 @@ fn test_exact_body_ambiguity_stays_unmatched() {
         ambiguity.candidate,
         vec![callable_ref("A.java", 0), callable_ref("A.java", 1)]
     );
+}
+
+/// Two identical getters added where one existed: a 1-base/2-candidate
+/// fingerprint bucket gives one `Ambiguity` and zero matches, not a spurious
+/// 1:1 pair with one candidate left over. The mirrored 2-base/1-candidate
+/// case (one of two identical getters deleted) is asserted the same way.
+#[test]
+fn test_one_to_many_body_ambiguity_stays_unmatched() {
+    let base = vec![synth_file(
+        "A.java",
+        &[(synth_identity("a1", &[]), "blake3:dup")],
+    )];
+    let candidate = vec![synth_file(
+        "A.java",
+        &[
+            (synth_identity("c1", &[]), "blake3:dup"),
+            (synth_identity("c2", &[]), "blake3:dup"),
+        ],
+    )];
+
+    let output = match_callables(&base, &candidate, &[]);
+
+    assert!(output.matches.is_empty(), "{output:#?}");
+    assert_eq!(output.ambiguities.len(), 1, "{output:#?}");
+    let ambiguity = &output.ambiguities[0];
+    assert_eq!(ambiguity.fingerprint, "blake3:dup");
+    assert_eq!(ambiguity.base, vec![callable_ref("A.java", 0)]);
+    assert_eq!(
+        ambiguity.candidate,
+        vec![callable_ref("A.java", 0), callable_ref("A.java", 1)]
+    );
+
+    // Mirrored: 2 base, 1 candidate.
+    let base = vec![synth_file(
+        "A.java",
+        &[
+            (synth_identity("a1", &[]), "blake3:dup"),
+            (synth_identity("a2", &[]), "blake3:dup"),
+        ],
+    )];
+    let candidate = vec![synth_file(
+        "A.java",
+        &[(synth_identity("c1", &[]), "blake3:dup")],
+    )];
+
+    let output = match_callables(&base, &candidate, &[]);
+
+    assert!(output.matches.is_empty(), "{output:#?}");
+    assert_eq!(output.ambiguities.len(), 1, "{output:#?}");
+    let ambiguity = &output.ambiguities[0];
+    assert_eq!(ambiguity.fingerprint, "blake3:dup");
+    assert_eq!(
+        ambiguity.base,
+        vec![callable_ref("A.java", 0), callable_ref("A.java", 1)]
+    );
+    assert_eq!(ambiguity.candidate, vec![callable_ref("A.java", 0)]);
 }
 
 /// 2,000 identical leftovers (1,000 base, 1,000 candidate, one distinct
