@@ -354,6 +354,40 @@ fn test_invalid_candidate_config_is_reported_but_base_still_applies() {
 }
 
 #[test]
+fn test_oversized_candidate_config_is_reported_but_base_still_applies() {
+    let (_dir, repo) = common::init_repo();
+    common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_REGULAR, b"version: 1\n".to_vec())],
+    );
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+    let base_config = nsd::config::load_from_commit(&repo, &base).expect("base config is valid");
+
+    common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_REGULAR, oversized_valid_config())],
+    );
+    let candidate = CommitSnapshot::head_or_empty(&repo).expect("snapshot candidate commit");
+
+    let resolution = policy::resolve(&repo, None, &base, Candidate::Commit(&candidate))
+        .expect("an oversized candidate must not fail the whole resolution");
+
+    assert_eq!(resolution.config, base_config);
+    assert_eq!(resolution.source, ConfigSource::Base);
+    assert_eq!(
+        resolution.diagnostics,
+        vec![
+            Diagnostic {
+                code: CODE_CONFIG_CHANGED
+            },
+            Diagnostic {
+                code: CODE_INVALID_CONFIG
+            },
+        ]
+    );
+}
+
+#[test]
 fn test_unchanged_candidate_config_reports_nothing() {
     let (_dir, repo) = common::init_repo();
     common::commit_entries(
