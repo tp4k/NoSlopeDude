@@ -144,7 +144,13 @@ fn test_no_analyzer_names_a_grammar_node_kind() {
     );
 
     let mut violations = Vec::new();
-    for scanned in ["src/ir", "src/metrics", "src/clones", "src/rules"] {
+    for scanned in [
+        "src/ir",
+        "src/metrics",
+        "src/clones",
+        "src/rules",
+        "src/identity",
+    ] {
         violations.extend(violations_in(&root.join(scanned), &vocabulary));
     }
 
@@ -195,7 +201,13 @@ fn test_the_scan_catches_a_planted_grammar_string() {
     // real grammar node-kind literal, so the walk is exercising real
     // production code, not an empty directory.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    for scanned in ["src/ir", "src/metrics", "src/clones", "src/rules"] {
+    for scanned in [
+        "src/ir",
+        "src/metrics",
+        "src/clones",
+        "src/rules",
+        "src/identity",
+    ] {
         let files = rust_files_under(&root.join(scanned));
         assert!(
             !files.is_empty(),
