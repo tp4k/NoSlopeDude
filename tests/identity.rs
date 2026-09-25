@@ -685,3 +685,98 @@ function f() {
     assert_ne!(module_identity, top_level_identity);
     assert_ne!(namespace_identity, top_level_identity);
 }
+
+fn owner_anonymous_class_body() -> nsd::ir::OwnerSegment {
+    nsd::ir::OwnerSegment {
+        kind: OwnerKind::AnonymousClassBody,
+        name: None,
+    }
+}
+
+/// WS-1 triage row 3: an enum constant's own body (`PLUS { … }`) is an
+/// anonymous class body (JLS §8.9.1), not a member of the enum's own
+/// `NamedType` -- `PLUS`'s overriding `apply` must carry a distinct owner
+/// chain from the enum's own shared `apply`. A method nested inside an
+/// `@interface` confirms `annotation_type_declaration` itself contributes a
+/// `NamedType` segment (it used to be entirely absent from the NamedType
+/// arm).
+#[test]
+fn test_java_owner_segments_cover_anonymous_bodies_and_annotation_types() {
+    let enum_source = "\
+enum Op {
+    PLUS {
+        int apply() {
+            return 1;
+        }
+    },
+    MINUS {
+        int apply() {
+            return 2;
+        }
+    };
+
+    int apply() {
+        return 0;
+    }
+}
+";
+    let enum_ir = lower_java(enum_source);
+    let plus_apply = callable_at_line(&enum_ir, 3);
+    let minus_apply = callable_at_line(&enum_ir, 8);
+    let shared_apply = callable_at_line(&enum_ir, 13);
+
+    let plus_identity = identity::callable_identity(&enum_ir, plus_apply);
+    let minus_identity = identity::callable_identity(&enum_ir, minus_apply);
+    let shared_identity = identity::callable_identity(&enum_ir, shared_apply);
+    assert_eq!(
+        plus_identity.owner_chain,
+        vec![owner_named_type("Op"), owner_anonymous_class_body()]
+    );
+    assert_eq!(
+        minus_identity.owner_chain,
+        vec![owner_named_type("Op"), owner_anonymous_class_body()]
+    );
+    assert_eq!(shared_identity.owner_chain, vec![owner_named_type("Op")]);
+    assert_ne!(
+        plus_identity, shared_identity,
+        "an enum constant's own body is an anonymous class body, not the enum's NamedType"
+    );
+
+    let anonymous_class_body_source = "\
+class A {
+    void m() {
+        Runnable r = new Runnable() {
+            public void run() {
+            }
+        };
+    }
+}
+";
+    let anonymous_ir = lower_java(anonymous_class_body_source);
+    let run_method = callable_at_line(&anonymous_ir, 4);
+    let run_identity = identity::callable_identity(&anonymous_ir, run_method);
+    assert_eq!(
+        run_identity.owner_chain,
+        vec![
+            owner_named_type("A"),
+            owner_callable("m"),
+            owner_anonymous_class_body(),
+        ]
+    );
+
+    let annotation_source = "\
+@interface Config {
+    record Loader() {
+        void run() {
+        }
+    }
+}
+";
+    let annotation_ir = lower_java(annotation_source);
+    let loader_run = callable_at_line(&annotation_ir, 3);
+    let loader_run_identity = identity::callable_identity(&annotation_ir, loader_run);
+    assert_eq!(
+        loader_run_identity.owner_chain,
+        vec![owner_named_type("Config"), owner_named_type("Loader")]
+    );
+}
