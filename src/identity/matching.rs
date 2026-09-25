@@ -5,8 +5,8 @@
 //! E101/E102 (M3) -- nothing here classifies a diff, emits a diagnostic, or
 //! wires into `pipeline.rs`; that is the next milestone's job (decision 13).
 //!
-//! Round 1 (this commit): tiers 1-2. Tier 3 and ambiguity land in later
-//! commits of the same round (strict TDD, one behaviour at a time).
+//! Round 1 (this commit): tiers 1-3. Ambiguity lands in a later commit of
+//! the same round (strict TDD, one behaviour at a time).
 //!
 //! Every input is already computed by the caller: WS-1's `identity::
 //! identities` zipped with `identity::body_fingerprint` for the
@@ -176,6 +176,49 @@ pub fn match_callables(
             MatchTier::Rename,
             &mut matches,
         );
+    }
+
+    // Tier 3: pooled across every file (the same file included, so an
+    // in-place rename matches too), an exactly-1:1 leftover fingerprint.
+    let mut pools: HashMap<&str, (Vec<CallableRef>, Vec<CallableRef>)> = HashMap::new();
+    for (file_index, file) in base.iter().enumerate() {
+        for (index, (_, fingerprint)) in file.callables.iter().enumerate() {
+            if base_matched[file_index][index] {
+                continue;
+            }
+            pools
+                .entry(fingerprint.as_str())
+                .or_default()
+                .0
+                .push(CallableRef {
+                    path: file.path.clone(),
+                    index,
+                });
+        }
+    }
+    for (file_index, file) in candidate.iter().enumerate() {
+        for (index, (_, fingerprint)) in file.callables.iter().enumerate() {
+            if candidate_matched[file_index][index] {
+                continue;
+            }
+            pools
+                .entry(fingerprint.as_str())
+                .or_default()
+                .1
+                .push(CallableRef {
+                    path: file.path.clone(),
+                    index,
+                });
+        }
+    }
+    for (base_refs, candidate_refs) in pools.into_values() {
+        if let ([base_ref], [candidate_ref]) = (base_refs.as_slice(), candidate_refs.as_slice()) {
+            matches.push(CallableMatch {
+                base: base_ref.clone(),
+                candidate: candidate_ref.clone(),
+                tier: MatchTier::BodyFingerprint,
+            });
+        }
     }
 
     matches.sort_by(|a, b| ref_order(&a.base).cmp(&ref_order(&b.base)));

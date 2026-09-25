@@ -417,10 +417,7 @@ fn test_renamed_file_matches_at_tier_2() {
 fn test_cross_file_move_matches_at_tier_3() {
     let moved = synth_identity("run", &[]);
     let base = vec![synth_file("A.java", &[(moved.clone(), "blake3:unchanged")])];
-    let candidate = vec![synth_file(
-        "B.java",
-        &[(moved.clone(), "blake3:unchanged")],
-    )];
+    let candidate = vec![synth_file("B.java", &[(moved.clone(), "blake3:unchanged")])];
 
     let output = match_callables(&base, &candidate, &[]);
 
