@@ -334,9 +334,9 @@ pub fn load_from_commit(
 }
 
 /// Raw repository-root `nsd.yml` bytes from a `Commit` snapshot (M2-2's
-/// diff seam, `src/policy`): `Ok(None)` when no root entry exists, the
-/// same errors `load_from_commit` reports otherwise (an unreadable or
-/// over-ceiling blob keeps the wrapped `GitError`'s own code, 3a).
+/// diff seam, `src/policy`): `Ok(None)` when no root entry exists; an
+/// over-ceiling or non-regular entry is `NSD-C102`, and a Git-domain read
+/// failure keeps the wrapped `GitError`'s own code (3a).
 pub fn root_config_bytes_from_commit(
     repo: &Repository,
     snapshot: &CommitSnapshot,
