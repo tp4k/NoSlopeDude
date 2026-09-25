@@ -52,6 +52,37 @@ pub struct Resolution {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+/// The candidate diagnostics for one invocation (M2-2's diff seam): `Ok`
+/// when the candidate's raw bytes were read, whatever they compare to.
+/// Row 2 (triage-ws2-r1.md) narrows this further for a candidate read
+/// error.
+fn diagnostics_for_candidate(
+    repo: &Repository,
+    candidate: Candidate<'_>,
+    base_bytes: Option<&Vec<u8>>,
+) -> Result<Vec<Diagnostic>, ConfigError> {
+    let candidate_bytes = match candidate {
+        Candidate::Commit(snapshot) => config::root_config_bytes_from_commit(repo, snapshot)?,
+        Candidate::Index(snapshot) => config::root_config_bytes_from_index(repo, snapshot)?,
+        Candidate::Worktree(snapshot) => config::root_config_bytes_from_worktree(repo, snapshot)?,
+    };
+
+    let mut diagnostics = Vec::new();
+    if candidate_bytes.as_ref() != base_bytes {
+        diagnostics.push(Diagnostic {
+            code: CODE_CONFIG_CHANGED,
+        });
+        if let Some(bytes) = &candidate_bytes {
+            if Config::parse(bytes).is_err() {
+                diagnostics.push(Diagnostic {
+                    code: CODE_INVALID_CONFIG,
+                });
+            }
+        }
+    }
+    Ok(diagnostics)
+}
+
 /// Resolves the effective `Config` for one invocation (M2-2):
 ///
 /// - A trusted `config_path`, when given, completely replaces repository
@@ -69,28 +100,15 @@ pub fn resolve(
     base: &CommitSnapshot,
     candidate: Candidate<'_>,
 ) -> Result<Resolution, ConfigError> {
-    let base_bytes = config::root_config_bytes_from_commit(repo, base)?;
-    let candidate_bytes = match candidate {
-        Candidate::Commit(snapshot) => config::root_config_bytes_from_commit(repo, snapshot)?,
-        Candidate::Index(snapshot) => config::root_config_bytes_from_index(repo, snapshot)?,
-        Candidate::Worktree(snapshot) => config::root_config_bytes_from_worktree(repo, snapshot)?,
-    };
-
-    let mut diagnostics = Vec::new();
-    if candidate_bytes != base_bytes {
-        diagnostics.push(Diagnostic {
-            code: CODE_CONFIG_CHANGED,
-        });
-        if let Some(bytes) = &candidate_bytes {
-            if Config::parse(bytes).is_err() {
-                diagnostics.push(Diagnostic {
-                    code: CODE_INVALID_CONFIG,
-                });
-            }
-        }
-    }
-
     if let Some(path) = config_path {
+        // A trusted config completely replaces repository policy, so an
+        // unreadable base must not fail this resolution (triage-ws2-r1.md
+        // row 1): skip the candidate diff entirely rather than propagate
+        // the base read's error.
+        let diagnostics = match config::root_config_bytes_from_commit(repo, base) {
+            Ok(base_bytes) => diagnostics_for_candidate(repo, candidate, base_bytes.as_ref())?,
+            Err(_) => Vec::new(),
+        };
         let config = config::load_trusted(path)?;
         return Ok(Resolution {
             config,
@@ -98,6 +116,9 @@ pub fn resolve(
             diagnostics,
         });
     }
+
+    let base_bytes = config::root_config_bytes_from_commit(repo, base)?;
+    let diagnostics = diagnostics_for_candidate(repo, candidate, base_bytes.as_ref())?;
 
     match base_bytes {
         Some(bytes) => Ok(Resolution {
