@@ -484,3 +484,148 @@ fn test_tier_order_prefers_structural_identity() {
     );
     assert!(output.ambiguities.is_empty());
 }
+
+// ---------------------------------------------------------------------
+// Ambiguity: a tier-3 fingerprint bucket with more than one leftover on
+// either side.
+// ---------------------------------------------------------------------
+
+/// Two identical getters added where one existed: 2 base and 2 candidate
+/// leftovers sharing one fingerprint give one `Ambiguity` and zero matches
+/// for that fingerprint. All four identities are kept distinct so tiers 1-2
+/// cannot place any of them first.
+#[test]
+fn test_exact_body_ambiguity_stays_unmatched() {
+    let base = vec![synth_file(
+        "A.java",
+        &[
+            (synth_identity("a1", &[]), "blake3:dup"),
+            (synth_identity("a2", &[]), "blake3:dup"),
+        ],
+    )];
+    let candidate = vec![synth_file(
+        "A.java",
+        &[
+            (synth_identity("c1", &[]), "blake3:dup"),
+            (synth_identity("c2", &[]), "blake3:dup"),
+        ],
+    )];
+
+    let output = match_callables(&base, &candidate, &[]);
+
+    assert!(output.matches.is_empty(), "{output:#?}");
+    assert_eq!(output.ambiguities.len(), 1, "{output:#?}");
+    let ambiguity = &output.ambiguities[0];
+    assert_eq!(ambiguity.fingerprint, "blake3:dup");
+    assert_eq!(
+        ambiguity.base,
+        vec![callable_ref("A.java", 0), callable_ref("A.java", 1)]
+    );
+    assert_eq!(
+        ambiguity.candidate,
+        vec![callable_ref("A.java", 0), callable_ref("A.java", 1)]
+    );
+}
+
+/// 2,000 identical leftovers (1,000 base, 1,000 candidate, one distinct
+/// identity per callable so tiers 1-2 place none of them) give one
+/// `Ambiguity` group containing all of them, built from hash-keyed pools
+/// rather than an O(n^2) comparison.
+#[test]
+fn test_many_identical_bodies_form_one_ambiguity_group() {
+    const N: usize = 1000;
+    let base: Vec<FileCallables> = (0..N)
+        .map(|i| {
+            synth_file(
+                &format!("base{i}.java"),
+                &[(synth_identity(&format!("base{i}"), &[]), "blake3:dup")],
+            )
+        })
+        .collect();
+    let candidate: Vec<FileCallables> = (0..N)
+        .map(|i| {
+            synth_file(
+                &format!("candidate{i}.java"),
+                &[(synth_identity(&format!("candidate{i}"), &[]), "blake3:dup")],
+            )
+        })
+        .collect();
+
+    let output = match_callables(&base, &candidate, &[]);
+
+    assert!(output.matches.is_empty(), "{}", output.matches.len());
+    assert_eq!(output.ambiguities.len(), 1, "{}", output.ambiguities.len());
+    let ambiguity = &output.ambiguities[0];
+    assert_eq!(ambiguity.fingerprint, "blake3:dup");
+    assert_eq!(ambiguity.base.len(), N);
+    assert_eq!(ambiguity.candidate.len(), N);
+}
+
+/// A deleted callable and an unrelated added callable both stay unmatched:
+/// distinct identities and distinct fingerprints give tiers 1-3 nothing to
+/// pair them on.
+#[test]
+fn test_deleted_and_added_callables_are_unmatched() {
+    let base = vec![synth_file(
+        "A.java",
+        &[(synth_identity("deletedFn", &[]), "blake3:deleted-body")],
+    )];
+    let candidate = vec![synth_file(
+        "A.java",
+        &[(synth_identity("addedFn", &[]), "blake3:added-body")],
+    )];
+
+    let output = match_callables(&base, &candidate, &[]);
+
+    assert!(output.matches.is_empty(), "{output:#?}");
+    assert!(output.ambiguities.is_empty(), "{output:#?}");
+}
+
+/// Shuffled file order (base and candidate both reversed) gives an
+/// identical `MatchOutput`: the spec's own sort by (path bytes, callable
+/// index) makes the result independent of input order, across a structural
+/// match, a cross-file tier-3 move, an ambiguity group, and a deletion all
+/// at once.
+#[test]
+fn test_matching_is_deterministic_under_input_order() {
+    let s = synth_identity("s", &[]);
+    let m1 = synth_identity("m1", &[]);
+    let m2 = synth_identity("m2", &[]);
+    let q1 = synth_identity("q1", &[]);
+    let q2 = synth_identity("q2", &[]);
+    let q3 = synth_identity("q3", &[]);
+    let q4 = synth_identity("q4", &[]);
+    let d = synth_identity("d", &[]);
+
+    let base = vec![
+        synth_file("S.java", &[(s.clone(), "blake3:s")]),
+        synth_file("M1.java", &[(m1.clone(), "blake3:move")]),
+        synth_file(
+            "Q.java",
+            &[(q1.clone(), "blake3:dup"), (q2.clone(), "blake3:dup")],
+        ),
+        synth_file("D.java", &[(d.clone(), "blake3:deleted")]),
+    ];
+    let candidate = vec![
+        synth_file("S.java", &[(s.clone(), "blake3:s")]),
+        synth_file("M2.java", &[(m2.clone(), "blake3:move")]),
+        synth_file(
+            "Q.java",
+            &[(q3.clone(), "blake3:dup"), (q4.clone(), "blake3:dup")],
+        ),
+    ];
+
+    let forward = match_callables(&base, &candidate, &[]);
+
+    let mut base_reversed = base.clone();
+    base_reversed.reverse();
+    let mut candidate_reversed = candidate.clone();
+    candidate_reversed.reverse();
+    let reversed = match_callables(&base_reversed, &candidate_reversed, &[]);
+
+    assert_eq!(forward, reversed);
+    // A sanity check that this fixture actually exercises every code path,
+    // so the equality above is not vacuously true.
+    assert_eq!(forward.matches.len(), 2, "{forward:#?}");
+    assert_eq!(forward.ambiguities.len(), 1, "{forward:#?}");
+}
