@@ -684,4 +684,45 @@ fn test_matching_is_deterministic_under_input_order() {
     // so the equality above is not vacuously true.
     assert_eq!(forward.matches.len(), 2, "{forward:#?}");
     assert_eq!(forward.ambiguities.len(), 1, "{forward:#?}");
+    // The Output bullet's own sort by (path bytes, callable index): unsorted
+    // insertion order for these matches is [S.java, M1.java] (S is matched in
+    // tier 1's loop before the tier-3 pool sees M1's move), but "M1.java" <
+    // "S.java" byte-wise.
+    assert_eq!(
+        forward
+            .matches
+            .iter()
+            .map(|m| m.base.clone())
+            .collect::<Vec<_>>(),
+        vec![callable_ref("M1.java", 0), callable_ref("S.java", 0)]
+    );
+}
+
+/// Two files' ambiguity lists are sorted by (path bytes, callable index),
+/// not by insertion order: `Z.java` is matched against `A.java` with `Z`
+/// inserted first on both sides.
+#[test]
+fn test_ambiguity_lists_are_sorted_by_path_and_index() {
+    let base = vec![
+        synth_file("Z.java", &[(synth_identity("z", &[]), "blake3:dup")]),
+        synth_file("A.java", &[(synth_identity("a", &[]), "blake3:dup")]),
+    ];
+    let candidate = vec![
+        synth_file("Z.java", &[(synth_identity("z2", &[]), "blake3:dup")]),
+        synth_file("A.java", &[(synth_identity("a2", &[]), "blake3:dup")]),
+    ];
+
+    let output = match_callables(&base, &candidate, &[]);
+
+    assert!(output.matches.is_empty(), "{output:#?}");
+    assert_eq!(output.ambiguities.len(), 1, "{output:#?}");
+    let ambiguity = &output.ambiguities[0];
+    assert_eq!(
+        ambiguity.base,
+        vec![callable_ref("A.java", 0), callable_ref("Z.java", 0)]
+    );
+    assert_eq!(
+        ambiguity.candidate,
+        vec![callable_ref("A.java", 0), callable_ref("Z.java", 0)]
+    );
 }
