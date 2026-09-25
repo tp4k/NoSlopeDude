@@ -122,7 +122,14 @@ fn callable_signature(node: Node, source: &str) -> Vec<String> {
 /// M1-7's Java owner-chain segment for a node that is itself a named type or
 /// an anonymous class body (never a callable -- `callable_info`'s own
 /// `CallableInfo` already carries that segment's facts, reused directly by
-/// `classify` below rather than recomputed here).
+/// `classify` below rather than recomputed here). Round 2 (WS-1 triage rows
+/// 3/4): `annotation_type_declaration` (an `@interface`) is a named type too;
+/// an `enum_constant`'s own `body` field is a `class_body` node, the same
+/// grammar kind an anonymous `object_creation_expression` body uses, and JLS
+/// §8.9.1 calls it exactly that -- an anonymous class body, not a member of
+/// the enum's own `NamedType` -- so both parent kinds map to
+/// `AnonymousClassBody`, distinguishing `PLUS { … }`'s own overriding methods
+/// from the enum's shared ones.
 fn owner_segment_for_type(
     kind: &str,
     parent_kind: Option<&str>,
@@ -133,7 +140,8 @@ fn owner_segment_for_type(
         "class_declaration"
         | "interface_declaration"
         | "enum_declaration"
-        | "record_declaration" => {
+        | "record_declaration"
+        | "annotation_type_declaration" => {
             let name = node
                 .child_by_field_name("name")
                 .map(|name_node| node_text(name_node, source));
@@ -142,10 +150,15 @@ fn owner_segment_for_type(
                 name,
             })
         }
-        "class_body" if parent_kind == Some("object_creation_expression") => Some(OwnerSegment {
-            kind: OwnerKind::AnonymousClassBody,
-            name: None,
-        }),
+        "class_body"
+            if parent_kind == Some("object_creation_expression")
+                || parent_kind == Some("enum_constant") =>
+        {
+            Some(OwnerSegment {
+                kind: OwnerKind::AnonymousClassBody,
+                name: None,
+            })
+        }
         _ => None,
     }
 }
