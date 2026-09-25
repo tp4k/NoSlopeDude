@@ -14,8 +14,11 @@
 //! duplicated here rather than imported, since each `tests/*.rs` file is its
 //! own compiled binary.
 
+mod common;
+
 use std::path::PathBuf;
 
+use nsd::git::diff::{self, Change};
 use nsd::git::path::RepoPath;
 use nsd::identity::matching::{match_callables, CallableRef, FileCallables, MatchTier};
 use nsd::identity::{self, CallableIdentity};
@@ -26,6 +29,7 @@ use nsd::parse::ParsedFile;
 
 const JAVA: LanguageFamily = LanguageFamily::Java;
 const JS_TS: LanguageFamily = LanguageFamily::JsTs;
+const MODE_REGULAR: i32 = 0o100644;
 
 // ---------------------------------------------------------------------
 // Shared helpers: real lowering (mirrors `tests/identity.rs`).
@@ -319,4 +323,88 @@ fn test_overload_reorder_keeps_pairs() {
         .matches
         .iter()
         .any(|m| m.base == callable_ref("A.java", 1) && m.candidate == callable_ref("A.java", 0)));
+}
+
+// ---------------------------------------------------------------------
+// Tier 2: a Git rename, equal identity.
+// ---------------------------------------------------------------------
+
+/// Thirty near-identical padding lines around one `run()` method, so a
+/// rename plus a one-line body edit still scores well above
+/// `diff::RENAME_THRESHOLD`.
+fn padded_java_class(body_line: &str) -> String {
+    let mut source = String::new();
+    for i in 0..30 {
+        source.push_str(&format!("// pad {i}\n"));
+    }
+    source.push_str("class Widget {\n");
+    source.push_str("    void run() {\n");
+    source.push_str(&format!("        System.out.println(\"{body_line}\");\n"));
+    source.push_str("    }\n");
+    source.push_str("}\n");
+    source
+}
+
+/// A real `git2` rename via `diff_commit_to_commit`, with the body edited,
+/// still matches at tier 2.
+#[test]
+fn test_renamed_file_matches_at_tier_2() {
+    let base_source = padded_java_class("original");
+    let candidate_source = padded_java_class("changed");
+
+    let (_dir, repo) = common::init_repo();
+    let base_oid = common::commit_entries(
+        &repo,
+        &[(
+            b"src/Old.java".to_vec(),
+            MODE_REGULAR,
+            base_source.clone().into_bytes(),
+        )],
+    );
+    let candidate_oid = common::commit_entries(
+        &repo,
+        &[(
+            b"src/New.java".to_vec(),
+            MODE_REGULAR,
+            candidate_source.clone().into_bytes(),
+        )],
+    );
+
+    let changes = diff::diff_commit_to_commit(&repo, Some(base_oid), candidate_oid)
+        .expect("diff commit to commit");
+    assert_eq!(changes.len(), 1, "{changes:?}");
+    match &changes[0] {
+        Change::Renamed { from, to, .. } => {
+            assert_eq!(from.as_bytes(), b"src/Old.java");
+            assert_eq!(to.as_bytes(), b"src/New.java");
+        }
+        other => panic!("expected a Renamed change, got {other:?}"),
+    }
+
+    let (base_ir, _) = lower_java(&base_source);
+    let (candidate_ir, _) = lower_java(&candidate_source);
+    assert_eq!(base_ir.callables.len(), 1, "fixture must have one callable");
+    assert_eq!(
+        candidate_ir.callables.len(),
+        1,
+        "fixture must have one callable"
+    );
+
+    let base = vec![file_callables("src/Old.java", &base_ir, &base_source)];
+    let candidate = vec![file_callables(
+        "src/New.java",
+        &candidate_ir,
+        &candidate_source,
+    )];
+
+    let output = match_callables(&base, &candidate, &changes);
+
+    assert_eq!(output.matches.len(), 1, "{output:#?}");
+    assert_eq!(output.matches[0].tier, MatchTier::Rename);
+    assert_eq!(output.matches[0].base, callable_ref("src/Old.java", 0));
+    assert_eq!(
+        output.matches[0].candidate,
+        callable_ref("src/New.java", 0)
+    );
+    assert!(output.ambiguities.is_empty());
 }
