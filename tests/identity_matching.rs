@@ -402,9 +402,6 @@ fn test_renamed_file_matches_at_tier_2() {
     assert_eq!(output.matches.len(), 1, "{output:#?}");
     assert_eq!(output.matches[0].tier, MatchTier::Rename);
     assert_eq!(output.matches[0].base, callable_ref("src/Old.java", 0));
-    assert_eq!(
-        output.matches[0].candidate,
-        callable_ref("src/New.java", 0)
-    );
+    assert_eq!(output.matches[0].candidate, callable_ref("src/New.java", 0));
     assert!(output.ambiguities.is_empty());
 }

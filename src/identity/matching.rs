@@ -5,7 +5,7 @@
 //! E101/E102 (M3) -- nothing here classifies a diff, emits a diagnostic, or
 //! wires into `pipeline.rs`; that is the next milestone's job (decision 13).
 //!
-//! Round 1 (this commit): tier 1 only. Tiers 2-3 and ambiguity land in later
+//! Round 1 (this commit): tiers 1-2. Tier 3 and ambiguity land in later
 //! commits of the same round (strict TDD, one behaviour at a time).
 //!
 //! Every input is already computed by the caller: WS-1's `identity::
@@ -15,13 +15,13 @@
 //! notes flagged the cost of materializing an owner chain more than once per
 //! callable, and a per-file `identities()` call here would do exactly that.
 //!
-//! Same-key grouping (tier 1 and, later, tier 2 within a renamed pair)
-//! follows the finding-matching rule the spec's *Stable data model* names
-//! for a repeated identical finding: pair equal fingerprints first, in
-//! source order (the k-th repeated fingerprint on one side pairs with the
-//! k-th on the other), then pair whatever remains by order-preserving greedy
-//! matching in source order. Every group is built with a hash map, never by
-//! comparing every base callable against every candidate one.
+//! Same-key grouping (tier 1 and, within a renamed pair, tier 2) follows the
+//! finding-matching rule the spec's *Stable data model* names for a repeated
+//! identical finding: pair equal fingerprints first, in source order (the
+//! k-th repeated fingerprint on one side pairs with the k-th on the other),
+//! then pair whatever remains by order-preserving greedy matching in source
+//! order. Every group is built with a hash map, never by comparing every
+//! base callable against every candidate one.
 
 use std::collections::{HashMap, HashSet};
 
@@ -84,24 +84,38 @@ pub struct MatchOutput {
     pub ambiguities: Vec<Ambiguity>,
 }
 
-/// Matches `base`'s callables against `candidate`'s. Round 1: tier 1 only
-/// (same path, equal identity); `changes` is accepted now (tier 2's future
-/// signature) but not yet consulted.
+/// Matches `base`'s callables against `candidate`'s. Round 1: tiers 1-2
+/// (same path, then a `Change::Renamed` pair, both by equal identity). Tier
+/// 3 and ambiguity land in a later commit.
 pub fn match_callables(
     base: &[FileCallables],
     candidate: &[FileCallables],
-    _changes: &[Change],
+    changes: &[Change],
 ) -> MatchOutput {
+    let base_by_path: HashMap<&RepoPath, usize> = base
+        .iter()
+        .enumerate()
+        .map(|(index, file)| (&file.path, index))
+        .collect();
     let candidate_by_path: HashMap<&RepoPath, usize> = candidate
         .iter()
         .enumerate()
         .map(|(index, file)| (&file.path, index))
         .collect();
 
+    let mut base_matched: Vec<Vec<bool>> = base
+        .iter()
+        .map(|file| vec![false; file.callables.len()])
+        .collect();
+    let mut candidate_matched: Vec<Vec<bool>> = candidate
+        .iter()
+        .map(|file| vec![false; file.callables.len()])
+        .collect();
+
     let mut matches = Vec::new();
 
     // Tier 1: same path, equal identity.
-    for base_file in base.iter() {
+    for (base_index, base_file) in base.iter().enumerate() {
         let Some(&candidate_index) = candidate_by_path.get(&base_file.path) else {
             continue;
         };
@@ -114,9 +128,52 @@ pub fn match_callables(
         );
         record_matches(
             &pairs,
-            base_file,
-            candidate_file,
+            MatchSide {
+                file: base_file,
+                matched: &mut base_matched[base_index],
+            },
+            MatchSide {
+                file: candidate_file,
+                matched: &mut candidate_matched[candidate_index],
+            },
             MatchTier::Structural,
+            &mut matches,
+        );
+    }
+
+    // Tier 2: a Git rename, equal identity, among what tier 1 left over.
+    for change in changes {
+        let Change::Renamed { from, to, .. } = change else {
+            continue;
+        };
+        let (Some(&base_index), Some(&candidate_index)) =
+            (base_by_path.get(from), candidate_by_path.get(to))
+        else {
+            continue;
+        };
+        let base_file = &base[base_index];
+        let candidate_file = &candidate[candidate_index];
+        let base_leftover =
+            (0..base_file.callables.len()).filter(|&index| !base_matched[base_index][index]);
+        let candidate_leftover = (0..candidate_file.callables.len())
+            .filter(|&index| !candidate_matched[candidate_index][index]);
+        let pairs = group_and_pair(
+            &base_file.callables,
+            base_leftover,
+            &candidate_file.callables,
+            candidate_leftover,
+        );
+        record_matches(
+            &pairs,
+            MatchSide {
+                file: base_file,
+                matched: &mut base_matched[base_index],
+            },
+            MatchSide {
+                file: candidate_file,
+                matched: &mut candidate_matched[candidate_index],
+            },
+            MatchTier::Rename,
             &mut matches,
         );
     }
@@ -232,15 +289,35 @@ fn pair_group(
     pairs
 }
 
-/// Records one `CallableMatch` per pair, tagged with `tier`.
+/// One side (base or candidate) of a single file's tier-1/tier-2 pairing:
+/// the file being matched against, and its match bitmap slice to update.
+/// Bundled so `record_matches` takes one argument per side rather than one
+/// per field (`clippy::too_many_arguments`).
+struct MatchSide<'a> {
+    file: &'a FileCallables,
+    matched: &'a mut [bool],
+}
+
+/// Marks every paired local index as matched in both sides' bitmaps and
+/// records one `CallableMatch` per pair, tagged with `tier`.
 fn record_matches(
     pairs: &[(usize, usize)],
-    base_file: &FileCallables,
-    candidate_file: &FileCallables,
+    base: MatchSide<'_>,
+    candidate: MatchSide<'_>,
     tier: MatchTier,
     matches: &mut Vec<CallableMatch>,
 ) {
+    let MatchSide {
+        file: base_file,
+        matched: base_matched,
+    } = base;
+    let MatchSide {
+        file: candidate_file,
+        matched: candidate_matched,
+    } = candidate;
     for &(base_index, candidate_index) in pairs {
+        base_matched[base_index] = true;
+        candidate_matched[candidate_index] = true;
         matches.push(CallableMatch {
             base: CallableRef {
                 path: base_file.path.clone(),
