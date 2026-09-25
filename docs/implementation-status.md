@@ -12,7 +12,8 @@ round; see *How to update this file* at the bottom and the matching rule in
 [`AGENTS.md`](../AGENTS.md).
 
 Last updated: 2026-09-25, from `main@4a36680` (M1–M2 merged at `5912e63`,
-M0c and its follow-up fixes merged at `4a36680`).
+M0c and its follow-up fixes merged at `4a36680`), plus M1-7 verified on
+`feat/m1m2-remaining@a065695` (unmerged).
 
 ## Legend
 
@@ -107,7 +108,7 @@ Plan: `nsd-plan-final.md` *M1–M2*, plus `nsd-plan-implementation.md`
 | M1-4 | Centralize line mapping as one shared primitive for parse errors, findings, suppressions, callables and clone attribution | `[~]` | `main` | Primitive landed with the central diff (`2bce3f5`), full line-map coverage `22eba67`. `[~]` until the five consumers exist — findings, suppressions and clone attribution are M3–M5 |
 | M1-5 | Handle additions, deletions, modifications, renames, symlinks, submodules, invalid UTF-8 and large files deterministically | `[x]` | `main` | `2bce3f5`; over-ceiling worktree entries hashed not emptied `e8bc84e`, typechange kept as one delta `f23804f`, non-UTF-8 similarity header parsed as bytes `e247638`, modes read from tree/index entries `8fb8457`, symlink/gitlink coverage `58f0110`/`22eba67` |
 | M1-6 | Rename detection: libgit2, fixed 50% similarity, configured threshold asserted plus one clear rename and one clear non-rename (A6) | `[x]` | `main` | `1b2b199` (per-delta similarity), `ee1cfee`, `f3bea70` (exact rename = full similarity), `dfe73cc` (`max_size` capped at the ceiling), `b968aaf`/`2820c9c` (ignores `diff.renames`/`diff.renamelimit`) |
-| M1-7 | Replace `<anonymous>@<line>` with a line-independent callable identity | `[ ]` | — | Nothing on either branch |
+| M1-7 | Replace `<anonymous>@<line>` with a line-independent callable identity | `[x]` | `feat/m1m2-remaining` | `IrCallable` gains `kind`/`is_anonymous`/`signature`/`owner_chain` and `IR_VERSION` bumps 3→4 (`6b1b0e2` red, `ab4f435` green); NEW `src/identity` computes `CallableIdentity` (path-free, no ordinal) and a `blake3` body fingerprint reusing `clones::ir_statement_tokens` (`ac5fad9` red, `173b76e` green); `tests/identity.rs` (8/8: line-independence, overloads, owner chains, same-key siblings, every `CallableKind`, fingerprint normalization/language separation, determinism); isolation scan widened (`ef072ba`); naming rule recorded in `docs/measurement-profile.md`, `docs/deferred-work.md` row closed (`a065695`). `cargo test --locked --no-fail-fast`, `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` all clean on `feat/m1m2-remaining@a065695`; `git diff --stat main -- tests/golden/` empty. Display name (`<anonymous>@<line>`) and `pipeline.rs`/`report.json` wiring untouched (deferred to WS-3) |
 | M1-8 | Report mapped parser gaps and coverage explicitly; ratios use *analyzed* executable lines and carry completeness metadata | `[ ]` | — | Related: M0b-7's salvage removed the per-file `SyntaxError` provenance; restoring it is a [`deferred-work.md`](deferred-work.md) row explicitly deferred to this milestone |
 | M2-1 | Strict repository-root `nsd.yml` parsing, all `C102` cases, incl. `measurement.min_clone_lines` | `[x]` | `main` | `44eb0fc` (red), `c1728cc` (green), blank/null include `a7c9b5c`, blank/comment-only globs `b7d00ef`; `tests/config.rs`; deps `serde_yaml_ng` 0.10, `git2` 0.21 |
 | M2-2 | Base-policy trust: trusted `--config` replaces repository policy; candidate config validated through `C101` but cannot affect its own check | `[ ]` | — | — |
