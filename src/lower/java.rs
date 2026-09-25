@@ -99,6 +99,13 @@ fn node_text(node: Node, source: &str) -> String {
 /// without a dedicated arm; `compact_constructor_declaration` and
 /// `static_initializer` have no `parameters` field at all and so always
 /// resolve to an empty signature via the `?` below.
+///
+/// Round 2 (WS-1 triage row 4): two legal overload pairs used to collide on
+/// this signature alone -- `f(int)`/`f(int... xs)` (a `spread_parameter`'s
+/// own trailing `"..."` was dropped, since it lives outside its `type`
+/// field's span) and `g(int x)`/`g(int x[])` (a `formal_parameter`'s own
+/// C-style `dimensions` field, also outside `type`'s span, was dropped
+/// entirely). Both are appended onto the whitespace-normalized `type` text.
 fn callable_signature(node: Node, source: &str) -> Vec<String> {
     let Some(parameters) = node.child_by_field_name("parameters") else {
         return Vec::new();
@@ -109,12 +116,18 @@ fn callable_signature(node: Node, source: &str) -> Vec<String> {
     let mut cursor = parameters.walk();
     parameters
         .children(&mut cursor)
-        .filter_map(|parameter| parameter.child_by_field_name("type"))
-        .map(|type_node| {
-            node_text(type_node, source)
+        .filter_map(|parameter| {
+            let type_node = parameter.child_by_field_name("type")?;
+            let mut text = node_text(type_node, source)
                 .split_whitespace()
                 .collect::<Vec<_>>()
-                .join(" ")
+                .join(" ");
+            if parameter.kind() == "spread_parameter" {
+                text.push_str("...");
+            } else if let Some(dimensions) = parameter.child_by_field_name("dimensions") {
+                text.extend(node_text(dimensions, source).split_whitespace());
+            }
+            Some(text)
         })
         .collect()
 }
