@@ -4,7 +4,7 @@
 
 mod common;
 
-use git2::{IndexEntry, IndexTime, Oid, Repository};
+use git2::{IndexEntry, IndexTime, ObjectType, Oid, Repository};
 
 use nsd::git::snapshot::{CommitSnapshot, IndexSnapshot, WorktreeSnapshot, SOURCE_CEILING_BYTES};
 use nsd::git::snapshot_id::SnapshotId;
@@ -359,10 +359,21 @@ fn test_worktree_id_writes_nothing_to_the_odb() {
         ],
     );
     sync_index_to_commit(&repo, commit_oid);
-    std::fs::write(dir.path().join("a.ts"), b"small\n").expect("write a.ts");
-    std::fs::write(dir.path().join("big.js"), &over_ceiling).expect("write big.js");
-    std::os::unix::fs::symlink("a.ts", dir.path().join("link")).expect("write link");
+    // Every on-disk byte hashed above equals a blob already committed, so an
+    // ODB write there would be an idempotent no-op and prove nothing.
+    // Dirty each path with content that has never been hashed into this
+    // repo's ODB, so a stray write is observable.
+    let dirty_a_ts: &[u8] = b"small, dirty\n";
+    std::fs::write(dir.path().join("a.ts"), dirty_a_ts).expect("write dirty a.ts");
+    let mut edited_big_js = over_ceiling.clone();
+    edited_big_js[0] = b'c';
+    std::fs::write(dir.path().join("big.js"), &edited_big_js).expect("write edited big.js");
+    std::os::unix::fs::symlink("b.ts", dir.path().join("link")).expect("write link as b.ts");
     std::fs::create_dir_all(dir.path().join("vendor")).expect("create vendor dir");
+    let new_ts_content: &[u8] = b"untracked novel content\n";
+    std::fs::write(dir.path().join("new.ts"), new_ts_content).expect("write untracked new.ts");
+    std::os::unix::fs::symlink("novel-target", dir.path().join("link2"))
+        .expect("create untracked link2");
 
     let worktree = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
     let odb_count_before = count_odb_objects(&repo);
@@ -373,6 +384,25 @@ fn test_worktree_id_writes_nothing_to_the_odb() {
         odb_count_before, odb_count_after,
         "computing a worktree ID must not write an object to the ODB"
     );
+
+    let odb = repo.odb().expect("open odb");
+    for (label, content) in [
+        ("dirty a.ts", dirty_a_ts),
+        ("edited big.js", edited_big_js.as_slice()),
+        ("re-pointed link's target b.ts", b"b.ts".as_slice()),
+        ("untracked new.ts", new_ts_content),
+        (
+            "untracked link2's target novel-target",
+            b"novel-target".as_slice(),
+        ),
+    ] {
+        let oid = Oid::hash_object(ObjectType::Blob, content)
+            .unwrap_or_else(|err| panic!("hash {label}'s content: {err}"));
+        assert!(
+            !odb.exists(oid),
+            "{label}'s content must not have been written to the ODB"
+        );
+    }
 }
 
 #[test]
