@@ -15,7 +15,10 @@ use tree_sitter::Node;
 /// bump it whenever `IrNode`'s shape changes in a way that would change what
 /// a downstream consumer reads off it. Bumped 2 -> 3 for M0c-9: removing
 /// `DamageKind::JavaVarargsAnnotation` changes what a `DamageSpan` can carry.
-pub const IR_VERSION: u32 = 3;
+/// Bumped 3 -> 4 for M1-7 (line-independent callable identity): `IrCallable`
+/// gains `kind`, `is_anonymous`, `signature` and `owner_chain`, changing what
+/// a downstream consumer -- WS-1's own `identity` module -- reads off it.
+pub const IR_VERSION: u32 = 4;
 
 /// A byte-and-line span back into the original source text a `ParsedFile`
 /// holds (D11/SLOC's requirement on the IR): both a byte range, for exact
