@@ -5,19 +5,28 @@
 //! `nsd-v1` freeze's job, out of this track's scope).
 
 use std::fmt;
+use std::fs;
+use std::io::Read as _;
 use std::path::Path;
 
 use git2::Repository;
 use ignore::overrides::{Override, OverrideBuilder};
 use serde::Deserialize;
 
-use crate::git::snapshot::{CommitSnapshot, Entry, SOURCE_CEILING_BYTES};
+use crate::git::snapshot::{
+    CommitSnapshot, Entry, IndexSnapshot, WorktreeSnapshot, SOURCE_CEILING_BYTES,
+};
 use crate::git::GitError;
 use crate::model::DEFAULT_MIN_CLONE_LINES;
 
 /// The diagnostic code every invalid `nsd.yml` shape carries (D21): the
 /// twelve-code enum is M3's `src/policy/` and is not created here.
 pub const CODE_INVALID_CONFIG: &str = "NSD-C102";
+
+/// The informational diagnostic a changed candidate `nsd.yml` carries
+/// (M2-2, `nsd-plan-final.md` *Diagnostics*): its raw bytes differ from
+/// the base's, whether added, removed or modified.
+pub const CODE_CONFIG_CHANGED: &str = "NSD-C101";
 
 /// The repository-root file name the loader looks for (D17): matched by
 /// raw entry path bytes, never opened by filesystem name (APFS is
@@ -318,18 +327,92 @@ pub fn load_from_commit(
     repo: &Repository,
     snapshot: &CommitSnapshot,
 ) -> Result<Config, ConfigError> {
-    let Some(entry) = find_root_entry(&snapshot.entries) else {
-        return Ok(Config::default());
+    match root_config_bytes_from_commit(repo, snapshot)? {
+        Some(bytes) => Config::parse(&bytes),
+        None => Ok(Config::default()),
+    }
+}
+
+/// Raw repository-root `nsd.yml` bytes from a `Commit` snapshot (M2-2's
+/// diff seam, `src/policy`): `Ok(None)` when no root entry exists, the
+/// same errors `load_from_commit` reports otherwise (an unreadable or
+/// over-ceiling blob keeps the wrapped `GitError`'s own code, 3a).
+pub fn root_config_bytes_from_commit(
+    repo: &Repository,
+    snapshot: &CommitSnapshot,
+) -> Result<Option<Vec<u8>>, ConfigError> {
+    root_config_bytes(&snapshot.entries, |entry| snapshot.read(repo, entry))
+}
+
+/// Raw repository-root `nsd.yml` bytes from an `Index` snapshot (M2-2's
+/// diff seam, `--staged`'s candidate): same contract as
+/// `root_config_bytes_from_commit`.
+pub fn root_config_bytes_from_index(
+    repo: &Repository,
+    snapshot: &IndexSnapshot,
+) -> Result<Option<Vec<u8>>, ConfigError> {
+    root_config_bytes(&snapshot.entries, |entry| snapshot.read(repo, entry))
+}
+
+/// Raw repository-root `nsd.yml` bytes from a `Worktree` snapshot (M2-2's
+/// diff seam): same contract as `root_config_bytes_from_commit`.
+pub fn root_config_bytes_from_worktree(
+    repo: &Repository,
+    snapshot: &WorktreeSnapshot,
+) -> Result<Option<Vec<u8>>, ConfigError> {
+    root_config_bytes(&snapshot.entries, |entry| snapshot.read(repo, entry))
+}
+
+/// Shared by the three `root_config_bytes_from_*` accessors above (reusing
+/// `find_root_entry`, D17): `Ok(None)` when no repository-root entry
+/// exists, `NSD-C102` when it exceeds `SOURCE_CEILING_BYTES` or is not a
+/// regular file, or the wrapped `GitError`'s own code for a Git-domain read
+/// failure (3a).
+fn root_config_bytes(
+    entries: &[Entry],
+    read: impl FnOnce(&Entry) -> Result<Option<Vec<u8>>, GitError>,
+) -> Result<Option<Vec<u8>>, ConfigError> {
+    let Some(entry) = find_root_entry(entries) else {
+        return Ok(None);
     };
-    let bytes = snapshot
-        .read(repo, entry)
-        .map_err(ConfigError::from_git)?
-        .ok_or_else(|| {
+    let bytes = read(entry).map_err(ConfigError::from_git)?.ok_or_else(|| {
+        ConfigError::new(format!(
+            "{CONFIG_FILE_NAME} exceeds the {SOURCE_CEILING_BYTES}-byte read ceiling or is \
+             not a regular file"
+        ))
+    })?;
+    Ok(Some(bytes))
+}
+
+/// Loads a trusted `--config` file from the filesystem (M2-2): bound by
+/// `SOURCE_CEILING_BYTES` the same way a snapshot's own bytes are, since
+/// this path is attacker-controlled the same way a repository entry is
+/// (D21's "candidate config validated through C101 but cannot affect its
+/// own check" companion: a trusted file is validated too). Missing,
+/// unreadable, over-ceiling and invalid-shape all report `NSD-C102`
+/// (`ConfigError::new`'s default code).
+pub fn load_trusted(path: &Path) -> Result<Config, ConfigError> {
+    let file = fs::File::open(path).map_err(|err| {
+        ConfigError::new(format!(
+            "cannot read trusted config {}: {err}",
+            path.display()
+        ))
+    })?;
+    let mut bytes = Vec::new();
+    file.take(SOURCE_CEILING_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|err| {
             ConfigError::new(format!(
-                "{CONFIG_FILE_NAME} exceeds the {SOURCE_CEILING_BYTES}-byte read ceiling or is \
-                 not a regular file"
+                "cannot read trusted config {}: {err}",
+                path.display()
             ))
         })?;
+    if bytes.len() as u64 > SOURCE_CEILING_BYTES {
+        return Err(ConfigError::new(format!(
+            "trusted config {} exceeds the {SOURCE_CEILING_BYTES}-byte read ceiling",
+            path.display()
+        )));
+    }
     Config::parse(&bytes)
 }
 

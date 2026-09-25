@@ -12,6 +12,7 @@ pub(crate) mod golden;
 pub(crate) mod hashing;
 pub mod model;
 pub mod pipeline;
+pub mod policy;
 pub mod profile;
 pub mod target;
 
