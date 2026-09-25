@@ -109,8 +109,8 @@ class C {
     assert_eq!(before_lambda.name, "<anonymous>@4");
     assert_eq!(after_lambda.name, "<anonymous>@8");
     assert_eq!(
-        identity::callable_identity(before_lambda),
-        identity::callable_identity(after_lambda)
+        identity::callable_identity(&before, before_lambda),
+        identity::callable_identity(&after, after_lambda)
     );
     assert_eq!(
         identity::body_fingerprint(&before, before_lambda, &before_parsed.source),
@@ -147,8 +147,8 @@ function run() {
     assert_eq!(before_iife.name, "<anonymous>@3");
     assert_eq!(after_iife.name, "<anonymous>@7");
     assert_eq!(
-        identity::callable_identity(before_iife),
-        identity::callable_identity(after_iife)
+        identity::callable_identity(&before, before_iife),
+        identity::callable_identity(&after, after_iife)
     );
     assert_eq!(
         identity::body_fingerprint(&before, before_iife, &before_parsed.source),
@@ -175,8 +175,8 @@ class Overloads {
     let ir_file = lower_java(int_first);
     let f_int = callable_at_line(&ir_file, 2);
     let f_string = callable_at_line(&ir_file, 6);
-    let identity_int = identity::callable_identity(f_int);
-    let identity_string = identity::callable_identity(f_string);
+    let identity_int = identity::callable_identity(&ir_file, f_int);
+    let identity_string = identity::callable_identity(&ir_file, f_string);
     assert_ne!(identity_int, identity_string);
     assert_eq!(identity_int.signature, vec!["int".to_string()]);
     assert_eq!(identity_string.signature, vec!["String".to_string()]);
@@ -195,8 +195,14 @@ class Overloads {
     let swapped = lower_java(string_first);
     let swapped_string = callable_at_line(&swapped, 2);
     let swapped_int = callable_at_line(&swapped, 6);
-    assert_eq!(identity::callable_identity(swapped_int), identity_int);
-    assert_eq!(identity::callable_identity(swapped_string), identity_string);
+    assert_eq!(
+        identity::callable_identity(&swapped, swapped_int),
+        identity_int
+    );
+    assert_eq!(
+        identity::callable_identity(&swapped, swapped_string),
+        identity_string
+    );
 }
 
 /// A method in an inner class and a lambda inside a method each carry
@@ -233,10 +239,10 @@ class Sibling {
     let lambda = callable_at_line(&ir_file, 10);
     let sibling_method = callable_at_line(&ir_file, 17);
 
-    let inner_identity = identity::callable_identity(inner_method);
-    let outer_identity = identity::callable_identity(outer_method);
-    let lambda_identity = identity::callable_identity(lambda);
-    let sibling_identity = identity::callable_identity(sibling_method);
+    let inner_identity = identity::callable_identity(&ir_file, inner_method);
+    let outer_identity = identity::callable_identity(&ir_file, outer_method);
+    let lambda_identity = identity::callable_identity(&ir_file, lambda);
+    let sibling_identity = identity::callable_identity(&ir_file, sibling_method);
 
     assert_eq!(
         inner_identity.owner_chain,
@@ -296,8 +302,8 @@ class Callbacks {
     let two_ir = lower::lower_file(&two_parsed);
     let first = callable_at_line(&two_ir, 4);
     let second = callable_at_line(&two_ir, 7);
-    let first_identity = identity::callable_identity(first);
-    let second_identity = identity::callable_identity(second);
+    let first_identity = identity::callable_identity(&two_ir, first);
+    let second_identity = identity::callable_identity(&two_ir, second);
     assert_eq!(first_identity, second_identity);
     let first_fingerprint = identity::body_fingerprint(&two_ir, first, &two_parsed.source);
     let second_fingerprint = identity::body_fingerprint(&two_ir, second, &two_parsed.source);
@@ -326,7 +332,10 @@ class Callbacks {
     let second_after = callable_at_line(&three_ir, 10);
 
     for callable in [zero, first_after, second_after] {
-        assert_eq!(identity::callable_identity(callable), first_identity);
+        assert_eq!(
+            identity::callable_identity(&three_ir, callable),
+            first_identity
+        );
     }
     assert_eq!(
         identity::body_fingerprint(&three_ir, first_after, &three_parsed.source),

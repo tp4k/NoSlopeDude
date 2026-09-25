@@ -62,14 +62,19 @@ pub struct CallableIdentity {
 /// this module's own doc comment) no reuse of `IrCallable.name` as identity:
 /// `name` here is the `ANONYMOUS_NAME` sentinel when `callable.is_anonymous`,
 /// never `callable.name`'s own line-embedding fallback.
-pub fn callable_identity(callable: &IrCallable) -> CallableIdentity {
+///
+/// Round 2 (WS-1 triage row 1): takes `ir_file` too, now that `callable.owner`
+/// is only an index into `ir_file.owners` rather than a self-contained
+/// `Vec<OwnerSegment>` -- `owner_chain` (below) walks that table to
+/// materialize the chain this function returns.
+pub fn callable_identity(ir_file: &IrFile, callable: &IrCallable) -> CallableIdentity {
     let name = if callable.is_anonymous {
         ANONYMOUS_NAME.to_string()
     } else {
         callable.name.clone()
     };
     CallableIdentity {
-        owner_chain: callable.owner_chain.clone(),
+        owner_chain: owner_chain(ir_file, callable.owner),
         kind: callable.kind,
         name,
         signature: callable.signature.clone(),
@@ -80,7 +85,29 @@ pub fn callable_identity(callable: &IrCallable) -> CallableIdentity {
 /// own document order (`src/ir/mod.rs:122-123`) -- the order WS-3 falls back
 /// on to separate a same-key group, by body fingerprint then source order.
 pub fn identities(ir_file: &IrFile) -> Vec<CallableIdentity> {
-    ir_file.callables.iter().map(callable_identity).collect()
+    ir_file
+        .callables
+        .iter()
+        .map(|callable| callable_identity(ir_file, callable))
+        .collect()
+}
+
+/// Materializes one callable's full owner chain, outermost first, by walking
+/// `OwnerEntry::parent` links from `owner` (its innermost enclosing owner)
+/// out to the root and reversing -- an iterative `while let`, not recursion,
+/// so a 15,000-level nesting cannot overflow the stack (D18). `owner` is
+/// `None` for a top-level callable with no lexical owner, giving an empty
+/// chain.
+fn owner_chain(ir_file: &IrFile, owner: Option<u32>) -> Vec<OwnerSegment> {
+    let mut chain = Vec::new();
+    let mut current = owner;
+    while let Some(index) = current {
+        let entry = &ir_file.owners[index as usize];
+        chain.push(entry.segment.clone());
+        current = entry.parent;
+    }
+    chain.reverse();
+    chain
 }
 
 /// `callable`'s per-body fingerprint: `clones::ir_statement_tokens`'s own

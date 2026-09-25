@@ -25,8 +25,8 @@ use crate::exec_lines::is_executable_leaf;
 #[cfg(test)]
 use crate::ir::is_clear_of_damage;
 use crate::ir::{
-    CallableKind, DamageKind, DamageSpan, DecisionKind, IrBlock, IrCallable, IrNode, OwnerSegment,
-    Span, TerminatorKind,
+    CallableKind, DamageKind, DamageSpan, DecisionKind, IrBlock, IrCallable, IrNode, OwnerEntry,
+    OwnerSegment, Span, TerminatorKind,
 };
 use crate::model::LanguageFamily;
 use crate::parse::ParsedFile;
@@ -67,6 +67,12 @@ pub struct IrFile {
     pub damage: Vec<DamageSpan>,
     pub callables: Vec<IrCallable>,
     pub blocks: Vec<IrBlock>,
+    /// M1-7 round 2 (WS-1 triage row 1): the per-file owner table -- one
+    /// `OwnerEntry` per named type, anonymous class body, namespace or
+    /// callable, however many callables sit underneath it. `IrCallable::owner`
+    /// indexes into this; `identity::callable_identity` walks it via
+    /// `OwnerEntry::parent` to materialize a callable's own owner chain.
+    pub owners: Vec<OwnerEntry>,
 }
 
 /// Lowers every parsed file, one rayon task per file (D21), matching the
@@ -111,12 +117,19 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
     let mut blocks = Vec::new();
     let mut callable_dirty = Vec::new();
     let mut block_dirty = Vec::new();
+    // M1-7 round 2: owners are never filtered by the salvage exclusion pass
+    // below, unlike `callables`/`blocks` -- a kept callable's `owner` index
+    // must stay valid even if the node that contributed that owner entry
+    // sits inside since-excluded damage elsewhere, so this table is never
+    // reordered or pruned once built.
+    let mut owners = Vec::new();
     let mut tables = IrTables {
         damage: &mut damage,
         callables: &mut callables,
         blocks: &mut blocks,
         callable_dirty: &mut callable_dirty,
         block_dirty: &mut block_dirty,
+        owners: &mut owners,
     };
     let root = build_ir(
         file.tree.root_node(),
@@ -162,6 +175,7 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
         damage,
         callables: kept_callables,
         blocks: kept_blocks,
+        owners,
     }
 }
 
@@ -585,6 +599,10 @@ struct IrTables<'a> {
     /// Index-aligned with `blocks`, the same way `callable_dirty` is with
     /// `callables`.
     block_dirty: &'a mut Vec<bool>,
+    /// M1-7 round 2: the per-file owner table `build_ir`'s own `owner_stack`
+    /// (below) indexes into, one `OwnerEntry` push per owner-kind node
+    /// regardless of how many callables sit underneath it.
+    owners: &'a mut Vec<OwnerEntry>,
 }
 
 /// Builds `root`'s whole `IrNode` tree in one iterative pass: a single
@@ -614,22 +632,28 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
     // `callables_out`/`blocks_out`) up front, at `false`, for the main
     // traversal loop's finish-site step to later fold the bottom-up bit
     // into -- see `EntitySlot` and the finish-site comment below.
-    // M1-7: `owner_stack` mirrors `stack`'s own ancestor chain, but holds
-    // only the owner-kind segments among them (named types, anonymous class
-    // bodies, namespaces, callables) -- so a callable's own `owner_chain` is
-    // a cheap `owner_stack.clone()` taken before this node's own segment (if
-    // it has one) is pushed onto it. `open` pushes that segment itself, once
-    // classification names it, and reports whether it did (`owner_pushed`)
-    // so the finish-site pop below stays paired one-for-one with the push,
-    // exactly mirroring `entity_slots`' own pairing with `callable_dirty`/
-    // `block_dirty`.
-    let mut owner_stack: Vec<OwnerSegment> = Vec::new();
+    // M1-7 round 2 (WS-1 triage row 1, security+perf HIGH): `owner_stack`
+    // mirrors `stack`'s own ancestor chain, but holds only the *indices*, into
+    // `tables.owners`, of the owner-kind segments among them (named types,
+    // anonymous class bodies, namespaces, callables) -- not the segments
+    // themselves. A callable's own `owner` is a cheap `Option<u32>` copy of
+    // `owner_stack.last()`, taken before this node's own segment (if it has
+    // one) is pushed onto it, so no callable carries a deep-copied
+    // `Vec<OwnerSegment>` of its own: a shared owner (a giant declared name,
+    // or a deeply nested chain) is stored exactly once in `tables.owners`
+    // regardless of how many callables it owns. `open` pushes that owner
+    // entry itself, once classification names it, and reports whether it did
+    // (`owner_pushed`) so the finish-site pop below stays paired one-for-one
+    // with the push, exactly mirroring `entity_slots`' own pairing with
+    // `callable_dirty`/`block_dirty`. `identity::callable_identity`
+    // materializes the full chain on demand by walking `OwnerEntry::parent`.
+    let mut owner_stack: Vec<u32> = Vec::new();
     let open = |node: Node,
                 parent: Option<Node>,
                 parent_in_catch_body: bool,
                 field_name: Option<&str>,
                 tables: &mut IrTables,
-                owner_stack: &mut Vec<OwnerSegment>|
+                owner_stack: &mut Vec<u32>|
      -> (IrNode, bool, bool, Option<EntitySlot>, bool) {
         let span = Span::from_node(node);
         let classification = classify(node, language, source, parent, field_name);
@@ -654,14 +678,18 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
                 kind: callable.kind,
                 is_anonymous: callable.is_anonymous,
                 signature: callable.signature,
-                owner_chain: owner_stack.clone(),
+                owner: owner_stack.last().copied(),
             });
             tables.callable_dirty.push(false);
             entity_slot = Some(EntitySlot::Callable(tables.callable_dirty.len() - 1));
         }
         let owner_pushed = classification.owner_segment.is_some();
         if let Some(segment) = classification.owner_segment {
-            owner_stack.push(segment);
+            tables.owners.push(OwnerEntry {
+                segment,
+                parent: owner_stack.last().copied(),
+            });
+            owner_stack.push((tables.owners.len() - 1) as u32);
         }
         let in_catch_body = classification.is_catch_body_root || parent_in_catch_body;
         let ir_node = IrNode {
@@ -894,12 +922,14 @@ mod tests {
             let mut blocks = Vec::new();
             let mut callable_dirty = Vec::new();
             let mut block_dirty = Vec::new();
+            let mut owners = Vec::new();
             let mut tables = IrTables {
                 damage: &mut damage,
                 callables: &mut callables,
                 blocks: &mut blocks,
                 callable_dirty: &mut callable_dirty,
                 block_dirty: &mut block_dirty,
+                owners: &mut owners,
             };
             build_ir(tree.root_node(), language, &source, &mut tables);
 
@@ -978,12 +1008,14 @@ mod tests {
             let mut blocks = Vec::new();
             let mut callable_dirty = Vec::new();
             let mut block_dirty = Vec::new();
+            let mut owners = Vec::new();
             let mut tables = IrTables {
                 damage: &mut damage,
                 callables: &mut callables,
                 blocks: &mut blocks,
                 callable_dirty: &mut callable_dirty,
                 block_dirty: &mut block_dirty,
+                owners: &mut owners,
             };
             let root = build_ir(tree.root_node(), language, &source, &mut tables);
 

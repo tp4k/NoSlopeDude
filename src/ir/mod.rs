@@ -16,8 +16,12 @@ use tree_sitter::Node;
 /// a downstream consumer reads off it. Bumped 2 -> 3 for M0c-9: removing
 /// `DamageKind::JavaVarargsAnnotation` changes what a `DamageSpan` can carry.
 /// Bumped 3 -> 4 for M1-7 (line-independent callable identity): `IrCallable`
-/// gains `kind`, `is_anonymous`, `signature` and `owner_chain`, changing what
-/// a downstream consumer -- WS-1's own `identity` module -- reads off it.
+/// gains `kind`, `is_anonymous`, `signature` and `owner` (round 2: an index
+/// into `lower::IrFile::owners`, not a deep-copied chain), changing what a
+/// downstream consumer -- WS-1's own `identity` module -- reads off it. The
+/// round-2 owner-storage change is a memory-safety fix to the same
+/// `IrCallable` shape this bump already covers, not a further shape bump of
+/// its own.
 pub const IR_VERSION: u32 = 4;
 
 /// A byte-and-line span back into the original source text a `ParsedFile`
@@ -159,6 +163,22 @@ pub struct OwnerSegment {
     pub name: Option<String>,
 }
 
+/// M1-7 round 2 (security+perf HIGH, WS-1 triage row 1): one entry in
+/// `lower::IrFile::owners`, the per-file owner table every owner-kind node
+/// (named type, anonymous class body, namespace, callable) contributes
+/// exactly one of, regardless of how many callables sit underneath it.
+/// `parent` is the index of the next segment out (`None` for an outermost
+/// owner), so a callable's whole `owner_chain` is reconstructed by walking
+/// `parent` links rather than each callable carrying its own deep-copied
+/// `Vec<OwnerSegment>` -- the deep copy is what let a hostile 15,000-level
+/// `()=>` nesting or a single giant declared name multiply across every
+/// sibling callable into gigabytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnerEntry {
+    pub segment: OwnerSegment,
+    pub parent: Option<u32>,
+}
+
 /// D8's callable table: one entry per callable-kind node that has a body,
 /// in document order, alongside `IrNode`'s per-node tree so per-node memory
 /// does not grow to carry it.
@@ -188,10 +208,13 @@ pub struct IrCallable {
     /// parameter types, and a TS overload signature without a body is not a
     /// callable).
     pub signature: Vec<String>,
-    /// M1-7: one segment per enclosing named type, anonymous class body,
-    /// namespace or callable, outermost first; empty for a top-level
-    /// callable with no lexical owner.
-    pub owner_chain: Vec<OwnerSegment>,
+    /// M1-7 round 2 (was `owner_chain: Vec<OwnerSegment>`, WS-1 triage row 1):
+    /// the index, into `lower::IrFile::owners`, of this callable's innermost
+    /// enclosing owner -- `None` for a top-level callable with no lexical
+    /// owner. `identity::callable_identity` walks `OwnerEntry::parent` from
+    /// here to materialize the full chain on demand, instead of every
+    /// callable carrying its own deep copy of it.
+    pub owner: Option<u32>,
 }
 
 /// The self-is-block predicate's table: one entry per block-kind node
