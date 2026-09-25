@@ -378,7 +378,7 @@ fn enumerate_container_candidates(
 /// per perf row 1, so a multi-statement run's fingerprint is built by
 /// feeding these in sequence, never by re-walking the statements it
 /// already covers.
-fn ir_statement_tokens(statement: &IrNode, source: &str) -> String {
+pub(crate) fn ir_statement_tokens(statement: &IrNode, source: &str) -> String {
     let mut tokens = String::new();
     for_each_ir_node(statement, &mut |node| {
         if !node.children.is_empty() || node.is_comment {
@@ -398,7 +398,7 @@ fn ir_statement_tokens(statement: &IrNode, source: &str) -> String {
 /// The source text at one `IrNode`'s own span — a byte slice, not a
 /// tree-sitter `utf8_text` call, since `IrNode` carries no reference back
 /// to a tree-sitter node.
-fn leaf_text<'a>(node: &IrNode, source: &'a str) -> &'a str {
+pub(crate) fn leaf_text<'a>(node: &IrNode, source: &'a str) -> &'a str {
     source
         .get(node.span.start_byte as usize..node.span.end_byte as usize)
         .unwrap_or("")

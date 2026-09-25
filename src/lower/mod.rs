@@ -25,7 +25,8 @@ use crate::exec_lines::is_executable_leaf;
 #[cfg(test)]
 use crate::ir::is_clear_of_damage;
 use crate::ir::{
-    DamageKind, DamageSpan, DecisionKind, IrBlock, IrCallable, IrNode, Span, TerminatorKind,
+    CallableKind, DamageKind, DamageSpan, DecisionKind, IrBlock, IrCallable, IrNode, OwnerSegment,
+    Span, TerminatorKind,
 };
 use crate::model::LanguageFamily;
 use crate::parse::ParsedFile;
@@ -433,6 +434,12 @@ struct Classification {
     block_kind: Option<&'static str>,
     /// `Some` when this node is a callable-kind node that has a body (D8).
     callable: Option<CallableInfo>,
+    /// M1-7: `Some` when this exact node is itself an owner-chain segment --
+    /// a named type, an anonymous class body, a namespace, or (reusing
+    /// `callable` above) the callable itself. `build_ir` pushes this onto its
+    /// own `owner_stack` for the node's descendants once classification
+    /// finishes, and pops it again when the node's own frame closes.
+    owner_segment: Option<OwnerSegment>,
 }
 
 /// D8's per-callable facts a lowering computes once it has already found a
@@ -442,6 +449,13 @@ struct Classification {
 struct CallableInfo {
     body_span: Span,
     name: String,
+    /// M1-7: this callable's grammar-free kind.
+    kind: CallableKind,
+    /// M1-7: whether this callable has no declared name of its own -- see
+    /// `IrCallable::is_anonymous`'s own doc comment.
+    is_anonymous: bool,
+    /// M1-7: the Java parameter-type signature; always empty for JS/TS.
+    signature: Vec<String>,
 }
 
 /// `parent` is `build_ir`'s already-threaded parent `Node` (see that
@@ -600,12 +614,23 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
     // `callables_out`/`blocks_out`) up front, at `false`, for the main
     // traversal loop's finish-site step to later fold the bottom-up bit
     // into -- see `EntitySlot` and the finish-site comment below.
+    // M1-7: `owner_stack` mirrors `stack`'s own ancestor chain, but holds
+    // only the owner-kind segments among them (named types, anonymous class
+    // bodies, namespaces, callables) -- so a callable's own `owner_chain` is
+    // a cheap `owner_stack.clone()` taken before this node's own segment (if
+    // it has one) is pushed onto it. `open` pushes that segment itself, once
+    // classification names it, and reports whether it did (`owner_pushed`)
+    // so the finish-site pop below stays paired one-for-one with the push,
+    // exactly mirroring `entity_slots`' own pairing with `callable_dirty`/
+    // `block_dirty`.
+    let mut owner_stack: Vec<OwnerSegment> = Vec::new();
     let open = |node: Node,
                 parent: Option<Node>,
                 parent_in_catch_body: bool,
                 field_name: Option<&str>,
-                tables: &mut IrTables|
-     -> (IrNode, bool, bool, Option<EntitySlot>) {
+                tables: &mut IrTables,
+                owner_stack: &mut Vec<OwnerSegment>|
+     -> (IrNode, bool, bool, Option<EntitySlot>, bool) {
         let span = Span::from_node(node);
         let classification = classify(node, language, source, parent, field_name);
         let self_damage = classification.damage.is_some();
@@ -626,9 +651,17 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
                 span,
                 body_span: callable.body_span,
                 name: callable.name,
+                kind: callable.kind,
+                is_anonymous: callable.is_anonymous,
+                signature: callable.signature,
+                owner_chain: owner_stack.clone(),
             });
             tables.callable_dirty.push(false);
             entity_slot = Some(EntitySlot::Callable(tables.callable_dirty.len() - 1));
+        }
+        let owner_pushed = classification.owner_segment.is_some();
+        if let Some(segment) = classification.owner_segment {
+            owner_stack.push(segment);
         }
         let in_catch_body = classification.is_catch_body_root || parent_in_catch_body;
         let ir_node = IrNode {
@@ -644,12 +677,18 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
             is_hoisted_or_type_only: classification.is_hoisted_or_type_only,
             children: Vec::with_capacity(node.child_count() as usize),
         };
-        (ir_node, in_catch_body, self_damage, entity_slot)
+        (
+            ir_node,
+            in_catch_body,
+            self_damage,
+            entity_slot,
+            owner_pushed,
+        )
     };
 
     let mut cursor = root.walk();
-    let (root_node, root_in_catch_body, root_self_damage, root_entity_slot) =
-        open(root, None, false, None, tables);
+    let (root_node, root_in_catch_body, root_self_damage, root_entity_slot, root_owner_pushed) =
+        open(root, None, false, None, tables, &mut owner_stack);
     let mut stack: Vec<IrNode> = vec![root_node];
     // Mirrors `stack`'s depth exactly: `catch_flags[i]` is `stack[i]`'s own
     // `in_catch_body` flag, so a child node reads its parent's flag in O(1)
@@ -669,23 +708,26 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
     // `callable_dirty_out`/`block_dirty_out` its own final bit belongs in.
     let mut dirty: Vec<bool> = vec![root_self_damage];
     let mut entity_slots: Vec<Option<EntitySlot>> = vec![root_entity_slot];
+    let mut owner_pushed_frames: Vec<bool> = vec![root_owner_pushed];
     loop {
         if cursor.goto_first_child() {
             let parent_in_catch_body = *catch_flags.last().unwrap_or(&false);
             let parent = *parents.last().unwrap_or(&root);
             let field_name = cursor.field_name();
-            let (node, in_catch_body, self_damage, entity_slot) = open(
+            let (node, in_catch_body, self_damage, entity_slot, owner_pushed) = open(
                 cursor.node(),
                 Some(parent),
                 parent_in_catch_body,
                 field_name,
                 tables,
+                &mut owner_stack,
             );
             stack.push(node);
             catch_flags.push(in_catch_body);
             parents.push(cursor.node());
             dirty.push(self_damage);
             entity_slots.push(entity_slot);
+            owner_pushed_frames.push(owner_pushed);
             continue;
         }
         loop {
@@ -701,6 +743,9 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
                     EntitySlot::Block(index) => tables.block_dirty[index] = own_dirty,
                 }
             }
+            if owner_pushed_frames.pop().unwrap_or(false) {
+                owner_stack.pop();
+            }
             let Some(parent) = stack.last_mut() else {
                 return finished;
             };
@@ -712,18 +757,20 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
                 let parent_in_catch_body = *catch_flags.last().unwrap_or(&false);
                 let parent_node = *parents.last().unwrap_or(&root);
                 let field_name = cursor.field_name();
-                let (node, in_catch_body, self_damage, entity_slot) = open(
+                let (node, in_catch_body, self_damage, entity_slot, owner_pushed) = open(
                     cursor.node(),
                     Some(parent_node),
                     parent_in_catch_body,
                     field_name,
                     tables,
+                    &mut owner_stack,
                 );
                 stack.push(node);
                 catch_flags.push(in_catch_body);
                 parents.push(cursor.node());
                 dirty.push(self_damage);
                 entity_slots.push(entity_slot);
+                owner_pushed_frames.push(owner_pushed);
                 break;
             }
             if !cursor.goto_parent() {

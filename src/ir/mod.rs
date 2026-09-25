@@ -122,6 +122,43 @@ pub enum TerminatorKind {
     Continue,
 }
 
+/// M1-7's grammar-free callable classification: one variant per callable-kind
+/// grammar node `src/lower/java.rs`/`src/lower/jsts.rs` recognize (each
+/// file's own `callable_kind_for`), so `src/identity/`'s `CallableIdentity`
+/// never needs a grammar string of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CallableKind {
+    JavaMethod,
+    JavaConstructor,
+    JavaCompactConstructor,
+    JavaStaticInitializer,
+    JavaLambda,
+    JsFunctionDeclaration,
+    JsGeneratorFunctionDeclaration,
+    JsFunctionExpression,
+    JsArrowFunction,
+    JsMethodDefinition,
+}
+
+/// M1-7's lexical owner-chain segment kind: one enclosing named type,
+/// anonymous class body, namespace or callable, in nesting order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OwnerKind {
+    NamedType,
+    AnonymousClassBody,
+    Namespace,
+    Callable,
+}
+
+/// One segment of a callable's lexical owner chain (M1-7): its kind, and its
+/// declared name -- `None` for an anonymous class body, or for a `Callable`
+/// segment whose own enclosing callable is itself undeclared.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct OwnerSegment {
+    pub kind: OwnerKind,
+    pub name: Option<String>,
+}
+
 /// D8's callable table: one entry per callable-kind node that has a body,
 /// in document order, alongside `IrNode`'s per-node tree so per-node memory
 /// does not grow to carry it.
@@ -133,8 +170,28 @@ pub struct IrCallable {
     /// Java's `static_initializer`, the one callable kind with no `body`
     /// field -- its first `block` child).
     pub body_span: Span,
-    /// D10's resolved name.
+    /// D10's resolved name -- the *display* name: `<anonymous>@<line>` when
+    /// undeclared. M1-7's `src/identity/` deliberately does not reuse this
+    /// as identity (see `is_anonymous` below): its anonymous fallback embeds
+    /// the declaration's own line number.
     pub name: String,
+    /// M1-7: the grammar-free callable kind.
+    pub kind: CallableKind,
+    /// M1-7: whether this callable has no declared name of its own (no
+    /// `name` field, and no name reachable via the same enclosing
+    /// `variable_declarator`/`pair`/`assignment_expression` fallback `name`
+    /// above already uses) -- `name`'s own anonymous fallback embeds a line
+    /// number and so cannot itself answer this question.
+    pub is_anonymous: bool,
+    /// M1-7: the Java parameter-type texts, whitespace-normalized, in
+    /// declaration order; always empty for JS/TS (untyped JS has no
+    /// parameter types, and a TS overload signature without a body is not a
+    /// callable).
+    pub signature: Vec<String>,
+    /// M1-7: one segment per enclosing named type, anonymous class body,
+    /// namespace or callable, outermost first; empty for a top-level
+    /// callable with no lexical owner.
+    pub owner_chain: Vec<OwnerSegment>,
 }
 
 /// The self-is-block predicate's table: one entry per block-kind node

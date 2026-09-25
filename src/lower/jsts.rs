@@ -5,7 +5,9 @@
 use tree_sitter::Node;
 
 use crate::exec_lines::is_comment_kind;
-use crate::ir::{DamageKind, DecisionKind, Span, TerminatorKind};
+use crate::ir::{
+    CallableKind, DamageKind, DecisionKind, OwnerKind, OwnerSegment, Span, TerminatorKind,
+};
 use crate::model::LanguageFamily;
 
 use super::{CallableInfo, Classification};
@@ -24,14 +26,20 @@ fn terminator_kind(kind: &str) -> Option<TerminatorKind> {
 }
 
 /// D8's JS/TS callable kinds (`metrics::JSTS_CALLABLE_KINDS`, private to a
-/// module this stream may not touch -- re-derived here rather than shared).
-const CALLABLE_KINDS: &[&str] = &[
-    "function_declaration",
-    "generator_function_declaration",
-    "function_expression",
-    "arrow_function",
-    "method_definition",
-];
+/// module this stream may not touch -- re-derived here rather than shared),
+/// and M1-7's grammar-free `CallableKind` each maps to -- see
+/// `java::callable_kind_for`'s doc comment for why this is the sole
+/// membership gate.
+fn callable_kind_for(kind: &str) -> Option<CallableKind> {
+    match kind {
+        "function_declaration" => Some(CallableKind::JsFunctionDeclaration),
+        "generator_function_declaration" => Some(CallableKind::JsGeneratorFunctionDeclaration),
+        "function_expression" => Some(CallableKind::JsFunctionExpression),
+        "arrow_function" => Some(CallableKind::JsArrowFunction),
+        "method_definition" => Some(CallableKind::JsMethodDefinition),
+        _ => None,
+    }
+}
 
 /// D8's body-node finder: every JS/TS callable kind exposes its body through
 /// the `body` field (no Java-style fieldless fallback needed on this side).
@@ -39,30 +47,72 @@ fn callable_body(node: Node) -> Option<Node> {
     node.child_by_field_name("body")
 }
 
-/// D10: the node's own `name` field; else the name from an enclosing
-/// `variable_declarator`, `pair` or `assignment_expression`; else
-/// `<anonymous>@<line>`. The same table as Java's own copy -- see
-/// `IrCallable`'s doc comment on why both lowerings carry it.
-fn resolve_name(node: Node, parent: Option<Node>, source: &str) -> String {
+/// D10's name resolution, minus the anonymous fallback: the node's own
+/// `name` field; else the name from an enclosing `variable_declarator`,
+/// `pair` or `assignment_expression`; else `None`. `resolve_name` (below)
+/// and M1-7's `is_anonymous` fact both key on this exact same resolution --
+/// one table, not two that could drift apart.
+fn declared_name(node: Node, parent: Option<Node>, source: &str) -> Option<String> {
     if let Some(name_node) = node.child_by_field_name("name") {
-        return node_text(name_node, source);
+        return Some(node_text(name_node, source));
     }
-    if let Some(parent) = parent {
-        let field = match parent.kind() {
-            "variable_declarator" => Some("name"),
-            "pair" => Some("key"),
-            "assignment_expression" => Some("left"),
-            _ => None,
-        };
-        if let Some(name_node) = field.and_then(|field| parent.child_by_field_name(field)) {
-            return node_text(name_node, source);
-        }
-    }
-    format!("<anonymous>@{}", node.start_position().row + 1)
+    let parent = parent?;
+    let field = match parent.kind() {
+        "variable_declarator" => Some("name"),
+        "pair" => Some("key"),
+        "assignment_expression" => Some("left"),
+        _ => None,
+    };
+    let name_node = field.and_then(|field| parent.child_by_field_name(field))?;
+    Some(node_text(name_node, source))
+}
+
+/// D10: `declared_name`, else `<anonymous>@<line>`. The same table as Java's
+/// own copy -- see `IrCallable`'s doc comment on why both lowerings carry it.
+fn resolve_name(node: Node, parent: Option<Node>, source: &str) -> String {
+    declared_name(node, parent, source)
+        .unwrap_or_else(|| format!("<anonymous>@{}", node.start_position().row + 1))
 }
 
 fn node_text(node: Node, source: &str) -> String {
     node.utf8_text(source.as_bytes()).unwrap_or("").to_string()
+}
+
+/// M1-7's JS/TS owner-chain segment for a node that is itself a named type or
+/// a namespace (never a callable -- see `java::owner_segment_for_type`'s own
+/// doc comment for why). `class_declaration` is always named in this
+/// grammar; the `class` expression form is optionally named, so it falls
+/// back to `AnonymousClassBody` when its own `name` field is absent.
+/// `internal_module` (TS's `namespace`/`module` keyword) always carries a
+/// required `name` field.
+fn owner_segment_for_type(kind: &str, node: Node, source: &str) -> Option<OwnerSegment> {
+    match kind {
+        "class_declaration" | "class" => {
+            let name = node
+                .child_by_field_name("name")
+                .map(|name_node| node_text(name_node, source));
+            Some(match name {
+                Some(name) => OwnerSegment {
+                    kind: OwnerKind::NamedType,
+                    name: Some(name),
+                },
+                None => OwnerSegment {
+                    kind: OwnerKind::AnonymousClassBody,
+                    name: None,
+                },
+            })
+        }
+        "internal_module" => {
+            let name = node
+                .child_by_field_name("name")
+                .map(|name_node| node_text(name_node, source));
+            Some(OwnerSegment {
+                kind: OwnerKind::Namespace,
+                name,
+            })
+        }
+        _ => None,
+    }
 }
 
 fn callable_info(
@@ -71,13 +121,17 @@ fn callable_info(
     parent: Option<Node>,
     source: &str,
 ) -> Option<CallableInfo> {
-    if !CALLABLE_KINDS.contains(&kind) {
-        return None;
-    }
+    let callable_kind = callable_kind_for(kind)?;
     let body = callable_body(node)?;
     Some(CallableInfo {
         body_span: Span::from_node(body),
         name: resolve_name(node, parent, source),
+        kind: callable_kind,
+        is_anonymous: declared_name(node, parent, source).is_none(),
+        // JS/TS signatures are always empty (answer 4): untyped JS has no
+        // parameter types, and a TS overload signature without a body is
+        // not a callable.
+        signature: Vec::new(),
     })
 }
 
@@ -221,6 +275,19 @@ pub(super) fn classify(
     let parent_kind = parent.map(|parent| parent.kind());
     let is_named = node.is_named();
     let is_comment = is_comment_kind(kind, LanguageFamily::JsTs);
+    let callable = callable_info(node, kind, parent, source);
+    // M1-7: see `java::classify`'s own comment on this same pattern.
+    let owner_segment = match &callable {
+        Some(info) => Some(OwnerSegment {
+            kind: OwnerKind::Callable,
+            name: if info.is_anonymous {
+                None
+            } else {
+                Some(info.name.clone())
+            },
+        }),
+        None => owner_segment_for_type(kind, node, source),
+    };
     Classification {
         decision: decision_kind(node, kind),
         terminator: terminator_kind(kind),
@@ -230,7 +297,8 @@ pub(super) fn classify(
         is_clone_statement: is_clone_statement(parent_kind, field_name, is_named, is_comment),
         is_hoisted_or_type_only: is_hoisted_or_type_only(kind),
         block_kind: is_block_kind(kind),
-        callable: callable_info(node, kind, parent, source),
+        callable,
+        owner_segment,
         is_comment,
         is_named,
     }

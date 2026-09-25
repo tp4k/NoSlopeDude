@@ -16,6 +16,7 @@ pub mod profile;
 pub mod target;
 
 pub mod clones;
+pub mod identity;
 pub mod ir;
 pub mod lower;
 pub mod metrics;

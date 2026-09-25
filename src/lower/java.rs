@@ -7,7 +7,9 @@
 use tree_sitter::Node;
 
 use crate::exec_lines::is_comment_kind;
-use crate::ir::{DamageKind, DecisionKind, Span, TerminatorKind};
+use crate::ir::{
+    CallableKind, DamageKind, DecisionKind, OwnerKind, OwnerSegment, Span, TerminatorKind,
+};
 use crate::model::LanguageFamily;
 
 use super::{CallableInfo, Classification};
@@ -27,14 +29,21 @@ fn terminator_kind(kind: &str) -> Option<TerminatorKind> {
 
 /// D8's Java callable kinds (`metrics::JAVA_CALLABLE_KINDS`, private to a
 /// module this stream may not touch -- re-derived here rather than shared,
-/// same as `is_block_kind` and `TERMINATOR_KINDS` already were).
-const CALLABLE_KINDS: &[&str] = &[
-    "method_declaration",
-    "constructor_declaration",
-    "compact_constructor_declaration",
-    "static_initializer",
-    "lambda_expression",
-];
+/// same as `is_block_kind` and `TERMINATOR_KINDS` already were), and M1-7's
+/// grammar-free `CallableKind` each maps to. The sole membership gate for
+/// `callable_info` below: unlike the pre-M1-7 shape (a separate
+/// `CALLABLE_KINDS.contains()` check plus a would-be lookup), there is only
+/// one table here, so it cannot drift out of sync with itself.
+fn callable_kind_for(kind: &str) -> Option<CallableKind> {
+    match kind {
+        "method_declaration" => Some(CallableKind::JavaMethod),
+        "constructor_declaration" => Some(CallableKind::JavaConstructor),
+        "compact_constructor_declaration" => Some(CallableKind::JavaCompactConstructor),
+        "static_initializer" => Some(CallableKind::JavaStaticInitializer),
+        "lambda_expression" => Some(CallableKind::JavaLambda),
+        _ => None,
+    }
+}
 
 /// D8's body-node finder: every callable kind exposes it through the `body`
 /// field, except `static_initializer`, whose direct `block` child carries no
@@ -52,30 +61,93 @@ fn first_child_of_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tre
     found
 }
 
-/// D10: the node's own `name` field; else the name from an enclosing
-/// `variable_declarator`, `pair` or `assignment_expression`; else
-/// `<anonymous>@<line>`. The same table as JS/TS's own copy -- see
-/// `IrCallable`'s doc comment on why both lowerings carry it.
-fn resolve_name(node: Node, parent: Option<Node>, source: &str) -> String {
+/// D10's name resolution, minus the anonymous fallback: the node's own
+/// `name` field; else the name from an enclosing `variable_declarator`,
+/// `pair` or `assignment_expression`; else `None`. `resolve_name` (below)
+/// and M1-7's `is_anonymous` fact both key on this exact same resolution --
+/// one table, not two that could drift apart.
+fn declared_name(node: Node, parent: Option<Node>, source: &str) -> Option<String> {
     if let Some(name_node) = node.child_by_field_name("name") {
-        return node_text(name_node, source);
+        return Some(node_text(name_node, source));
     }
-    if let Some(parent) = parent {
-        let field = match parent.kind() {
-            "variable_declarator" => Some("name"),
-            "pair" => Some("key"),
-            "assignment_expression" => Some("left"),
-            _ => None,
-        };
-        if let Some(name_node) = field.and_then(|field| parent.child_by_field_name(field)) {
-            return node_text(name_node, source);
-        }
-    }
-    format!("<anonymous>@{}", node.start_position().row + 1)
+    let parent = parent?;
+    let field = match parent.kind() {
+        "variable_declarator" => Some("name"),
+        "pair" => Some("key"),
+        "assignment_expression" => Some("left"),
+        _ => None,
+    };
+    let name_node = field.and_then(|field| parent.child_by_field_name(field))?;
+    Some(node_text(name_node, source))
+}
+
+/// D10: `declared_name`, else `<anonymous>@<line>`. The same table as JS/TS's
+/// own copy -- see `IrCallable`'s doc comment on why both lowerings carry it.
+fn resolve_name(node: Node, parent: Option<Node>, source: &str) -> String {
+    declared_name(node, parent, source)
+        .unwrap_or_else(|| format!("<anonymous>@{}", node.start_position().row + 1))
 }
 
 fn node_text(node: Node, source: &str) -> String {
     node.utf8_text(source.as_bytes()).unwrap_or("").to_string()
+}
+
+/// M1-7: the Java parameter-type signature -- every `formal_parameters` child
+/// that exposes a `type` field (`formal_parameter`, `spread_parameter`), its
+/// text whitespace-normalized, in declaration order. `receiver_parameter`
+/// (an explicit `this` parameter) exposes no `type` field, so it is skipped
+/// without a dedicated arm; `compact_constructor_declaration` and
+/// `static_initializer` have no `parameters` field at all and so always
+/// resolve to an empty signature via the `?` below.
+fn callable_signature(node: Node, source: &str) -> Vec<String> {
+    let Some(parameters) = node.child_by_field_name("parameters") else {
+        return Vec::new();
+    };
+    if parameters.kind() != "formal_parameters" {
+        return Vec::new();
+    }
+    let mut cursor = parameters.walk();
+    parameters
+        .children(&mut cursor)
+        .filter_map(|parameter| parameter.child_by_field_name("type"))
+        .map(|type_node| {
+            node_text(type_node, source)
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect()
+}
+
+/// M1-7's Java owner-chain segment for a node that is itself a named type or
+/// an anonymous class body (never a callable -- `callable_info`'s own
+/// `CallableInfo` already carries that segment's facts, reused directly by
+/// `classify` below rather than recomputed here).
+fn owner_segment_for_type(
+    kind: &str,
+    parent_kind: Option<&str>,
+    node: Node,
+    source: &str,
+) -> Option<OwnerSegment> {
+    match kind {
+        "class_declaration"
+        | "interface_declaration"
+        | "enum_declaration"
+        | "record_declaration" => {
+            let name = node
+                .child_by_field_name("name")
+                .map(|name_node| node_text(name_node, source));
+            Some(OwnerSegment {
+                kind: OwnerKind::NamedType,
+                name,
+            })
+        }
+        "class_body" if parent_kind == Some("object_creation_expression") => Some(OwnerSegment {
+            kind: OwnerKind::AnonymousClassBody,
+            name: None,
+        }),
+        _ => None,
+    }
 }
 
 fn callable_info(
@@ -84,13 +156,14 @@ fn callable_info(
     parent: Option<Node>,
     source: &str,
 ) -> Option<CallableInfo> {
-    if !CALLABLE_KINDS.contains(&kind) {
-        return None;
-    }
+    let callable_kind = callable_kind_for(kind)?;
     let body = callable_body(node)?;
     Some(CallableInfo {
         body_span: Span::from_node(body),
         name: resolve_name(node, parent, source),
+        kind: callable_kind,
+        is_anonymous: declared_name(node, parent, source).is_none(),
+        signature: callable_signature(node, source),
     })
 }
 
@@ -204,6 +277,22 @@ pub(super) fn classify(node: Node, source: &str, parent: Option<Node>) -> Classi
     let parent_kind = parent.map(|parent| parent.kind());
     let is_named = node.is_named();
     let is_comment = is_comment_kind(kind, LanguageFamily::Java);
+    let callable = callable_info(node, kind, parent, source);
+    // M1-7: a callable node's own owner-chain segment reuses the `Callable`
+    // facts `callable_info` just computed (its kind and declared-name-ness),
+    // rather than re-deriving them; every other owner-kind node (named type,
+    // anonymous class body) goes through `owner_segment_for_type`.
+    let owner_segment = match &callable {
+        Some(info) => Some(OwnerSegment {
+            kind: OwnerKind::Callable,
+            name: if info.is_anonymous {
+                None
+            } else {
+                Some(info.name.clone())
+            },
+        }),
+        None => owner_segment_for_type(kind, parent_kind, node, source),
+    };
     Classification {
         decision: decision_kind(node, kind),
         terminator: terminator_kind(kind),
@@ -213,7 +302,8 @@ pub(super) fn classify(node: Node, source: &str, parent: Option<Node>) -> Classi
         is_clone_statement: is_clone_statement(kind, parent_kind, is_named, is_comment),
         is_hoisted_or_type_only: false,
         block_kind: is_block_kind(kind),
-        callable: callable_info(node, kind, parent, source),
+        callable,
+        owner_segment,
         is_comment,
         is_named,
     }
