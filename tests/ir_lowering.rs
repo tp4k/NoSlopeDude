@@ -139,7 +139,12 @@ fn test_version_constants_are_exported() {
     // M0c-9: `IR_VERSION`/`JAVA_LOWERING_VERSION` bumped 2 -> 3 (removing
     // `DamageKind::JavaVarargsAnnotation` changes what the Java lowering
     // carries); `JSTS_LOWERING_VERSION` is untouched by the grammar swap.
-    assert_eq!(nsd::ir::IR_VERSION, 3);
+    // M1-7: `IR_VERSION` bumped 3 -> 4 -- `IrCallable` gains `kind`/
+    // `is_anonymous`/`signature`/`owner_chain`, changing what a downstream
+    // consumer (WS-1's own `identity` module) reads off it. Both lowering
+    // versions are unchanged: neither lowering's own classification of a
+    // node changed, only what `IrCallable` additionally records about one.
+    assert_eq!(nsd::ir::IR_VERSION, 4);
     assert_eq!(lower::JAVA_LOWERING_VERSION, 3);
     assert_eq!(lower::JSTS_LOWERING_VERSION, 2);
 }
