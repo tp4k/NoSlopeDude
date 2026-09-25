@@ -1,6 +1,5 @@
 //! Shared types used across every scan stage.
 
-use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 /// Default value for `--min-clone-lines`: how many duplicated source lines
@@ -207,6 +206,12 @@ pub struct Callable {
     pub name: String,
     /// 1-based line of the callable's own declaration (not its body).
     pub start_line: usize,
+    /// 1-based last line of the callable's own span
+    /// (`IrCallable::span.end_line`) — its real closing line, including its
+    /// body. Not `IrCallable::body_span.end_line`: that field is an
+    /// internal input to CC/mass counting, not meant for reporting, even
+    /// though the two line numbers usually coincide.
+    pub end_line: usize,
     /// D7: `1 + decision points` in the callable's own body, excluding any
     /// nested callable's span (D9).
     pub cc: u32,
@@ -312,7 +317,9 @@ pub struct RuleFinding {
 /// D12/D20/D11: one scanned file's language family and D12 scanned-line
 /// count, joined for the per-family verbosity denominator — `FileScanSummary`
 /// alone carries no language — plus the D11-filtered set of executable
-/// source lines across the whole file. `compute_verbosity` uses
+/// source lines across the whole file, sorted and deduplicated (a `Vec`,
+/// not a `BTreeSet`: cheaper to store, and `compute_verbosity`'s own lookup
+/// only needs `binary_search`, not insertion). `compute_verbosity` uses
 /// `executable_lines` to filter a clone occurrence's `[start_line,
 /// end_line]` span before it enters the numerator, so a blank, comment-only
 /// or brace-only line inside that span does not inflate verbosity, the same
@@ -323,7 +330,7 @@ pub struct FileLanguageLines {
     pub relative_path: PathBuf,
     pub language: LanguageFamily,
     pub scanned_lines: usize,
-    pub executable_lines: BTreeSet<usize>,
+    pub executable_lines: Vec<usize>,
 }
 
 /// D23: one verbosity fraction — distinct flagged lines over scanned

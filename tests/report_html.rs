@@ -325,8 +325,20 @@ fn test_links_point_at_the_scanned_revision() {
     // Anchor *text* (the visible label between `>` and `</a>`) is a
     // separate interpolation site from the `href` value above — checked
     // independently so a regression in either one is caught on its own.
+    // Derived from `payload_finding.location` itself, not the old
+    // hardcoded `#L1-L1` literal: that literal never matched this
+    // finding (`payload_finding.location` has always spanned lines 3-4,
+    // never 1-1) — it happened to match the Top-25 row for
+    // `unreachableDemo` in the same file, back when every Top-25 span
+    // duplicated its `start_line` as its `end_line`. Now that `end_line`
+    // is real (M0c-13), that coincidence is gone, so the anchor has to be
+    // derived to stay non-vacuous.
+    let payload_anchor = format!(
+        ">src/\"><img onerror=1>.js#L{}-L{}</a>",
+        payload_finding.location.start_line, payload_finding.location.end_line
+    );
     assert!(
-        !remote_html.contains(">src/\"><img onerror=1>.js#L1-L1</a>"),
+        !remote_html.contains(&payload_anchor),
         "an unescaped anchor text leaked the raw payload filename"
     );
 

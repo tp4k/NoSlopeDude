@@ -112,7 +112,7 @@ fn parse_inline(source: &str, grammar: Grammar, language: LanguageFamily) -> Par
 
 fn tree_sitter_language(grammar: Grammar) -> tree_sitter::Language {
     match grammar {
-        Grammar::Java => tree_sitter_java::LANGUAGE.into(),
+        Grammar::Java => tree_sitter_java_orchard::LANGUAGE.into(),
         Grammar::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
         Grammar::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
         Grammar::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
@@ -136,8 +136,11 @@ fn decision_sequence(root: &IrNode) -> Vec<DecisionKind> {
 
 #[test]
 fn test_version_constants_are_exported() {
-    assert_eq!(nsd::ir::IR_VERSION, 2);
-    assert_eq!(lower::JAVA_LOWERING_VERSION, 2);
+    // M0c-9: `IR_VERSION`/`JAVA_LOWERING_VERSION` bumped 2 -> 3 (removing
+    // `DamageKind::JavaVarargsAnnotation` changes what the Java lowering
+    // carries); `JSTS_LOWERING_VERSION` is untouched by the grammar swap.
+    assert_eq!(nsd::ir::IR_VERSION, 3);
+    assert_eq!(lower::JAVA_LOWERING_VERSION, 3);
     assert_eq!(lower::JSTS_LOWERING_VERSION, 2);
 }
 
@@ -288,19 +291,13 @@ fn test_structural_predicates_answer_terminator_block_membership_and_catch_body(
     }
 }
 
+/// M0c-9 (Decision 4): `DamageKind::JavaVarargsAnnotation` is removed --
+/// orchard's grammar no longer produces the `ERROR` shape it named (see
+/// `test_java_varargs_annotation_parses_clean_under_orchard` below) -- so
+/// only the two JS/TS damage classes stay typed here. Renamed from
+/// `test_damage_spans_are_typed_for_all_three_known_classes`.
 #[test]
-fn test_damage_spans_are_typed_for_all_three_known_classes() {
-    let java_varargs = parse_damaged("JavaVarargsAnnotation.java", JAVA);
-    let java_ir = lower::lower_file(&java_varargs);
-    assert!(
-        java_ir
-            .damage
-            .iter()
-            .any(|damage| damage.kind == DamageKind::JavaVarargsAnnotation),
-        "{:#?}",
-        java_ir.damage
-    );
-
+fn test_damage_spans_are_typed_for_both_known_classes() {
     let ts_using = parse_damaged("TsUsingParameter.ts", JS_TS);
     let ts_ir = lower::lower_file(&ts_using);
     assert!(
@@ -322,6 +319,20 @@ fn test_damage_spans_are_typed_for_all_three_known_classes() {
         "{:#?}",
         jsx_ir.damage
     );
+}
+
+/// M0c-9/M0c-10's gate, at the unit level: `JavaVarargsAnnotation.java`'s
+/// `Class<?> @Nullable ... cs` parameter, which produced an `ERROR` node
+/// under `tree-sitter-java` 0.23.5, must parse with **no** syntax error at
+/// all under orchard -- `parsed_files` (not `parse_damaged`) is deliberate
+/// here: it goes through the production `parse::parse_all` path and asserts
+/// zero `ParseFailure`s, so this fails loudly pre-swap rather than silently
+/// tolerating a residual error.
+#[test]
+fn test_java_varargs_annotation_parses_clean_under_orchard() {
+    let files = parsed_files(&[("JavaVarargsAnnotation.java", JAVA)]);
+    let ir_file = lower::lower_file(&files[0]);
+    assert!(ir_file.damage.is_empty(), "{:#?}", ir_file.damage);
 }
 
 #[test]

@@ -97,9 +97,14 @@ fn is_hoisted_or_type_only(kind: &str) -> bool {
 /// Mirrors `metrics::is_block_kind`'s JS/TS arm (private to `src/metrics/
 /// mod.rs`): a `{ … }` scope is a `statement_block` only -- deliberately not
 /// `program`, the top-level module scope, which is never itself a braced
-/// block.
-fn is_block_kind(kind: &str) -> bool {
-    kind == "statement_block"
+/// block. Returns the matched arm's own literal rather than a bool -- see
+/// `java::is_block_kind`'s doc comment for why.
+fn is_block_kind(kind: &str) -> Option<&'static str> {
+    if kind == "statement_block" {
+        Some("statement_block")
+    } else {
+        None
+    }
 }
 
 fn decision_kind(node: Node, kind: &str) -> Option<DecisionKind> {
@@ -140,7 +145,7 @@ fn operator_text<'tree>(node: Node<'tree>) -> Option<&'tree str> {
 /// tree root and descends, turning one linear tree build into `Θ(depth)`
 /// work per node).
 fn is_catch_body_root(kind: &str, parent_kind: Option<&str>) -> bool {
-    is_block_kind(kind) && parent_kind == Some("catch_clause")
+    is_block_kind(kind).is_some() && parent_kind == Some("catch_clause")
 }
 
 /// D15's JS/TS clone-candidate containers (`clones::statement_children`'s
@@ -158,7 +163,7 @@ fn is_catch_body_root(kind: &str, parent_kind: Option<&str>) -> bool {
 /// case body). Production: its result is `IrNode::is_clone_statement`.
 pub(super) fn is_clone_statement(
     parent_kind: Option<&str>,
-    field_name: Option<&'static str>,
+    field_name: Option<&str>,
     is_named: bool,
     is_comment: bool,
 ) -> bool {
@@ -210,7 +215,7 @@ pub(super) fn classify(
     node: Node,
     source: &str,
     parent: Option<Node>,
-    field_name: Option<&'static str>,
+    field_name: Option<&str>,
 ) -> Classification {
     let kind = node.kind();
     let parent_kind = parent.map(|parent| parent.kind());
@@ -219,12 +224,12 @@ pub(super) fn classify(
     Classification {
         decision: decision_kind(node, kind),
         terminator: terminator_kind(kind),
-        in_block: parent_kind.is_some_and(is_block_kind),
+        in_block: parent_kind.is_some_and(|kind| is_block_kind(kind).is_some()),
         is_catch_body_root: is_catch_body_root(kind, parent_kind),
         damage: classify_damage(node, parent_kind),
         is_clone_statement: is_clone_statement(parent_kind, field_name, is_named, is_comment),
         is_hoisted_or_type_only: is_hoisted_or_type_only(kind),
-        is_block: is_block_kind(kind),
+        block_kind: is_block_kind(kind),
         callable: callable_info(node, kind, parent, source),
         is_comment,
         is_named,

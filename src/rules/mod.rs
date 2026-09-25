@@ -206,10 +206,13 @@ fn findings_from_ir(file: &ParsedFile, ir_file: &lower::IrFile) -> Vec<RuleFindi
 /// extracted out of `file_language_lines`'s per-file closure so `run`'s
 /// fused pass can call it on an `IrFile` it already lowered for
 /// `findings_from_ir`, instead of lowering the same file a second time.
-fn executable_lines_from_ir(ir_file: &lower::IrFile) -> BTreeSet<usize> {
+/// Collects into a `BTreeSet` first (so the result is sorted and
+/// deduplicated for free), then converts to the `Vec<usize>`
+/// `FileLanguageLines::executable_lines` stores.
+fn executable_lines_from_ir(ir_file: &lower::IrFile) -> Vec<usize> {
     let mut executable_lines = BTreeSet::new();
     collect_ir_executable_lines(&ir_file.root, &mut executable_lines);
-    executable_lines
+    executable_lines.into_iter().collect()
 }
 
 /// D12/D20/D11: joins WS-2's per-file scanned-line count with the language
@@ -300,7 +303,7 @@ pub fn compute_verbosity(
             };
             let executable_lines = &files[index as usize].executable_lines;
             let lines_in_span = (occurrence.start_line..=occurrence.end_line)
-                .filter(|line| executable_lines.contains(line));
+                .filter(|line| executable_lines.binary_search(line).is_ok());
             flagged[index as usize].extend(lines_in_span);
         }
     }
@@ -543,7 +546,7 @@ mod tests {
     fn parse_java_inline(source: &str) -> ParsedFile {
         let mut parser = tree_sitter::Parser::new();
         parser
-            .set_language(&tree_sitter_java::LANGUAGE.into())
+            .set_language(&tree_sitter_java_orchard::LANGUAGE.into())
             .expect("java grammar");
         let tree = parser.parse(source, None).expect("java parse");
         ParsedFile {
@@ -582,7 +585,7 @@ mod tests {
         };
         let files = file_language_lines(std::slice::from_ref(&file), &metrics);
         assert_eq!(files.len(), 1);
-        let expected: BTreeSet<usize> = [1usize, 2, 3, 5].into_iter().collect();
+        let expected: Vec<usize> = vec![1usize, 2, 3, 5];
         assert_eq!(files[0].executable_lines, expected, "{:?}", files[0]);
         assert_eq!(files[0].scanned_lines, 7);
         assert_eq!(files[0].language, LanguageFamily::Java);

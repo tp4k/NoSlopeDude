@@ -3,17 +3,18 @@
 //! asserts the rendered `report.json` is byte-identical to a committed
 //! pre-IR baseline, captured now while the tree is still pre-IR.
 //!
-//! This suite never shells out to git and needs no worktree, no network and
-//! no private archive for its always-on legs:
-//! `scripts/neutrality_gate.sh` (the operator-run re-capture/comparison
-//! tool) is the mechanism that reaches into git history, kept deliberately
-//! separate. The one leg that does need a private fixture --
-//! `test_java_fixture_01_strict_scan_is_byte_identical_to_the_archived_report`
-//! -- is env-var gated (`NSD_ARCHIVED_REPORT`) and reports pending, not
-//! passing, when that fixture is absent.
+//! This suite never shells out to git, needs no worktree, no network and no
+//! private archive: `scripts/neutrality_gate.sh` (the operator-run
+//! re-capture/comparison tool) is the mechanism that reaches into git
+//! history, kept deliberately separate. Through M0b this suite also carried
+//! a private-archive-gated strict byte-identity leg against
+//! `java-fixture-01`; M0c-10 retired it (see `docs/ir-neutrality.md`,
+//! *The `java-fixture-01` strict leg*) because it asserted an invariant
+//! about holding the Java parser fixed, which that workstream's grammar
+//! swap deliberately breaks. The `java-fixture-01` corpus's separate lossy
+//! digest comparison (`tests/golden_digest.rs`) is unaffected.
 
 use std::collections::HashSet;
-use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -92,16 +93,6 @@ const DECLARED_DELTAS: &[&str] = &[
 /// `tests/golden/neutrality/`; a plain `cargo test` never sets it.
 /// `scripts/neutrality_gate.sh --capture` is the operator entry point.
 const NEUTRALITY_CAPTURE_ENV_VAR: &str = "NSD_NEUTRALITY_CAPTURE";
-
-/// The env var carrying the private archived `java-fixture-01` report's
-/// path at invocation time only; it is never written into a repository
-/// file (`AGENTS.md`, *Fixture privacy*).
-const ARCHIVED_REPORT_ENV_VAR: &str = "NSD_ARCHIVED_REPORT";
-
-/// Opt-in env var that promotes the pending arm of the archive-backed leg
-/// from a silent `ok` to a panic, mirroring
-/// `tests/golden_digest.rs::REQUIRE_ARCHIVE_VERIFIED_ENV_VAR`.
-const REQUIRE_ARCHIVE_VERIFIED_ENV_VAR: &str = "NSD_REQUIRE_ARCHIVE_VERIFIED";
 
 fn manifest_path(relative: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative)
@@ -538,186 +529,4 @@ fn test_corpus_copy_is_outside_any_git_work_tree() {
         report["scan"]["revision"]["unavailable_reason"],
         Value::String("not_a_git_repository".to_string())
     );
-}
-
-/// Where the archive is, or an explicit statement that this leg is pending
-/// because the private fixture was not supplied -- mirroring
-/// `tests/golden_digest.rs::ArchiveGate` so a missing private fixture can
-/// never silently read as a validated pass (`AGENTS.md` -> *Verification*).
-enum ArchiveGate {
-    Resolved(PathBuf),
-    Pending,
-}
-
-fn archive_gate() -> ArchiveGate {
-    classify_archive_gate(std::env::var_os(ARCHIVED_REPORT_ENV_VAR))
-}
-
-/// Pure classification of a possibly-absent `NSD_ARCHIVED_REPORT` value,
-/// split out from `archive_gate`'s `env::var_os` call so `None` (the var is
-/// unset) and `Some("")` (the var is set but empty) can each be asserted
-/// directly, rather than only observed indirectly through whatever the test
-/// process's own environment happens to carry when it runs.
-fn classify_archive_gate(raw: Option<OsString>) -> ArchiveGate {
-    match raw {
-        Some(path) if !path.is_empty() => ArchiveGate::Resolved(PathBuf::from(path)),
-        _ => ArchiveGate::Pending,
-    }
-}
-
-fn pending_notice() -> String {
-    format!(
-        "PENDING: {ARCHIVED_REPORT_ENV_VAR} is unset -- the java-fixture-01 strict \
-         neutrality leg is pending, not passing, this run"
-    )
-}
-
-fn verification_required() -> bool {
-    classify_verification_requirement(std::env::var_os(REQUIRE_ARCHIVE_VERIFIED_ENV_VAR))
-}
-
-/// Pure classification of a possibly-absent `NSD_REQUIRE_ARCHIVE_VERIFIED`
-/// value, split out the same way `classify_archive_gate` is: so `None` and
-/// `Some("")` (unset, and set-but-empty) can each be asserted directly as
-/// "not required", rather than only observed through the process's own
-/// environment.
-fn classify_verification_requirement(raw: Option<OsString>) -> bool {
-    matches!(raw, Some(value) if !value.is_empty())
-}
-
-fn required_but_pending_message() -> String {
-    format!(
-        "{REQUIRE_ARCHIVE_VERIFIED_ENV_VAR} demands a verified run, but \
-         {ARCHIVED_REPORT_ENV_VAR} is unset -- supply the archive or unset \
-         {REQUIRE_ARCHIVE_VERIFIED_ENV_VAR}"
-    )
-}
-
-/// Item 8's strict leg: `java-fixture-01` has no parse failures, so neither
-/// salvage nor the `SkipReason` split can mask an IR defect there. Re-scans
-/// the archive's own recorded target with its own recorded settings and
-/// asserts the freshly rendered `report.json` is byte-identical to the
-/// archived one. The archive is resolved only from `NSD_ARCHIVED_REPORT` at
-/// invocation time and never committed (`AGENTS.md`, *Fixture privacy*).
-#[test]
-fn test_java_fixture_01_strict_scan_is_byte_identical_to_the_archived_report() {
-    let path = match archive_gate() {
-        ArchiveGate::Resolved(path) => path,
-        ArchiveGate::Pending => {
-            println!("{}", pending_notice());
-            if verification_required() {
-                panic!("{}", required_but_pending_message());
-            }
-            return;
-        }
-    };
-
-    let archived_text = fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("reading the archived report: {error}"));
-    let archived = parse_json(&archived_text);
-    let scan = archived
-        .get("scan")
-        .and_then(Value::as_object)
-        .expect("archived report has a scan object");
-    let target = scan
-        .get("target")
-        .and_then(Value::as_str)
-        .expect("scan.target is a string")
-        .to_string();
-    let include_tests = scan
-        .get("include_tests")
-        .and_then(Value::as_bool)
-        .expect("scan.include_tests is a bool");
-    let exclude: Vec<String> = scan
-        .get("exclude")
-        .and_then(Value::as_array)
-        .expect("scan.exclude is an array")
-        .iter()
-        .map(|value| {
-            value
-                .as_str()
-                .expect("scan.exclude entry is a string")
-                .to_string()
-        })
-        .collect();
-    let min_clone_lines = scan
-        .get("min_clone_lines")
-        .and_then(Value::as_u64)
-        .expect("scan.min_clone_lines is a number") as u32;
-
-    let output_dir = tempfile::tempdir().expect("output tempdir");
-    let settings = ScanSettings {
-        output: output_dir.path().to_path_buf(),
-        include_tests,
-        exclude,
-        min_clone_lines,
-    };
-    pipeline::run(&target, settings).unwrap_or_else(|_| {
-        panic!(
-            "scanning the archive's recorded target failed; details withheld \
-             (AGENTS.md, Fixture privacy)"
-        )
-    });
-    let actual_text = fs::read_to_string(output_dir.path().join("report.json"))
-        .expect("freshly rendered report.json exists");
-
-    assert!(
-        actual_text == archived_text,
-        "the IR build must render java-fixture-01 byte-identical to the archived report; \
-         lengths {} vs {}, first differing byte at {:?}; contents withheld \
-         (AGENTS.md, Fixture privacy)",
-        actual_text.len(),
-        archived_text.len(),
-        actual_text
-            .bytes()
-            .zip(archived_text.bytes())
-            .position(|(a, b)| a != b)
-    );
-}
-
-/// Proves the pending path is reachable and prints its notice rather than
-/// silently substituting a pass, independent of whether this invocation
-/// happens to carry the archive-backed leg too -- mirroring
-/// `tests/golden_digest.rs::test_gate_is_reported_pending_when_the_archive_is_absent`.
-#[test]
-fn test_java_fixture_01_strict_leg_is_reported_pending_when_the_archive_is_absent() {
-    match archive_gate() {
-        ArchiveGate::Pending => println!("{}", pending_notice()),
-        ArchiveGate::Resolved(_) => {
-            // The archive-backed leg is running in this invocation; the
-            // pending branch above is exercised by this same test in the
-            // ordinary (archive-absent) developer/CI run instead.
-        }
-    }
-}
-
-/// `classify_archive_gate` is the pure decision `archive_gate` delegates to;
-/// tested directly (not through `env::var_os`, which only the process's own
-/// environment can drive) so the unset case, the set-but-empty case, and the
-/// set-and-non-empty case are each pinned rather than only exercised
-/// incidentally by whichever of the three the test process happens to run
-/// under -- mirroring `tests/golden_digest.rs::test_classify_archive_gate`.
-#[test]
-fn test_classify_archive_gate() {
-    assert!(matches!(classify_archive_gate(None), ArchiveGate::Pending));
-    assert!(matches!(
-        classify_archive_gate(Some(OsString::new())),
-        ArchiveGate::Pending
-    ));
-    match classify_archive_gate(Some(OsString::from("/x"))) {
-        ArchiveGate::Resolved(path) => assert_eq!(path, PathBuf::from("/x")),
-        ArchiveGate::Pending => panic!("a non-empty path must resolve, not read as pending"),
-    }
-}
-
-/// `classify_verification_requirement` is the pure decision
-/// `verification_required` delegates to; tested directly for the same
-/// reason `classify_archive_gate` is -- the unset and set-but-empty cases
-/// must read as "not required", not just happen to -- mirroring
-/// `tests/golden_digest.rs::test_classify_verification_requirement_needs_a_non_empty_value`.
-#[test]
-fn test_classify_verification_requirement_needs_a_non_empty_value() {
-    assert!(!classify_verification_requirement(None));
-    assert!(!classify_verification_requirement(Some(OsString::new())));
-    assert!(classify_verification_requirement(Some(OsString::from("1"))));
 }

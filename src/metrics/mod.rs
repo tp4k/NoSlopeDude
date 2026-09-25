@@ -71,6 +71,12 @@ pub fn erosion(callables: &[Callable]) -> f64 {
         .filter(|callable| callable.cc > CC_EROSION_THRESHOLD)
         .map(|callable| callable.mass)
         .sum();
+    if eroded_mass == 0.0 {
+        // `Iterator::sum::<f64>()` over an empty (or empty-after-filter)
+        // sequence is `-0.0` on this toolchain; force the positive literal
+        // so a caller sees `+0.0`, not `-0.0`, when nothing is eroded.
+        return 0.0;
+    }
     eroded_mass / total_mass
 }
 
@@ -144,6 +150,7 @@ fn scan_file(file: &ParsedFile) -> (Vec<Callable>, Vec<SyntaxBlock>, FileScanSum
                 language: file.language,
                 name: callable.name.clone(),
                 start_line: callable.span.start_line as usize,
+                end_line: callable.span.end_line as usize,
                 cc,
                 sloc,
                 mass: mass(cc, sloc),
@@ -259,11 +266,15 @@ fn find_ir_subtree(root: &IrNode, target: Span) -> Option<&IrNode> {
     Some(current)
 }
 
-/// A structurally-unreachable fallback for `find_ir_subtree` returning
-/// `None`: `build_ir` produces exactly one `IrNode` per tree-sitter node, in
-/// the same nested-span shape, so a callable body's own span always has a
-/// match. Kept only so a defect here degrades (D18) instead of panicking --
-/// same reasoning as `lower::fallback_node`'s own doc comment.
+/// Fallback for `find_ir_subtree` returning `None` -- no `IrNode` in the
+/// redacted tree matches a callable's body span. WS-6 round 4's fix to
+/// `cascade_exclusions` (excluding an entity contained in a bare damage
+/// span) closed the one known input shape that reached this branch; this
+/// crate's own suite hits it zero times, as did a 400-input fuzz run at
+/// WS-6 round 4 (before M0c's grammar swap), but unlike
+/// `lower::fallback_node`'s structural unreachability, that is evidence,
+/// not a proof of unreachability. Kept so a future gap here degrades (D18)
+/// instead of panicking.
 fn fallback_ir_body(span: Span) -> IrNode {
     IrNode::empty(span)
 }

@@ -88,8 +88,17 @@ fn correct_scores_floats(report: &mut Value, raw: &str) -> Result<()> {
             .get_mut("scores")
             .and_then(|scores| scores.get_mut(lang))
             .with_context(|| format!("normalized report is missing scores.{lang}"))?;
-        overwrite_checked(&mut language["erosion"], erosion)?;
-        overwrite_checked(&mut language["verbosity"]["ratio"], ratio)?;
+        let erosion_slot = language
+            .get_mut("erosion")
+            .with_context(|| format!("scores.{lang} is not an object with an `erosion` field"))?;
+        overwrite_checked(erosion_slot, erosion)?;
+        let ratio_slot = language
+            .get_mut("verbosity")
+            .and_then(|verbosity| verbosity.get_mut("ratio"))
+            .with_context(|| {
+                format!("scores.{lang}.verbosity is not an object with a `ratio` field")
+            })?;
+        overwrite_checked(ratio_slot, ratio)?;
     }
     Ok(())
 }
@@ -119,7 +128,10 @@ fn correct_top25_masses_keyed(report: &mut Value, raw: &str) -> Result<()> {
         .and_then(Value::as_array_mut)
         .context("report is missing a `top25` array")?;
     for (entry, mass) in entries.iter_mut().zip(masses) {
-        overwrite_checked(&mut entry["mass"], mass)?;
+        let slot = entry
+            .get_mut("mass")
+            .context("a top25 entry is not an object with a `mass` field")?;
+        overwrite_checked(slot, mass)?;
     }
     Ok(())
 }
@@ -276,9 +288,9 @@ pub(crate) const AUTHORSHIP: &str = "unknown";
 /// `hashing.rs` exposes no accessor for it, and this workstream's brief
 /// forbids editing that module to add one (see the round-1 implementer
 /// report's Refactor request). This digest's own `hash_version` metadata
-/// field is therefore kept in sync by hand; a drift would first surface as
-/// a loud failure in `hashing.rs`'s own `test_digest_is_stable_for_known_input`,
-/// which pins a known digest value against the same constant.
+/// field is therefore kept in sync by hand; a drift is caught by
+/// `tests::test_body_blake3_of_empty_input_matches_hash_version_mirror`,
+/// which pins `body_blake3(b"")` against this constant.
 const HASH_VERSION_MIRROR: u8 = 1;
 
 /// The BLAKE3 family-prefix domain this digest hashes under, distinct from
@@ -471,6 +483,109 @@ pub(crate) fn build_digest(report: &mut Value) -> Result<(Value, usize)> {
 mod tests {
     use super::*;
 
+    /// L23 drift check (`HASH_VERSION_MIRROR`'s own doc comment names this
+    /// test): computes `body_blake3(b"")`'s expected value independently,
+    /// via a bare `blake3::Hasher` mirroring `hashing.rs`'s documented
+    /// framing (version byte, then each slice as an 8-byte LE length plus
+    /// its bytes, `BODY_FAMILY_PREFIX` first) under `HASH_VERSION_MIRROR`
+    /// -- never through `hashing::Digest`, which is the code path
+    /// `body_blake3` itself runs and so could never expose a drift between
+    /// `HASH_VERSION_MIRROR` and the real `HASH_VERSION`. A future bump of
+    /// `HASH_VERSION` without a matching bump of `HASH_VERSION_MIRROR`
+    /// fails this test.
+    #[test]
+    fn test_body_blake3_of_empty_input_matches_hash_version_mirror() {
+        let body: &[u8] = b"";
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&[HASH_VERSION_MIRROR]);
+        let prefix = BODY_FAMILY_PREFIX.as_bytes();
+        hasher.update(&(prefix.len() as u64).to_le_bytes());
+        hasher.update(prefix);
+        hasher.update(&(body.len() as u64).to_le_bytes());
+        hasher.update(body);
+        let output_bytes = hasher.finalize();
+        let mut leading = [0u8; 16];
+        leading.copy_from_slice(&output_bytes.as_bytes()[..16]);
+        let expected = format!("blake3:{:032x}", u128::from_le_bytes(leading));
+
+        assert_eq!(body_blake3(body), expected);
+    }
+
+    /// L24: `overwrite_checked`'s callers used to reach their slot through
+    /// `IndexMut` (`language["erosion"]`, `language["verbosity"]["ratio"]`,
+    /// `entry["mass"]`), which panics on a non-object container instead of
+    /// returning the designed `anyhow` error. Covers all three named call
+    /// sites: a non-object `scores.java`, a non-object `scores.java.verbosity`,
+    /// and a non-object `top25` entry. Each assertion pins the `get_mut`
+    /// branch's own distinguishing error text (not just a keyword that could
+    /// also appear in `find_key_pos`'s "could not find key" error for a
+    /// different key), so the test cannot pass on the wrong path.
+    #[test]
+    fn test_raw_text_recovery_rejects_a_non_object_container_without_panicking() {
+        let non_object_scores_java = r#"{
+            "scan": { "target": "/x", "revision": { "sha": "deadbeef", "dirty": false, "unavailable_reason": null } },
+            "scores": {
+                "overall": { "erosion": 0.1, "verbosity": { "flagged_lines": 1, "scanned_lines": 1, "ratio": 0.1 } },
+                "java": 5,
+                "js_ts": { "erosion": 0.1, "verbosity": { "flagged_lines": 1, "scanned_lines": 1, "ratio": 0.1 } }
+            },
+            "findings": [],
+            "duplicates": [],
+            "top25": [],
+            "skipped_files": []
+        }"#;
+        let err = parse_report(non_object_scores_java).expect_err(
+            "a non-object scores.java container must be rejected with an error, not a panic",
+        );
+        assert!(
+            err.to_string()
+                .contains("scores.java is not an object with an `erosion` field"),
+            "error was: {err}"
+        );
+
+        let non_object_scores_java_verbosity = r#"{
+            "scan": { "target": "/x", "revision": { "sha": "deadbeef", "dirty": false, "unavailable_reason": null } },
+            "scores": {
+                "overall": { "erosion": 0.1, "verbosity": { "flagged_lines": 1, "scanned_lines": 1, "ratio": 0.1 } },
+                "java": { "erosion": 0.1, "verbosity": 5 },
+                "js_ts": { "erosion": 0.1, "verbosity": { "flagged_lines": 1, "scanned_lines": 1, "ratio": 0.1 } }
+            },
+            "findings": [],
+            "duplicates": [],
+            "top25": [],
+            "skipped_files": []
+        }"#;
+        let err = parse_report(non_object_scores_java_verbosity).expect_err(
+            "a non-object scores.java.verbosity container must be rejected with an error, not a panic",
+        );
+        assert!(
+            err.to_string()
+                .contains("scores.java.verbosity is not an object with a `ratio` field"),
+            "error was: {err}"
+        );
+
+        let non_object_top25_entry = r#"{
+            "scan": { "target": "/x", "revision": { "sha": "deadbeef", "dirty": false, "unavailable_reason": null } },
+            "scores": {
+                "overall": { "erosion": 0.1, "verbosity": { "flagged_lines": 1, "scanned_lines": 1, "ratio": 0.1 } },
+                "java": { "erosion": 0.1, "verbosity": { "flagged_lines": 1, "scanned_lines": 1, "ratio": 0.1 } },
+                "js_ts": { "erosion": 0.1, "verbosity": { "flagged_lines": 1, "scanned_lines": 1, "ratio": 0.1 } }
+            },
+            "findings": [],
+            "duplicates": [],
+            "top25": [42],
+            "decoy": { "mass": 9.0 },
+            "skipped_files": []
+        }"#;
+        let err = parse_report(non_object_top25_entry)
+            .expect_err("a non-object top25 entry must be rejected with an error, not a panic");
+        assert!(
+            err.to_string()
+                .contains("a top25 entry is not an object with a `mass` field"),
+            "error was: {err}"
+        );
+    }
+
     fn location_with_excerpt(relative_path: &str) -> serde_json::Value {
         json!({
             "relative_path": relative_path,
@@ -495,7 +610,7 @@ mod tests {
     fn test_normalization_strips_excerpts_and_the_absolute_target() {
         let mut report = json!({
             "scan": {
-                "target": "/Users/example/private-checkout",
+                "target": "/example/checkout",
                 "revision": { "sha": "deadbeef", "dirty": false, "unavailable_reason": null },
             },
             "scores": { "overall": { "erosion": 0.5 } },

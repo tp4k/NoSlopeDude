@@ -113,11 +113,11 @@ pub struct ReportDuplicateGroup {
     pub locations: Vec<SourceLocation>,
 }
 
-/// One top-25 (by `cc`) callable, rendered. `location.start_line ==
-/// location.end_line`: `Callable` (WS-2) publishes only the callable's own
-/// declaration line, not its body's end line, so the excerpt is that one
-/// line rather than the callable's whole text — see this stream's report,
-/// Open questions.
+/// One top-25 (by `cc`) callable, rendered. `location` spans
+/// `[start_line, end_line]` of the whole callable node
+/// (`Callable::start_line`/`end_line`, from `IrCallable::span`, not
+/// `body_span`) — its real last line, through the closing line of its own
+/// body, not just its declaration's first line (M0c-13).
 #[derive(Debug, Clone, Serialize)]
 pub struct ReportCallable {
     pub name: String,
@@ -355,7 +355,7 @@ fn build_callable(input: &ReportInput, callable: &Callable) -> ReportCallable {
             input,
             &callable.relative_path,
             callable.start_line,
-            callable.start_line,
+            callable.end_line,
         ),
     }
 }

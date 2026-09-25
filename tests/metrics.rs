@@ -41,6 +41,7 @@ fn make_callable_named(cc: u32, sloc: usize, path: &str, start_line: usize) -> C
         language: LanguageFamily::Java,
         name: "callable".to_string(),
         start_line,
+        end_line: start_line,
         cc,
         sloc,
         mass: metrics::mass(cc, sloc),
@@ -342,6 +343,26 @@ fn test_erosion_is_mass_fraction_above_cc_10() {
 #[test]
 fn test_erosion_is_zero_when_no_callables() {
     assert_eq!(metrics::erosion(&[]), 0.0);
+}
+
+/// Edge case 1 (this test): a non-empty callable slice where none exceed the
+/// CC erosion threshold. Expected `+0.0` (`is_sign_positive()`); actual
+/// before the fix is `-0.0`, because `eroded_mass` sums an empty filtered
+/// iterator and `Iterator::sum::<f64>()` over an empty sequence is `-0.0` on
+/// this toolchain, and `-0.0 / total_mass` stays `-0.0`.
+/// Edge case 2 (covered by `test_erosion_is_mass_fraction_above_cc_10` and
+/// `test_erosion_scan_matches_hand_computation` above): all mass eroded, or
+/// a genuine fraction — both unaffected by this fix, since `eroded_mass` is
+/// non-zero there.
+#[test]
+fn test_erosion_with_no_eroded_mass_is_positive_zero() {
+    let callables = vec![make_callable(1, 1), make_callable(2, 4)];
+    let erosion = metrics::erosion(&callables);
+    assert_eq!(erosion, 0.0);
+    assert!(
+        erosion.is_sign_positive(),
+        "erosion with no eroded mass must be +0.0, got {erosion}"
+    );
 }
 
 #[test]

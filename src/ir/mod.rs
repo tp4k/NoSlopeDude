@@ -13,8 +13,9 @@ use tree_sitter::Node;
 
 /// M0c's fingerprint keys on this alongside the two lowering versions below;
 /// bump it whenever `IrNode`'s shape changes in a way that would change what
-/// a downstream consumer reads off it.
-pub const IR_VERSION: u32 = 2;
+/// a downstream consumer reads off it. Bumped 2 -> 3 for M0c-9: removing
+/// `DamageKind::JavaVarargsAnnotation` changes what a `DamageSpan` can carry.
+pub const IR_VERSION: u32 = 3;
 
 /// A byte-and-line span back into the original source text a `ParsedFile`
 /// holds (D11/SLOC's requirement on the IR): both a byte range, for exact
@@ -85,13 +86,15 @@ pub enum DecisionKind {
     Or,
 }
 
-/// The three known damage classes from `nsd-plan-final.md`'s *The 16 parse
-/// failures* table, plus a catch-all for an `ERROR`/`MISSING` node the
-/// lowering does not recognize as one of the three. Typed, not just "there
-/// was an error somewhere" (*Architecture* -> salvage row).
+/// The two known damage classes from `nsd-plan-final.md`'s *The 16 parse
+/// failures* table that survive under orchard, plus a catch-all for an
+/// `ERROR`/`MISSING` node the lowering does not recognize as one of them.
+/// Typed, not just "there was an error somewhere" (*Architecture* -> salvage
+/// row). `JavaVarargsAnnotation` (M0c-9/M0c-10) is removed here: orchard's
+/// grammar no longer produces the `ERROR` shape it named, so every Java
+/// `ERROR`/`MISSING` node now falls back to `Unclassified`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DamageKind {
-    JavaVarargsAnnotation,
     TsUsingParameterName,
     JsxUnterminatedEntity,
     Unclassified,
@@ -188,9 +191,11 @@ pub struct IrNode {
 }
 
 impl IrNode {
-    /// A structurally-empty `IrNode` for the one degrade-don't-panic
-    /// fallback outside `src/lower/` (`metrics::fallback_ir_body`, D18):
-    /// all flags false, no decision, no terminator, no children.
+    /// A structurally-empty `IrNode`. Its main caller today is
+    /// `src/lower/`'s own `prune_damage`, redacting a damaged subtree; its
+    /// only caller outside `src/lower/` is `metrics::fallback_ir_body`,
+    /// D18's degrade-don't-panic fallback there: all flags false, no
+    /// decision, no terminator, no children.
     pub fn empty(span: Span) -> IrNode {
         IrNode {
             span,

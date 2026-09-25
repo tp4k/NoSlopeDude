@@ -95,14 +95,23 @@ fn callable_info(
 }
 
 /// Mirrors `metrics::is_block_kind`'s Java arm (private to `src/metrics/
-/// mod.rs`): a `{ … }` scope is a `block` or a constructor's `constructor_body`.
-fn is_block_kind(kind: &str) -> bool {
-    matches!(kind, "block" | "constructor_body")
+/// mod.rs`): a `{ … }` scope is a `block` or a constructor's
+/// `constructor_body`. Returns the matched arm's own literal rather than a
+/// bool: `Node::kind()` in tree-sitter 0.27 borrows from `node`'s own
+/// lifetime rather than promising `'static`, but `IrBlock::kind` is
+/// `&'static str` (`model::SyntaxBlock::kind` must not move), so the caller
+/// needs the match arm's `'static` literal, not `node.kind()` itself.
+fn is_block_kind(kind: &str) -> Option<&'static str> {
+    match kind {
+        "block" => Some("block"),
+        "constructor_body" => Some("constructor_body"),
+        _ => None,
+    }
 }
 
-/// Java's non-default `switch_label`: `case`, never `default`. Mirrors
-/// `metrics::is_default_label`'s own check (a `switch_label`'s first child's
-/// kind is literally `"default"`).
+/// True for Java's `default` `switch_label`: its first child's kind is
+/// literally `"default"`. `decision_kind` (below) counts every other
+/// `switch_label` as a `Case`.
 fn is_default_label(node: Node) -> bool {
     node.child(0).is_some_and(|child| child.kind() == "default")
 }
@@ -141,7 +150,7 @@ fn operator_text<'tree>(node: Node<'tree>) -> Option<&'tree str> {
 /// tree root and descends, turning one linear tree build into `Θ(depth)`
 /// work per node).
 fn is_catch_body_root(kind: &str, parent_kind: Option<&str>) -> bool {
-    is_block_kind(kind) && parent_kind == Some("catch_clause")
+    is_block_kind(kind).is_some() && parent_kind == Some("catch_clause")
 }
 
 /// D15's Java clone-candidate containers (`clones::statement_children`'s
@@ -170,16 +179,13 @@ pub(super) fn is_clone_statement(
     }
 }
 
-/// The known Java damage class (`nsd-plan-final.md`'s *The 16 parse
-/// failures*): a varargs parameter's annotation, e.g.
-/// `void m(Class<?> @Nullable ... cs)`, produces an `ERROR` node directly
-/// inside `formal_parameters`. Anything else `ERROR`/`MISSING` falls back to
-/// `Unclassified` rather than going untyped. Takes the already-threaded
-/// `parent_kind` -- see `is_catch_body_root`'s doc comment.
-fn classify_damage(node: Node, parent_kind: Option<&str>) -> Option<DamageKind> {
-    if node.is_error() && parent_kind == Some("formal_parameters") {
-        return Some(DamageKind::JavaVarargsAnnotation);
-    }
+/// M0c-9: under orchard's grammar, a varargs parameter's annotation (e.g.
+/// `void m(Class<?> @Nullable ... cs)`) no longer produces an `ERROR` node
+/// directly inside `formal_parameters` -- `DamageKind::JavaVarargsAnnotation`
+/// is removed (the shape it named is gone), so every remaining Java
+/// `ERROR`/`MISSING` node falls back to `Unclassified` rather than a
+/// dedicated class.
+fn classify_damage(node: Node) -> Option<DamageKind> {
     if node.is_error() || node.is_missing() {
         return Some(DamageKind::Unclassified);
     }
@@ -201,12 +207,12 @@ pub(super) fn classify(node: Node, source: &str, parent: Option<Node>) -> Classi
     Classification {
         decision: decision_kind(node, kind),
         terminator: terminator_kind(kind),
-        in_block: parent_kind.is_some_and(is_block_kind),
+        in_block: parent_kind.is_some_and(|kind| is_block_kind(kind).is_some()),
         is_catch_body_root: is_catch_body_root(kind, parent_kind),
-        damage: classify_damage(node, parent_kind),
+        damage: classify_damage(node),
         is_clone_statement: is_clone_statement(kind, parent_kind, is_named, is_comment),
         is_hoisted_or_type_only: false,
-        is_block: is_block_kind(kind),
+        block_kind: is_block_kind(kind),
         callable: callable_info(node, kind, parent, source),
         is_comment,
         is_named,

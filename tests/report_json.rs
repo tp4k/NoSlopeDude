@@ -422,18 +422,69 @@ fn test_source_spans_match_the_inspected_code() {
             assert_bracket_exact(&fixture_root(), location);
         }
     }
+}
 
-    // Top-25 rows (D8's `Callable`) only publish a declaration line, not a
-    // body end line (see docs/report-format.md's "Top-25 span" note) — the
-    // excerpt is that single line, read back off disk, not the callable's
-    // whole body.
+/// M0c-13: Top-25 rows (D8's `Callable`) now publish the callable's own
+/// declaration end line too (`IrCallable::span.end_line`, not just its
+/// start line), so the excerpt brackets the whole declaration, not just its
+/// first line (see docs/report-format.md's "Top-25 span" section, which
+/// used to disclose the single-line compromise this closes).
+#[test]
+fn test_top25_span_covers_the_whole_callable() {
+    let (_dir, output) = run_scan(&fixture_root(), |_| {});
+    let report = &output.report;
+
     assert!(!report.top25.is_empty());
+    let mut any_multi_line_span = false;
     for callable in &report.top25 {
-        assert_eq!(
-            callable.location.start_line, callable.location.end_line,
-            "a top-25 row's span is its single declaration line: {callable:?}"
+        assert!(
+            callable.location.end_line >= callable.location.start_line,
+            "a top-25 row's end_line must not precede its start_line: {callable:?}"
         );
+        if callable.location.end_line > callable.location.start_line {
+            any_multi_line_span = true;
+        }
         assert_bracket_exact(&fixture_root(), &callable.location);
+    }
+    assert!(
+        any_multi_line_span,
+        "at least one top-25 row's fixture callable must span more than its \
+         declaration line, or this test cannot discriminate end_line from \
+         start_line: {:?}",
+        report.top25
+    );
+
+    // The `>=` loop above only proves end_line never precedes start_line, so
+    // it survives a mutant that adds a constant offset to end_line (e.g.
+    // `start_line + 1`) instead of using the real declaration span. These
+    // three exact pins, read by hand off the fixture files, catch that
+    // mutant directly.
+    let expected_spans = [
+        ("classify", "src/Sample.java", 2usize, 8usize),
+        ("orderSummary", "src/sample.js", 1usize, 12usize),
+        (
+            "unreachableDemo",
+            "src/\"><img onerror=1>.js",
+            1usize,
+            5usize,
+        ),
+    ];
+    for (name, relative_path, expected_start, expected_end) in expected_spans {
+        let callable = report
+            .top25
+            .iter()
+            .find(|c| c.name == name && c.location.relative_path == Path::new(relative_path))
+            .unwrap_or_else(|| {
+                panic!(
+                    "{name} in {relative_path} should be in top25: {:?}",
+                    report.top25
+                )
+            });
+        assert_eq!(
+            (callable.location.start_line, callable.location.end_line),
+            (expected_start, expected_end),
+            "{name} in {relative_path}: {callable:?}"
+        );
     }
 }
 

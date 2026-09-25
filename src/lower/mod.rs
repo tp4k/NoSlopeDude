@@ -5,9 +5,11 @@
 //! catch-body structure, damage classification, clone-candidate statement
 //! containers); this file holds only the traversal shared by both -- one
 //! iterative `TreeCursor`-based tree build (D18: no per-AST-depth
-//! recursion), the same shape `metrics::walk_excluding` already uses for its
-//! own flat traversal, extended here to also assemble the `IrNode` tree
-//! itself rather than only visiting.
+//! recursion) over the raw tree-sitter tree, assembling the `IrNode` tree
+//! itself as it goes. `metrics::walk_ir_excluding` is a separate,
+//! later-stage traversal over the already-built `IrNode` tree -- an
+//! explicit work-list, not a `TreeCursor`, so a different shape from this
+//! one.
 
 mod java;
 mod jsts;
@@ -30,8 +32,10 @@ use crate::parse::ParsedFile;
 
 /// M0c's fingerprint keys on this alongside `ir::IR_VERSION`; bump it
 /// whenever the Java lowering's classification changes what an `IrNode`
-/// carries for a Java file.
-pub const JAVA_LOWERING_VERSION: u32 = 2;
+/// carries for a Java file. Bumped 2 -> 3 for M0c-9: orchard's grammar
+/// changes what a Java `ERROR`/`MISSING` node classifies as (`ir::DamageKind`'s
+/// `JavaVarargsAnnotation` variant is gone).
+pub const JAVA_LOWERING_VERSION: u32 = 3;
 
 /// The JS/TS counterpart of `JAVA_LOWERING_VERSION`.
 pub const JSTS_LOWERING_VERSION: u32 = 2;
@@ -246,6 +250,12 @@ fn cascade_exclusions(
             Some(EntityRef::Block(index)),
         ));
     }
+    // Row-1's security fix depends on `sort_by`'s stability: for two
+    // entries with an identical span, it preserves push order, and damage
+    // entries are pushed first (above), so a damage entry always sorts
+    // ahead of a same-span callable/block entry and wins the tie-break
+    // below. `sort_unstable_by` would not preserve that push order and
+    // could reopen row-1 for that exact same-span shape.
     entries.sort_by(|(a_span, ..), (b_span, ..)| {
         a_span
             .start_byte
@@ -413,9 +423,14 @@ struct Classification {
     is_clone_statement: bool,
     /// JS/TS only; always `false` from the Java lowering.
     is_hoisted_or_type_only: bool,
-    /// Whether this exact node is itself a block-kind node (the
-    /// self-is-block predicate for `SyntaxBlock` classification).
-    is_block: bool,
+    /// This exact node's own canonical block-kind literal (the self-is-block
+    /// predicate for `SyntaxBlock` classification), `None` if it is not a
+    /// block-kind node. `&'static str`, not `node.kind()` directly: tree-sitter
+    /// 0.27's `Node::kind()` borrows from the node's own lifetime rather than
+    /// promising `'static`, but `IrBlock::kind` (below) is `&'static str`
+    /// (`model::SyntaxBlock::kind` must not move), so each lowering's
+    /// `is_block_kind` returns its matched arm's own `'static` literal instead.
+    block_kind: Option<&'static str>,
     /// `Some` when this node is a callable-kind node that has a body (D8).
     callable: Option<CallableInfo>,
 }
@@ -438,7 +453,7 @@ fn classify(
     language: LanguageFamily,
     source: &str,
     parent: Option<Node>,
-    field_name: Option<&'static str>,
+    field_name: Option<&str>,
 ) -> Classification {
     match language {
         LanguageFamily::Java => java::classify(node, source, parent),
@@ -559,14 +574,15 @@ struct IrTables<'a> {
 }
 
 /// Builds `root`'s whole `IrNode` tree in one iterative pass: a single
-/// `TreeCursor` walks the tree exactly as `metrics::walk_excluding` does
-/// (D18: no per-AST-depth recursion), but this traversal also assembles a
-/// tree rather than only visiting, via an explicit stack of in-progress
-/// `IrNode`s mirroring the cursor's own descent depth. A node is finalized
-/// (popped and attached to its parent's `children`) the moment the cursor
-/// has no more children and no more siblings to explore under it, which is
-/// exactly when `metrics::walk_excluding`'s own traversal would have moved
-/// on past that subtree.
+/// `TreeCursor` walks the raw tree-sitter tree (D18: no per-AST-depth
+/// recursion), assembling the `IrNode` tree as it goes rather than only
+/// visiting, via an explicit stack of in-progress `IrNode`s mirroring the
+/// cursor's own descent depth. A node is finalized (popped and attached to
+/// its parent's `children`) the moment the cursor has no more children and
+/// no more siblings to explore under it. `metrics::walk_ir_excluding` is a
+/// later, separate pass over this already-built `IrNode` tree, using an
+/// explicit work-list rather than a `TreeCursor` -- a different shape from
+/// this one, not the same one reused.
 fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrTables) -> IrNode {
     // `parent_in_catch_body` is the already-computed `in_catch_body` flag of
     // this node's own parent (or `false` for `root`), inherited rather than
@@ -587,7 +603,7 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
     let open = |node: Node,
                 parent: Option<Node>,
                 parent_in_catch_body: bool,
-                field_name: Option<&'static str>,
+                field_name: Option<&str>,
                 tables: &mut IrTables|
      -> (IrNode, bool, bool, Option<EntitySlot>) {
         let span = Span::from_node(node);
@@ -597,10 +613,10 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
             tables.damage.push(DamageSpan { kind, span });
         }
         let mut entity_slot = None;
-        if classification.is_block {
+        if let Some(block_kind) = classification.block_kind {
             tables.blocks.push(IrBlock {
                 span,
-                kind: node.kind(),
+                kind: block_kind,
             });
             tables.block_dirty.push(false);
             entity_slot = Some(EntitySlot::Block(tables.block_dirty.len() - 1));
@@ -626,7 +642,7 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
             is_named: classification.is_named,
             is_clone_statement: classification.is_clone_statement,
             is_hoisted_or_type_only: classification.is_hoisted_or_type_only,
-            children: Vec::with_capacity(node.child_count()),
+            children: Vec::with_capacity(node.child_count() as usize),
         };
         (ir_node, in_catch_body, self_damage, entity_slot)
     };
@@ -773,7 +789,7 @@ mod tests {
 
     fn tree_sitter_language(grammar: Grammar) -> tree_sitter::Language {
         match grammar {
-            Grammar::Java => tree_sitter_java::LANGUAGE.into(),
+            Grammar::Java => tree_sitter_java_orchard::LANGUAGE.into(),
             Grammar::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
             Grammar::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
             Grammar::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),

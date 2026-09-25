@@ -105,6 +105,68 @@ checkout it came from:
    line; set `NSD_REQUIRE_ARCHIVE_VERIFIED=1` alongside the archive path to
    turn a still-missing archive into a panic instead, for a CI job (once
    wired) that has the archive and wants to demand it.
-3. `test_committed_digest_carries_no_paths_names_or_excerpts` runs
-   unconditionally, with no archive needed, and checks the committed file
-   itself for forbidden keys and absolute-path-shaped strings.
+3. `assert_digest_carries_no_paths_names_or_excerpts` runs unconditionally,
+   with no archive needed, and is called by both
+   `test_committed_digest_carries_no_paths_names_or_excerpts` and
+   `test_nsd_v1_digest_carries_no_paths_names_or_excerpts`, each against its
+   own committed file (the M0b digest and the `nsd-v1` digest). It asserts:
+   the forbidden keys and the widened path-shape scan (any `/`, `\`, or `~`
+   in any object key or string value, exempting only the exact `language`
+   value, not just a leading `/`); the exact eleven-key top-level set; the
+   exact `label`, `authorship`, `revision_sha`, and `language` values;
+   `body_blake3`'s `blake3:` + 32-lowercase-hex-char shape; `scores`' exact
+   `{overall, java, js_ts}` language set, per-language `{erosion,
+   verbosity}` key shape and `verbosity`'s `{flagged_lines, ratio,
+   scanned_lines}` key shape; and that every leaf under `scores`, `clones`,
+   `findings_by_rule_id`, `skips_by_reason` and `top25` is numeric.
+
+## The `nsd-v1` digest (M0c-14)
+
+`nsd-plan-final.md:750-752` and `nsd-plan-implementation.md:167` make the
+`java-fixture-01` digest the committed Java E2E golden. M0c's grammar swap
+(`tree-sitter-java` 0.23.5 → `tree-sitter-java-orchard` 0.5.18) and the
+`Callable::end_line`/`-0.0` fixes (M0c-13) mean the M0b digest above no
+longer describes what `nsd-v1` actually emits, so a second file,
+`tests/golden/java-fixture-01.nsd-v1.digest.json`, is committed alongside
+it. The M0b file above stays byte-identical, as history: it is what
+`tree-sitter-java` 0.23.5 emitted, and
+`test_committed_digest_matches_the_archived_report` keeps checking it
+against the archive.
+
+Captured at `feat/m0c-grammar@beee958` (M0c-14's red commit), under the
+frozen `nsd-v1` measurement profile fingerprint
+`blake3:90b27f53ddecccd4ac879652d4d9c4eb` (`src/profile.rs::PROFILE_NAME`,
+pinned by `tests/profile.rs::test_nsd_v1_fingerprint_is_frozen`).
+
+`tests/golden_digest.rs::test_nsd_v1_digest_matches_a_live_scan_of_java_fixture_01`
+re-scans the archive's own recorded target with its own
+recorded settings (`include_tests`, `exclude`, `min_clone_lines`), exactly
+as the retired M0b-8c strict leg did, and asserts the result equals this
+file. It first asserts the live report's `scan.revision.sha` equals the
+M0b digest's `revision_sha`, `scan.revision.dirty` is `false`, and
+top-level `incomplete` is `false` -- so a re-capture against the wrong or
+a dirty checkout fails loudly instead of silently drifting. The archive
+path is read only from `NSD_ARCHIVED_REPORT` at invocation time, exactly
+like the M0b check; without it the test prints a PENDING notice, same as
+above.
+
+Re-capturing (implementer-only; overwrites the committed file) sets a
+second, separate opt-in alongside the archive path:
+
+```
+NSD_ARCHIVED_REPORT=… NSD_GOLDEN_CAPTURE=1 cargo test --test golden_digest
+```
+
+### Per-field delta against the M0b digest
+
+Every field this digest carries was compared directly against the M0b
+file at capture time:
+
+| field | delta | attributed to |
+|---|---|---|
+| `label`, `language`, `authorship`, `revision_sha`, `hash_version` | none | shared identity — see `test_nsd_v1_digest_shares_the_m0b_revision` |
+| `scores` (`overall`/`java`/`js_ts` `erosion` and `verbosity`) | none | measured directly: under orchard, no score, finding, clone, skip or top-25 triple moved on this fixture, and no language's eroded mass is exactly zero here, so the `-0.0` fix's edge case never triggers |
+| `findings_by_rule_id`, `clones`, `skips_by_reason`, `top25` | none | same reason — no rule finding, clone group, skip, or top-25 `(cc, sloc, mass)` triple moves; `Callable::end_line` (M0c-13) widens *where* a span is reported, not `cc`/`sloc`/`mass`, which are computed from the IR's own executable-line set, not from `end_line` |
+| `body_blake3` | **changed** (`blake3:f78712b43c6520413265b31903d724d8` → `blake3:bf38db177aef0a50836345834131cf68`) | measured directly: comparing the two normalized report bodies (archive vs. a live HEAD scan) shows the body moved only in `top25[].location.end_line` and `top25[].location.link`, for 20 of the 25 rows; `start_line` is unchanged, and no finding or clone location moved. The cause is M0c-13's `build_callable` change alone (`src/report/mod.rs:358`, `[start_line, end_line]` instead of `[start_line, start_line]`) — the orchard swap moved nothing in the normalized body |
+
+No path, name or excerpt appears in either file or in this table.

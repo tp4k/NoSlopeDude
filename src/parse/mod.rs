@@ -126,7 +126,7 @@ fn parse_one(root: &Path, file: &DiscoveredFile) -> (Option<ParsedFile>, Option<
 
 fn language_for(grammar: Grammar) -> Language {
     match grammar {
-        Grammar::Java => tree_sitter_java::LANGUAGE.into(),
+        Grammar::Java => tree_sitter_java_orchard::LANGUAGE.into(),
         Grammar::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
         Grammar::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
         Grammar::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),

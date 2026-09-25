@@ -317,24 +317,191 @@ key added on only one side under a declared pointer, and a changed leaf
 outside any declared pointer — independent of whatever `DECLARED_DELTAS`
 holds in production.
 
-## The `java-fixture-01` strict leg
+## M0c-10: baselines moved by the Java grammar swap
 
-Spec item 8 also names a byte-identity comparison against
-`java-fixture-01`, the private archived report — separate from
-`docs/golden-digest.md`'s lossy digest comparison (below).
+The Java grammar swap (`tree-sitter-java` 0.23.5 →
+`tree-sitter-java-orchard` 0.5.18, `src/parse/mod.rs`) is a deliberate
+change to Java parse output, so `docs/measurements.md`'s *Known caveats*
+warning about the byte-identity gate applies here too: any Java-corpus
+baseline this swap moves is expected, not a regression, provided the
+moved pointers are fully explained (below) rather than merely observed.
+
+**`clean.report.json` — recaptured. Exactly four JSON pointers changed**
+(`bash scripts/neutrality_gate.sh --capture`, i.e.
+`NSD_NEUTRALITY_CAPTURE=1 cargo test --test neutrality`, then a full
+before/after pointer diff of the committed file against a
+`3dd9ae2`-built control's baseline to confirm nothing else moved):
+
+| pointer | before | after |
+| --- | --- | --- |
+| `/scores/java/verbosity/scanned_lines` | 636 | 637 |
+| `/scores/java/verbosity/ratio` | 0.24213836477987422 | 0.24175824175824176 |
+| `/scores/overall/verbosity/scanned_lines` | 1018 | 1019 |
+| `/scores/overall/verbosity/ratio` | 0.22298624754420432 | 0.22276741903827282 |
+
+All four are one mechanism: `tests/fixtures/ir/JavaVarargsAnnotation.java`
+(`class JavaVarargsAnnotation { void m(Class<?> @Nullable ... cs) {} }`)
+is the *only* clean-corpus file with any before/after delta at all
+(confirmed by an isolated single-file scan of every non-malformed Java
+fixture with both a `3dd9ae2`-built and this branch's release binary).
+Under 0.23.5 its `formal_parameters` contains an `ERROR` node (the same
+varargs-annotation misparse `docs/measurements.md` describes at corpus
+scale), so callable `m` is entirely fail-closed excluded
+(`cascade_exclusions`/`prune_damage`) and contributes nothing —
+`scanned_lines` for the file is `1` (only the `class ... {` line). Under
+orchard the file parses clean, `m` is fully measured, and
+`scanned_lines` becomes `2` (the signature line's own leaf tokens are now
+counted too, even though the empty body itself contributes `0` `sloc`).
+`+1` file → `+1` java `scanned_lines` → `+1` overall `scanned_lines`; the
+two `ratio` fields move only because their denominator did.
+
+This is **not** a `modifier`/`visibility` node effect. Orchard's
+node-types do add named `modifier`/`visibility` wrapper nodes around what
+were previously anonymous `public`/`static`/... keyword tokens (confirmed
+via a `node-types.json` diff and a real parse dump of
+`tests/fixtures/rules/broken/Broken.java`), which is what this
+workstream's own planning brief expected to be the delta's cause — but
+that wrapper node always has exactly one child (the still-anonymous
+keyword token itself), so `src/exec_lines.rs::is_executable_leaf`'s
+`child_count() == 0` leaf test never accepts it, on any line, in any
+fixture. The corpus-wide four-pointer diff above is the complete,
+verified account of every place this swap moved `clean.report.json`; see
+`docs/measurements.md`'s M0c-10 section for the same mechanism confirmed
+again at the Spring/Angular perf-fixture scale, with two hand-checked
+real callables.
+
+**`malformed.report.json` — unchanged, deliberately not recaptured.**
+Running the capture command touches both baseline files at once (they
+share one `NSD_NEUTRALITY_CAPTURE=1 cargo test --test neutrality`
+invocation), and doing so once did overwrite this file too — that
+recapture was reverted (`git checkout -- tests/golden/neutrality/
+malformed.report.json`) after confirming the observed delta
+(`/skipped_files` shrinking from three entries to zero,
+`scores.{overall,java}.verbosity.scanned_lines` moving `0` → `3`) is
+**already** the *Declared deltas* section's own pre-existing, WS-6-era
+divergence — present in the `3dd9ae2` control build too, unrelated to and
+unmoved by this swap. `git show 3dd9ae2:tests/golden/neutrality/
+malformed.report.json` and the reverted file are byte-identical; a fresh
+`cargo test --test neutrality` run against the reverted file passes
+(`test_malformed_corpus_report_matches_its_baseline_with_declared_deltas_only`
+tolerates exactly this, already-declared, delta). Recapturing it would
+have replaced one already-tolerated divergence with a second,
+indistinguishable one and lost the historical record of which workstream
+caused which — `DECLARED_DELTAS` in `tests/neutrality.rs` is untouched by
+this workstream.
+
+## M0c-13: baselines moved by the real Top-25 span
+
+`Callable::end_line` (M0c-13, `src/model.rs`) is now
+`IrCallable::span.end_line`, populated from the AST walk, instead of a
+duplicate of `start_line` — a deliberate change to what `report.json`'s
+`top25[].location` publishes, so this baseline move is expected, not a
+regression, provided the moved pointers are fully explained (below)
+rather than merely observed.
+
+**`clean.report.json` — recaptured.** Exactly 66 JSON pointers changed
+(`NSD_NEUTRALITY_CAPTURE=1 cargo test --test neutrality`, then `git diff`
+grepped for every changed key name to confirm only three keys ever
+appear: `end_line`, `excerpt`, `link` — 66 additions paired with 66
+deletions, i.e. 22 of the corpus's 25 top-25 entries, three fields each).
+The three entries that did **not** move are single-line callables whose
+`end_line` already equalled `start_line` before this change: one-line
+expression-bodied arrows (`<anonymous>@1` and `<anonymous>@4` in
+`metrics/__tests__/NestedExpressionCallable.js`, `inner` in
+`metrics/__tests__/NestedCallable.js`, e.g. `(b) => (b > 0 ? b : -b)`)
+declared and closed on the line they start on, so there is nothing to
+widen. Every moved entry:
+
+| callable | file | start_line | end_line before | end_line after |
+| --- | --- | --- | --- | --- |
+| `decide` | `metrics/__tests__/Decisions.java` | 2 | 2 | 44 |
+| `decide` | `metrics/__tests__/JsDecisions.js` | 1 | 1 | 39 |
+| `compute` | `metrics/erosion/HighComplexity.java` | 2 | 2 | 12 |
+| `classify` | `report_erosion/src/HighComplexity.java` | 2 | 2 | 16 |
+| `m` | `ir/Decisions.java` | 2 | 2 | 28 |
+| `m` | `ir/decisions.ts` | 1 | 1 | 27 |
+| `lowComplexity` | `metrics/erosion/LowComplexity.js` | 1 | 1 | 11 |
+| `loopy` | `metrics/__tests__/BareControlFlow.js` | 1 | 1 | 11 |
+| `run` | `clones/__tests__/SwitchDupJava.java` | 2 | 2 | 29 |
+| `run` | `clones/__tests__/SwitchDupJs.js` | 1 | 1 | 37 |
+| `forOfOptional` | `metrics/__tests__/ForOfOptional.js` | 1 | 1 | 9 |
+| `colonForm` | `metrics/__tests__/SwitchForms.java` | 2 | 2 | 12 |
+| `arrowForm` | `metrics/__tests__/SwitchForms.java` | 14 | 14 | 21 |
+| `m` | `ir/ContainerSet.java` | 7 | 7 | 13 |
+| `m` | `ir/StructuralPredicates.java` | 2 | 2 | 10 |
+| `m` | `ir/container_set.ts` | 4 | 4 | 10 |
+| `m` | `ir/structural_predicates.ts` | 1 | 1 | 9 |
+| `Point` | `metrics/__tests__/CallableKinds.java` | 10 | 10 | 14 |
+| `outer` | `metrics/__tests__/NestedCallable.js` | 1 | 1 | 7 |
+| `sloc` | `metrics/__tests__/SlocLines.js` | 1 | 1 | 12 |
+| `ifConstruct` | `parity/Constructs.java` | 2 | 2 | 8 |
+| `forConstruct` | `parity/Constructs.java` | 10 | 10 | 14 |
+
+Each row's `excerpt` widened to match (the callable's whole declaration
+and body, read back off disk, not just its first line) and each row's
+`link` moved from `#L{n}-L{n}` to `#L{start}-L{end}` accordingly — no
+other field on any row, and no field outside `top25[]`, moved.
+
+**`malformed.report.json` — unchanged.** Its own `top25` array is empty
+(the corpus is `incomplete`, fail-closed on every fixture's one
+callable), so the span widening has nothing to reach there; a capture
+run touched it anyway (recapturing both files at once), and that
+recapture was reverted (`git show HEAD:tests/golden/neutrality/
+malformed.report.json > tests/golden/neutrality/malformed.report.json`,
+`git checkout --`/`git restore` being off-limits) after confirming the
+only observed delta — `/skipped_files` shrinking from three entries to
+zero, `scores.{overall,java}.verbosity.scanned_lines` moving `0` → `3`
+— is the *Declared deltas* section's own pre-existing, WS-6-era
+divergence, unrelated to and unmoved by this workstream: a fresh
+`cargo test --test neutrality` run against the reverted file passes
+(`test_malformed_corpus_report_matches_its_baseline_with_declared_deltas_only`
+tolerates exactly this, already-declared, delta).
+
+## The `java-fixture-01` strict leg (retired at M0c-10)
+
+Spec item 8 named a byte-identity comparison against `java-fixture-01`,
+the private archived report — separate from `docs/golden-digest.md`'s
+lossy digest comparison (below). Through the end of M0b,
 `tests/neutrality.rs::test_java_fixture_01_strict_scan_is_byte_identical_to_the_archived_report`
-covers it, gated the same way `tests/golden_digest.rs` gates its own
+covered it, gated the same way `tests/golden_digest.rs` gates its own
 archive comparison: `NSD_ARCHIVED_REPORT` (a path to the private archived
-`report.json`, read only at test run time) resolves the leg; when unset,
-the test prints a pending notice and passes, unless
-`NSD_REQUIRE_ARCHIVE_VERIFIED` is also set, in which case it panics.
+`report.json`, read only at test run time) resolved the leg; when unset,
+the test printed a pending notice and passed, unless
+`NSD_REQUIRE_ARCHIVE_VERIFIED` was also set, in which case it panicked.
 `test_java_fixture_01_strict_leg_is_reported_pending_when_the_archive_is_absent`
-pins the pending path. When resolved, the archived report's own
-`scan.{target,include_tests,exclude,min_clone_lines}` are read back out of
-it to rebuild the exact `ScanSettings` used to produce it, a fresh scan is
-run, and the two `report.json` texts are compared byte-for-byte. Neither
-the archive's path nor any excerpt of its contents is ever written to this
-repository.
+pinned the pending path. When resolved, the archived report's own
+`scan.{target,include_tests,exclude,min_clone_lines}` were read back out of
+it to rebuild the exact `ScanSettings` used to produce it, a fresh scan was
+run, and the two `report.json` texts were compared byte-for-byte.
+
+**Last run before retirement (run by the coordinator on `main@3dd9ae2`,
+still at `tree-sitter-java` 0.23.5): PASS.** `NSD_ARCHIVED_REPORT=<the
+private archive> NSD_REQUIRE_ARCHIVE_VERIFIED=1 cargo test --test
+neutrality` ran
+`test_java_fixture_01_strict_scan_is_byte_identical_to_the_archived_report`,
+which scanned `java-fixture-01` byte-identical to the archived
+`report.json` — 2,613,042 bytes, verified against a tampered-archive
+negative control (a single flipped byte in a scratch copy of the archive
+correctly failed the comparison). See `docs/implementation-status.md`,
+row M0b-8c, for the commit that records
+this without the archive's path or contents.
+
+**Retired by this workstream (M0c-10), not merely re-baselined.** Item 8's
+invariant was "the IR retarget alone produces a byte-identical
+`report.json`" — a statement about IR *lowering*, holding the *parser*
+fixed. M0c-10 deliberately changes the parser (`tree-sitter-java` 0.23.5 →
+`tree-sitter-java-orchard` 0.5.18) specifically so it no longer misparses a
+type-use annotation before a varargs ellipsis. Re-pointing this leg at a
+newly-captured `java-fixture-01` archive would silently convert a
+parser-behavior invariant into "whatever today's grammar happens to
+produce", which is not what item 8 asked for and not verifiable without
+re-running the private fixture archival process (out of this workstream's
+scope; WS-5 owns the post-swap golden digest instead, in
+`docs/golden-digest.md`). The test and its pending twin have been removed
+from `tests/neutrality.rs` rather than left to assert against a stale
+pre-swap archive forever. The `java-fixture-01` corpus's *lossy* digest
+comparison (`tests/golden_digest.rs`, `docs/golden-digest.md`) is
+unaffected by this retirement and continues to gate independently.
 
 ## Running the gate
 
@@ -343,9 +510,10 @@ cargo test --test neutrality
 ```
 
 runs the always-on comparison against the committed baselines; it needs
-nothing beyond the checked-out repository (aside from the optional,
-private-archive-gated `java-fixture-01` leg above, which is pending by
-default).
+nothing beyond the checked-out repository. (Through M0b this also carried
+the optional, private-archive-gated `java-fixture-01` strict leg described
+above; that leg is retired as of M0c-10 and no longer part of this
+suite.)
 
 ```
 bash scripts/neutrality_gate.sh

@@ -72,7 +72,7 @@ mod tests {
     fn parse_java(source: &str) -> Tree {
         let mut parser = Parser::new();
         parser
-            .set_language(&tree_sitter_java::LANGUAGE.into())
+            .set_language(&tree_sitter_java_orchard::LANGUAGE.into())
             .expect("java grammar");
         parser.parse(source, None).expect("java parse")
     }
@@ -108,6 +108,12 @@ mod tests {
         let jsts = parse_jsts("function f() {\n  // note\n}\n");
         let comment = find_by_kind(jsts.root_node(), "comment");
         assert!(!is_executable_leaf(comment, LanguageFamily::JsTs));
+
+        // Cross-family: is_comment_kind must discriminate by language, not
+        // just by kind string, so a language-blind implementation fails.
+        assert!(!is_comment_kind("line_comment", LanguageFamily::JsTs));
+        assert!(!is_comment_kind("block_comment", LanguageFamily::JsTs));
+        assert!(!is_comment_kind("comment", LanguageFamily::Java));
     }
 
     #[test]

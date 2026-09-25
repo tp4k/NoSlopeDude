@@ -20,10 +20,13 @@ mod hashing;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde_json::Value;
+
+use nsd::model::ScanSettings;
+use nsd::pipeline;
 
 /// The env var that carries the archived report's path at invocation time
 /// only; it is never written into a repository file.
@@ -59,13 +62,33 @@ const EXPECTED_JAVA_EROSION: f64 = 0.13294913151043064;
 const EXPECTED_SKIPS_TEST: u64 = 853;
 const EXPECTED_SKIPS_DEPENDENCY_OR_BUILD_OUTPUT: u64 = 1;
 
+/// Opt-in env var, mirroring `tests/neutrality.rs::NEUTRALITY_CAPTURE_ENV_VAR`,
+/// that promotes `test_nsd_v1_digest_matches_a_live_scan_of_java_fixture_01`
+/// from a comparison into an implementer-only capture: instead of asserting
+/// the live digest against the committed `nsd-v1` file, it writes the live
+/// digest there. Never set in a verifier or CI run -- capturing overwrites a
+/// repository file.
+const GOLDEN_CAPTURE_ENV_VAR: &str = "NSD_GOLDEN_CAPTURE";
+
 fn committed_digest_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/java-fixture-01.digest.json")
 }
 
-fn read_committed_digest() -> Result<Value> {
-    let raw = fs::read_to_string(committed_digest_path())
-        .context("reading the committed java-fixture-01 golden digest")?;
+/// The post-swap digest (D15): captured from a live scan once orchard, the
+/// `nsd-v1` freeze, and the `end_line`/`-0.0` fixes have all landed, so it
+/// matches what `nsd-v1` actually emits. `committed_digest_path` above must
+/// keep reading the M0b file -- the archive-backed check that reproduces the
+/// pre-swap golden is never repointed at this one.
+fn nsd_v1_digest_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/golden/java-fixture-01.nsd-v1.digest.json")
+}
+
+/// Reads and parses a committed digest file at `path` -- either the M0b
+/// digest or the `nsd-v1` digest, both the same seven-normalized, A1 shape.
+fn read_committed_digest(path: &Path) -> Result<Value> {
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("reading the committed golden digest at {path:?}"))?;
     golden::parse_digest(&raw).context("parsing the committed golden digest")
 }
 
@@ -187,7 +210,7 @@ fn test_committed_digest_matches_the_archived_report() -> Result<()> {
         .context("recomputed digest is missing top25")?;
     assert_eq!(top25.len(), TOP25_TRIPLE_COUNT);
 
-    let committed = read_committed_digest()?;
+    let committed = read_committed_digest(&committed_digest_path())?;
     assert_eq!(
         recomputed, committed,
         "the committed golden must equal what build_digest re-derives from the archive"
@@ -273,10 +296,13 @@ fn test_required_but_pending_message_names_both_env_vars() {
     );
 }
 
-/// Runs unconditionally (no archive needed): the committed digest file
-/// itself must carry none of the archived report's private shape.
-#[test]
-fn test_committed_digest_carries_no_paths_names_or_excerpts() -> Result<()> {
+/// Runs unconditionally (no archive needed): a committed digest file --
+/// either the M0b digest or the `nsd-v1` digest, both the same A1 shape --
+/// must carry none of the archived report's private shape. Shared by
+/// `test_committed_digest_carries_no_paths_names_or_excerpts` and
+/// `test_nsd_v1_digest_carries_no_paths_names_or_excerpts` so the check
+/// cannot silently drift between the two files it is run against.
+fn assert_digest_carries_no_paths_names_or_excerpts(committed: &Value) -> Result<()> {
     const FORBIDDEN_KEYS: [&str; 6] = [
         "excerpt",
         "link",
@@ -344,9 +370,8 @@ fn test_committed_digest_carries_no_paths_names_or_excerpts() -> Result<()> {
         }
     }
 
-    let committed = read_committed_digest()?;
     let mut forbidden_keys_found = BTreeMap::new();
-    walk(&committed, &mut forbidden_keys_found);
+    walk(committed, &mut forbidden_keys_found);
     assert!(
         forbidden_keys_found.is_empty(),
         "committed digest carries forbidden keys: {:?}",
@@ -472,5 +497,234 @@ fn test_committed_digest_carries_no_paths_names_or_excerpts() -> Result<()> {
         assert_all_leaves_are_numbers(&committed[field], field);
     }
 
+    Ok(())
+}
+
+/// Runs unconditionally (no archive needed): the committed M0b digest file
+/// itself must carry none of the archived report's private shape.
+#[test]
+fn test_committed_digest_carries_no_paths_names_or_excerpts() -> Result<()> {
+    let committed = read_committed_digest(&committed_digest_path())?;
+    assert_digest_carries_no_paths_names_or_excerpts(&committed)
+}
+
+/// Runs unconditionally (no archive needed): the committed `nsd-v1` digest
+/// file must carry none of the archived report's private shape, exactly
+/// like the M0b digest above -- the same forbidden-key, path-shape,
+/// top-level-key and numeric-leaf checks, over the new file.
+#[test]
+fn test_nsd_v1_digest_carries_no_paths_names_or_excerpts() -> Result<()> {
+    let committed = read_committed_digest(&nsd_v1_digest_path())?;
+    assert_digest_carries_no_paths_names_or_excerpts(&committed)
+}
+
+/// Unconditional: the M0b and `nsd-v1` committed digests must agree on
+/// every field that is not expected to move under the orchard swap -- the
+/// fixture's identity and revision, not its measurements.
+#[test]
+fn test_nsd_v1_digest_shares_the_m0b_revision() -> Result<()> {
+    let m0b = read_committed_digest(&committed_digest_path())?;
+    let nsd_v1 = read_committed_digest(&nsd_v1_digest_path())?;
+    for field in [
+        "revision_sha",
+        "label",
+        "language",
+        "authorship",
+        "hash_version",
+    ] {
+        assert_eq!(
+            m0b[field], nsd_v1[field],
+            "{field} must agree between the M0b and nsd-v1 committed digests"
+        );
+    }
+    Ok(())
+}
+
+/// Pure classification of a possibly-absent `NSD_GOLDEN_CAPTURE` value,
+/// split out the same way `classify_archive_gate` and
+/// `classify_verification_requirement` are: so `None` and `Some("")`
+/// (unset, and set-but-empty) can each be asserted directly as "do not
+/// capture", rather than only observed through the process's own
+/// environment.
+fn classify_golden_capture(raw: Option<OsString>) -> bool {
+    matches!(raw, Some(value) if !value.is_empty())
+}
+
+fn golden_capture_requested() -> bool {
+    classify_golden_capture(std::env::var_os(GOLDEN_CAPTURE_ENV_VAR))
+}
+
+#[test]
+fn test_classify_golden_capture_needs_a_non_empty_value() {
+    assert!(!classify_golden_capture(None));
+    assert!(!classify_golden_capture(Some(OsString::new())));
+    assert!(classify_golden_capture(Some(OsString::from("1"))));
+}
+
+/// What `test_nsd_v1_digest_matches_a_live_scan_of_java_fixture_01` needs
+/// out of the archived report to reproduce its scan: the same target and
+/// scan settings the retired strict leg read
+/// (`git show 3dd9ae2:tests/neutrality.rs`,
+/// `test_java_fixture_01_strict_scan_is_byte_identical_to_the_archived_report`),
+/// so a private checkout path is read only from the archive at
+/// invocation time, never from a repository file.
+struct ArchivedScanRecipe {
+    target: String,
+    include_tests: bool,
+    exclude: Vec<String>,
+    min_clone_lines: u32,
+}
+
+fn read_archived_scan_recipe(archived: &Value) -> Result<ArchivedScanRecipe> {
+    let scan = archived
+        .get("scan")
+        .and_then(Value::as_object)
+        .context("archived report is missing a scan object")?;
+    let target = scan
+        .get("target")
+        .and_then(Value::as_str)
+        .context("scan.target is missing or not a string")?
+        .to_string();
+    let include_tests = scan
+        .get("include_tests")
+        .and_then(Value::as_bool)
+        .context("scan.include_tests is missing or not a bool")?;
+    let exclude: Vec<String> = scan
+        .get("exclude")
+        .and_then(Value::as_array)
+        .context("scan.exclude is missing or not an array")?
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .context("scan.exclude entry is not a string")
+        })
+        .collect::<Result<_>>()?;
+    let min_clone_lines =
+        scan.get("min_clone_lines")
+            .and_then(Value::as_u64)
+            .context("scan.min_clone_lines is missing or not a number")? as u32;
+    Ok(ArchivedScanRecipe {
+        target,
+        include_tests,
+        exclude,
+        min_clone_lines,
+    })
+}
+
+/// Proves the pending path is reachable and prints its notice rather than
+/// silently substituting a pass, independent of whether this particular
+/// invocation happens to carry the archive-backed leg too -- mirroring
+/// `test_gate_is_reported_pending_when_the_archive_is_absent` for the
+/// live-scan leg below.
+#[test]
+fn test_nsd_v1_live_scan_is_reported_pending_when_the_archive_is_absent() {
+    match archive_gate() {
+        ArchiveGate::Pending => {
+            println!("{}", pending_notice());
+        }
+        ArchiveGate::Resolved(_) => {
+            // The archive-backed leg is running in this invocation; the
+            // pending branch above is exercised by this same test in the
+            // ordinary (archive-absent) developer/CI run instead.
+        }
+    }
+}
+
+/// D15: re-scans the archive's own recorded target with its own recorded
+/// settings -- exactly as the retired strict leg did -- and asserts the
+/// live `nsd-v1` digest equals the committed `tests/golden/java-fixture-01.
+/// nsd-v1.digest.json`. The archive is resolved only from
+/// `NSD_ARCHIVED_REPORT` at invocation time and never committed
+/// (`AGENTS.md`, *Fixture privacy*); the freshly rendered `report.json`
+/// (which does carry real source excerpts, for a real local checkout
+/// target) is written only to a tempdir outside this repository and never
+/// read past `golden::build_digest`'s own excerpt strip.
+///
+/// A missing archive never invents a pass here, same as the M0b check
+/// above: the pending arm asserts nothing. `NSD_GOLDEN_CAPTURE` (checked
+/// only once the archive is resolved) turns this from a comparison into
+/// an implementer-only capture that writes the live digest to the
+/// committed file instead of asserting equality.
+#[test]
+fn test_nsd_v1_digest_matches_a_live_scan_of_java_fixture_01() -> Result<()> {
+    let path = match archive_gate() {
+        ArchiveGate::Resolved(path) => path,
+        ArchiveGate::Pending => {
+            println!("{}", pending_notice());
+            if verification_required() {
+                panic!("{}", required_but_pending_message());
+            }
+            return Ok(());
+        }
+    };
+
+    let archived_raw = fs::read_to_string(&path).context("reading the archived report")?;
+    let archived = golden::parse_report(&archived_raw).context("parsing the archived report")?;
+    let recipe = read_archived_scan_recipe(&archived)?;
+
+    let output_dir = tempfile::tempdir().context("creating the live-scan output tempdir")?;
+    let settings = ScanSettings {
+        output: output_dir.path().to_path_buf(),
+        include_tests: recipe.include_tests,
+        exclude: recipe.exclude,
+        min_clone_lines: recipe.min_clone_lines,
+    };
+    pipeline::run(&recipe.target, settings).unwrap_or_else(|_| {
+        panic!(
+            "running the live scan of java-fixture-01 failed; details withheld \
+             (AGENTS.md, Fixture privacy)"
+        )
+    });
+    let live_raw = fs::read_to_string(output_dir.path().join("report.json"))
+        .context("reading the freshly rendered live report.json")?;
+    let mut live = golden::parse_report(&live_raw).context("parsing the live report")?;
+
+    let committed_m0b = read_committed_digest(&committed_digest_path())?;
+    let expected_revision_sha = committed_m0b["revision_sha"]
+        .as_str()
+        .context("committed M0b digest is missing revision_sha")?;
+    let live_sha = live["scan"]["revision"]["sha"]
+        .as_str()
+        .context("live report is missing scan.revision.sha")?;
+    assert_eq!(
+        live_sha, expected_revision_sha,
+        "the private java-fixture-01 checkout is not at the recorded revision; \
+         details withheld (AGENTS.md, Fixture privacy)"
+    );
+    let live_dirty = live["scan"]["revision"]["dirty"]
+        .as_bool()
+        .context("live report is missing scan.revision.dirty")?;
+    assert!(
+        !live_dirty,
+        "the private java-fixture-01 checkout is dirty; details withheld \
+         (AGENTS.md, Fixture privacy)"
+    );
+    let live_incomplete = live["incomplete"]
+        .as_bool()
+        .context("live report is missing incomplete")?;
+    assert!(
+        !live_incomplete,
+        "the live scan of java-fixture-01 is incomplete"
+    );
+
+    let (live_digest, _removed) =
+        golden::build_digest(&mut live).context("building the live nsd-v1 digest")?;
+
+    let nsd_v1_path = nsd_v1_digest_path();
+    if golden_capture_requested() {
+        let text = serde_json::to_string_pretty(&live_digest)
+            .context("serializing the live nsd-v1 digest")?
+            + "\n";
+        fs::write(&nsd_v1_path, text).context("writing the nsd-v1 golden digest")?;
+        return Ok(());
+    }
+
+    let committed_nsd_v1 = read_committed_digest(&nsd_v1_path)?;
+    assert_eq!(
+        live_digest, committed_nsd_v1,
+        "the live nsd-v1 scan of java-fixture-01 no longer matches the committed digest"
+    );
     Ok(())
 }

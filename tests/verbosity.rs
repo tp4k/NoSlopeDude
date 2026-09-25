@@ -244,6 +244,43 @@ fn test_verbosity_zero_when_nothing_flagged() {
     );
 }
 
+/// M0c-13: `FileLanguageLines::executable_lines` moved from `BTreeSet<usize>`
+/// to a sorted, deduplicated `Vec<usize>` (`compute_verbosity`'s own
+/// membership check moved from `.contains()` to `.binary_search().is_ok()`
+/// to match) — `binary_search` only gives a correct answer over an
+/// already-sorted, duplicate-free slice. This test pins that
+/// `binary_search` lookup against a genuinely sparse set with gaps, matching
+/// what `executable_lines_from_ir` produces; the builder's own sorted/dedup
+/// invariant (that it never hands `compute_verbosity` an unsorted or
+/// duplicate-containing Vec in the first place) is pinned separately by
+/// `rules::tests::test_file_language_lines_come_from_ir_spans`.
+#[test]
+fn test_executable_lines_are_sorted_and_distinct() {
+    let executable_lines = vec![2usize, 5, 9, 40];
+
+    let files = vec![FileLanguageLines {
+        relative_path: sample_path(),
+        language: JAVA,
+        scanned_lines: 100,
+        executable_lines,
+    }];
+    let group = CloneGroup {
+        language: JAVA,
+        locations: vec![
+            clone_location("Sample.java", 1, 10, 10),
+            clone_location("Sample.java", 1, 45, 10),
+        ],
+        redundant_lines: 10,
+    };
+
+    let verbosity = rules::compute_verbosity(&files, &[], &[group]);
+
+    // Expected vs actual, the two edge cases this test pins: a naive raw
+    // [1, 45] span would count all 45 lines; the D11-correct answer counts
+    // only the 4 sparse executable lines (2, 5, 9, 40) that fall inside it.
+    assert_eq!(verbosity.overall.flagged_lines, 4, "{verbosity:?}");
+}
+
 #[test]
 fn test_per_family_and_overall_scores_are_computed_separately() {
     let files = vec![

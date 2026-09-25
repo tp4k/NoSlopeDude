@@ -325,19 +325,22 @@ fn test_report_json_gains_no_new_top_level_field() {
 /// WS-6 round 3 (security HIGH: a clean entity nested inside a damaged
 /// outer entity survived in `metrics.callables` despite its own `IrNode`
 /// subtree being wiped by pruning, publishing a bogus `cc:1,sloc:0`):
-/// `broken`'s parameter list is truncated by a missing `)` (Java: a
-/// `@Nullable` varargs annotation the grammar cannot place; TS: an
-/// unterminated `formal_parameters`), so `broken` itself is excluded, and
-/// its nested-but-otherwise-clean callable (`clean`'s lambda / arrow
-/// function) must be excluded too -- it is physically inside `broken`'s own
-/// span, so `prune_damage` wipes its `IrNode` subtree regardless of
-/// whether the nested callable's *own* span happens to avoid the damage.
+/// `broken`'s parameter list is truncated by a missing `)` (both languages:
+/// an unterminated `formal_parameters`, the same shape
+/// `tests/fixtures/rules/broken/Broken.java` already exercises -- M0c-9
+/// re-points the Java literal away from the `@Nullable` varargs annotation
+/// this test used pre-orchard, since that shape no longer produces damage
+/// at all under orchard's grammar), so `broken` itself is excluded, and its
+/// nested-but-otherwise-clean callable (`clean`'s lambda / arrow function)
+/// must be excluded too -- it is physically inside `broken`'s own span, so
+/// `prune_damage` wipes its `IrNode` subtree regardless of whether the
+/// nested callable's *own* span happens to avoid the damage.
 #[test]
 fn test_a_clean_callable_nested_inside_a_damaged_outer_callable_is_not_measured() {
     let dir = tempfile::tempdir().expect("tempdir");
     fs::write(
         dir.path().join("Nested.java"),
-        "class Nested {\n    void broken(Class<?> @Nullable ... cs) {\n        Runnable clean = () -> {\n            System.out.println(\"hi\");\n        };\n    }\n}\n",
+        "class Nested {\n    void broken(int a {\n        Runnable clean = () -> {\n            System.out.println(\"hi\");\n        };\n    }\n}\n",
     )
     .expect("write Nested.java");
     fs::write(
@@ -450,6 +453,25 @@ fn test_a_clean_callable_contained_in_a_bare_damage_span_is_not_measured() {
             "{relative_path}: no callable should ever be published with a fabricated cc:1 \
              sloc:0 measurement: {:?}",
             output.metrics.callables
+        );
+        // L43 positive anchor: the absence above must mean the callable was
+        // scanned and salvaged, not that the whole file was silently
+        // dropped -- a regression to whole-file dropping would leave the
+        // negative assertions above green too. (Not also asserting absence
+        // from `output.parse_failures`: `parse::parse_all`'s doc comment
+        // documents that a file tree-sitter built a tree for but
+        // that still carries residual damage produces *both* a `ParsedFile`
+        // and a `ParseFailure{reason: SyntaxError}` -- these two fixtures
+        // are exactly that case, so a parse-failures-absence assertion
+        // would never pass here regardless of salvage correctness.)
+        assert!(
+            output
+                .metrics
+                .file_scan_summaries
+                .iter()
+                .any(|summary| summary.relative_path == path),
+            "{relative_path}: expected the file to have been scanned: {:?}",
+            output.metrics.file_scan_summaries
         );
     }
 }
