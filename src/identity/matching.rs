@@ -62,6 +62,7 @@ pub enum MatchTier {
     BodyFingerprint,
 }
 
+/// One matched base/candidate callable pair and the tier that paired it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallableMatch {
     pub base: CallableRef,
