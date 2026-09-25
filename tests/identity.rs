@@ -437,6 +437,30 @@ record Point(int x, int y) {
     .collect();
     assert_eq!(java_kinds, expected_java, "{:#?}", java_ir.callables);
 
+    // WS-1 triage row 6 (round 2): the set-equality assert above would still
+    // pass if two grammar nodes swapped kinds -- pin each callable's kind to
+    // its own declaration line too.
+    assert_eq!(
+        callable_at_line(&java_ir, 2).kind,
+        CallableKind::JavaStaticInitializer
+    );
+    assert_eq!(
+        callable_at_line(&java_ir, 6).kind,
+        CallableKind::JavaConstructor
+    );
+    assert_eq!(
+        callable_at_line(&java_ir, 10).kind,
+        CallableKind::JavaMethod
+    );
+    assert_eq!(
+        callable_at_line(&java_ir, 12).kind,
+        CallableKind::JavaLambda
+    );
+    assert_eq!(
+        callable_at_line(&java_ir, 19).kind,
+        CallableKind::JavaCompactConstructor
+    );
+
     let ts_source = "\
 function plain() {
     return 1;
@@ -474,6 +498,28 @@ class C {
     .into_iter()
     .collect();
     assert_eq!(ts_kinds, expected_ts, "{:#?}", ts_ir.callables);
+
+    // Same per-line pinning as the Java half above.
+    assert_eq!(
+        callable_at_line(&ts_ir, 1).kind,
+        CallableKind::JsFunctionDeclaration
+    );
+    assert_eq!(
+        callable_at_line(&ts_ir, 5).kind,
+        CallableKind::JsGeneratorFunctionDeclaration
+    );
+    assert_eq!(
+        callable_at_line(&ts_ir, 9).kind,
+        CallableKind::JsFunctionExpression
+    );
+    assert_eq!(
+        callable_at_line(&ts_ir, 13).kind,
+        CallableKind::JsArrowFunction
+    );
+    assert_eq!(
+        callable_at_line(&ts_ir, 16).kind,
+        CallableKind::JsMethodDefinition
+    );
 }
 
 fn is_well_formed_blake3(fingerprint: &str) -> bool {
