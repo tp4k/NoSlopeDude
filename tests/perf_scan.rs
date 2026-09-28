@@ -223,3 +223,21 @@ fn test_row_marks_a_dirty_src_tree() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+#[cfg(unix)]
+#[test]
+fn test_date_cell_fails_outside_a_git_repo() -> anyhow::Result<()> {
+    // A REPO_ROOT that is not inside any git repository: `git rev-parse
+    // HEAD` and `git status --porcelain` both fail there. Command
+    // substitution clears `set -e`, so without an explicit `|| return 1`
+    // on each of those calls, date_cell prints `(nsd@)` and exits 0
+    // instead of failing closed.
+    let dir = tempfile::tempdir()?;
+    let output = run_sourced(&format!("REPO_ROOT='{}'; date_cell", dir.path().display()))?;
+    assert!(
+        !output.status.success(),
+        "expected date_cell to fail outside a git repo, got success with stdout {:?}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    Ok(())
+}
