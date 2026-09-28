@@ -408,12 +408,7 @@ pub(crate) fn ir_statement_tokens(statement: &IrNode, source: &str) -> String {
         }
         tokens.push(TOKEN_SEPARATOR);
         let text = leaf_text(node, source);
-        // C4 (triage-ws4-r3): the overwhelmingly common case -- a named
-        // leaf, or an anonymous one with no internal whitespace to collapse
-        // -- pushes `text` as-is, allocation-free; only the rare
-        // whitespace-bearing anonymous leaf (see this function's own doc
-        // comment above) still needs the `Vec<&str>` + `String` collapse.
-        if node.is_named || !text.bytes().any(|b| b.is_ascii_whitespace()) {
+        if node.is_named {
             tokens.push_str(text);
         } else {
             tokens.push_str(&text.split_whitespace().collect::<Vec<_>>().join(" "));
