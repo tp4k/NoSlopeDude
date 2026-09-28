@@ -19,9 +19,10 @@ pub struct PipelineOutput {
     pub rules: RulesResult,
     pub report: Report,
     /// M0b: the IR built per successfully parsed file (`nsd-plan-final.md`
-    /// M0b item 5). No stage reads this yet -- it is wired in so the build
-    /// is proven against real discovery output, not to retarget any
-    /// analyzer; `report` above is unaffected by its presence.
+    /// M0b item 5). WS-9 (C1): this is the one lowering `run` below
+    /// performs -- `metrics`, `clones` and `rules` above are each computed
+    /// from this same `Vec<IrFile>`, index-aligned with the pipeline's own
+    /// `parsed_files`, instead of each lowering independently.
     pub ir: Vec<IrFile>,
 }
 
@@ -34,9 +35,9 @@ pub fn run(target_input: &str, settings: ScanSettings) -> anyhow::Result<Pipelin
     let (parsed_files, parse_failures) =
         parse::parse_all(&resolved_target.root, &discover.discovered);
     let ir = lower::lower_all(&parsed_files);
-    let metrics = metrics::run(&parsed_files, !parse_failures.is_empty());
-    let clones = clones::run(&parsed_files, settings.min_clone_lines);
-    let rules = rules::run(&parsed_files, &metrics, &clones);
+    let metrics = metrics::run_with_ir(&parsed_files, &ir, !parse_failures.is_empty());
+    let clones = clones::run_with_ir(&parsed_files, &ir, settings.min_clone_lines);
+    let rules = rules::run_with_ir(&parsed_files, &ir, &metrics, &clones);
     let report_input = ReportInput {
         target: &target,
         target_input,
