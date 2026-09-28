@@ -67,15 +67,30 @@ extract_incomplete() {
 }
 
 # extract_skipped_block <report.json path>
-# Prints the `"skipped_files": [ ... ]` array (bracket-depth counted, so it
-# does not depend on key order inside that array either).
+# Prints the `"skipped_files": [ ... ]` array. B11: depth is counted on a
+# copy of each line with JSON string *contents* blanked out first, so a
+# skipped path containing a literal `]` (or `[`) can never be mistaken for
+# array structure and truncate the block early. The printed block is the
+# original, unblanked text, so a downstream key-name grep still works.
 extract_skipped_block() {
   local file="$1"
   awk '
+    function blank_strings(s,    i, c, out, in_str) {
+      out = ""
+      in_str = 0
+      for (i = 1; i <= length(s); i++) {
+        c = substr(s, i, 1)
+        if (c == "\"") { in_str = !in_str; continue }
+        if (in_str) { continue }
+        out = out c
+      }
+      return out
+    }
     /"skipped_files": \[/ { capture = 1; depth = 0 }
     capture {
-      depth += gsub(/\[/, "[")
-      depth -= gsub(/\]/, "]")
+      safe = blank_strings($0)
+      depth += gsub(/\[/, "[", safe)
+      depth -= gsub(/\]/, "]", safe)
       print
       if (depth == 0) { exit }
     }
