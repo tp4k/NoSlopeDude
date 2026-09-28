@@ -773,18 +773,24 @@ fn test_a_clean_block_contained_in_a_bare_damage_span_is_excluded() {
 /// at a stale (now-removed) index. `Outer` (`class`) owns `broken` (a
 /// damaged method whose own signature is missing its closing `)`) and
 /// `Kept` (a clean nested class); `broken` in turn owns a nested lambda
-/// `clean`. `broken`/`clean` are both excluded by cascade (the same
-/// mechanism `test_a_clean_callable_nested_inside_a_damaged_outer_callable_
+/// `clean`. `Kept` in turn owns `Inner` (a second clean nested class), and
+/// `keep` itself lives inside `Inner`, not directly inside `Kept` -- so the
+/// chain under test is two owner hops deep, not one. `broken`/`clean` are
+/// both excluded by cascade (the same mechanism
+/// `test_a_clean_callable_nested_inside_a_damaged_outer_callable_
 /// is_not_measured` already covers for `IrFile::callables`), so their own
 /// owner-table entries -- pushed by the exact same declaration nodes --
-/// must also be dropped. `Kept`'s own owner entry is pushed *after*
-/// `broken`'s and `clean`'s in document order, so once those two are
-/// pruned, `Kept` (and `keep`'s own owner-segment entry after it) shifts
-/// down by two positions in the compacted table: any remap bug that copies
-/// `OwnerEntry::parent`/`IrCallable::owner` verbatim rather than through
-/// the old-to-new index map would point `keep`'s owner at the wrong entry
-/// (or panic on an out-of-bounds index) here where a byte-for-byte-safe
-/// file (no exclusions at all) would never expose it.
+/// must also be dropped. `Kept`'s and `Inner`'s own owner entries are pushed
+/// *after* `broken`'s and `clean`'s in document order, so once those two are
+/// pruned, `Kept` and `Inner` (and `keep`'s own owner-segment entry after
+/// them) each shift down by two positions in the compacted table: a remap
+/// bug that copies `OwnerEntry::parent`/`IrCallable::owner` verbatim rather
+/// than through the old-to-new index map would leave `Inner`'s `parent`
+/// pointing at its own stale (pre-compaction) index rather than at `Kept`'s
+/// new one -- corrupting the *middle* of `keep`'s two-hop chain, which a
+/// single-hop fixture (where `Kept` sits at index 0 both before and after
+/// pruning) cannot expose -- (or panic on an out-of-bounds index) here where
+/// a byte-for-byte-safe file (no exclusions at all) would never expose it.
 #[test]
 fn test_salvage_drops_owner_entries_of_excluded_callables() {
     use nsd::ir::OwnerKind;
@@ -792,7 +798,7 @@ fn test_salvage_drops_owner_entries_of_excluded_callables() {
     let dir = tempfile::tempdir().expect("tempdir");
     fs::write(
         dir.path().join("Owners.java"),
-        "class Outer {\n    void broken(int a {\n        Runnable clean = () -> {\n            System.out.println(\"hi\");\n        };\n    }\n    class Kept {\n        void keep() {}\n    }\n}\n",
+        "class Outer {\n    void broken(int a {\n        Runnable clean = () -> {\n            System.out.println(\"hi\");\n        };\n    }\n    class Kept {\n        class Inner {\n            void keep() {}\n        }\n    }\n}\n",
     )
     .expect("write Owners.java");
 
@@ -838,7 +844,8 @@ fn test_salvage_drops_owner_entries_of_excluded_callables() {
 
     // Walk `keep`'s own owner chain through `ir_file.owners`, exactly the
     // way `identity::callable_identity` would, and compare it to the chain
-    // an unpruned file would have produced: `Kept`, then `Outer`.
+    // an unpruned file would have produced: `Inner`, then `Kept`, then
+    // `Outer`.
     let mut chain = Vec::new();
     let mut cursor = keep.owner;
     while let Some(index) = cursor {
@@ -852,6 +859,7 @@ fn test_salvage_drops_owner_entries_of_excluded_callables() {
     assert_eq!(
         chain,
         vec![
+            (OwnerKind::NamedType, Some("Inner".to_string())),
             (OwnerKind::NamedType, Some("Kept".to_string())),
             (OwnerKind::NamedType, Some("Outer".to_string())),
         ],
