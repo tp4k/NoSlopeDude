@@ -475,15 +475,42 @@ pub(super) fn repo_path_to_fs(workdir: &Path, path: &[u8]) -> PathBuf {
     workdir.join(String::from_utf8_lossy(path).as_ref())
 }
 
+/// The platform's observed exec bit for `metadata` (`Some`), or `None` when
+/// the platform cannot observe one at all (A2: never `Some(false)` standing
+/// in for "unobservable" — that reading is `is_executable`'s old mistake,
+/// which made a non-Unix worktree always classify a tracked Executable
+/// entry as Regular).
 #[cfg(unix)]
-fn is_executable(metadata: &fs::Metadata) -> bool {
+fn observed_exec_bit(metadata: &fs::Metadata) -> Option<bool> {
     use std::os::unix::fs::PermissionsExt;
-    metadata.permissions().mode() & 0o111 != 0
+    Some(metadata.permissions().mode() & 0o111 != 0)
 }
 
 #[cfg(not(unix))]
-fn is_executable(_metadata: &fs::Metadata) -> bool {
-    false
+fn observed_exec_bit(_metadata: &fs::Metadata) -> Option<bool> {
+    None
+}
+
+/// A2: whether a worktree entry that is a plain file on disk is `Regular`
+/// or `Executable`. Platform-independent and pure (no `fs::Metadata`), so
+/// it is unit-testable regardless of the host platform. When the exec bit
+/// is observable (`Some`), that bit decides, exactly as the old Unix-only
+/// `is_executable` arm did. When it is not (`None`), a tracked entry keeps
+/// its own `Executable` kind (git's own `core.fileMode=false` behaviour);
+/// any other `tracked_kind` (`Regular`, `None` for untracked, or another
+/// kind such as `Submodule` that this on-disk file replaced) is `Regular`.
+fn worktree_file_kind(
+    observed_exec_bit: Option<bool>,
+    tracked_kind: Option<EntryKind>,
+) -> EntryKind {
+    match observed_exec_bit {
+        Some(true) => EntryKind::Executable,
+        Some(false) => EntryKind::Regular,
+        None => match tracked_kind {
+            Some(EntryKind::Executable) => EntryKind::Executable,
+            _ => EntryKind::Regular,
+        },
+    }
 }
 
 /// Recomputes a tracked entry's worktree shape after confirming the path
@@ -529,11 +556,7 @@ fn refresh_from_disk(
             size: 0,
         }));
     }
-    let kind = if is_executable(metadata) {
-        EntryKind::Executable
-    } else {
-        EntryKind::Regular
-    };
+    let kind = worktree_file_kind(observed_exec_bit(metadata), Some(original_kind));
     Ok(Some(Entry {
         path: path.clone(),
         kind,
@@ -653,11 +676,7 @@ fn walk_worktree(
                 format!("cannot stat worktree entry {}: {err}", relative.render()),
             )
         })?;
-        let kind = if is_executable(&metadata) {
-            EntryKind::Executable
-        } else {
-            EntryKind::Regular
-        };
+        let kind = worktree_file_kind(observed_exec_bit(&metadata), None);
         by_path.insert(
             relative.clone(),
             Entry {
