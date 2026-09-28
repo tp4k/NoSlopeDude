@@ -149,7 +149,10 @@ fn test_single_callable_identity_call_does_not_build_the_whole_table() {
     let single_identity = identity::callable_identity(&ir_file, outermost);
     let after = ALLOCATED_BYTES.load(Ordering::SeqCst);
 
-    assert_eq!(single_identity.owner_digest, identity::OwnerDigest::default());
+    assert_eq!(
+        single_identity.owner_digest,
+        identity::OwnerDigest::default()
+    );
     let allocated = after - before;
     assert!(
         allocated < single_call_bound_bytes,

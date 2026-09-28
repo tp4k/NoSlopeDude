@@ -1058,8 +1058,7 @@ function N() {
     );
 
     let namespace_identity = identity::callable_identity(&namespace_ir, namespace_f);
-    let function_owner_identity =
-        identity::callable_identity(&function_owner_ir, function_owner_f);
+    let function_owner_identity = identity::callable_identity(&function_owner_ir, function_owner_f);
     assert_eq!(namespace_identity.kind, function_owner_identity.kind);
     assert_eq!(namespace_identity.name, function_owner_identity.name);
     assert_eq!(
