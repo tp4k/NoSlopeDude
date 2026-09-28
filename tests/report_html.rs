@@ -397,3 +397,52 @@ fn test_links_point_at_the_scanned_revision() {
         "the repo name should be escaped wherever it is interpolated into an href: {malicious_html}"
     );
 }
+
+/// C7 (triage-ws5-r1/r3): `read_excerpt`'s per-file cache must be
+/// output-identical to a fresh read/split per location. `src/Sample.java`
+/// carries at least two locations at distinct line spans (a
+/// JAVA-REDUNDANT-ELSE-AFTER-RETURN finding on `classify` and a
+/// JAVA-EMPTY-CATCH finding on `risky`, plus every top25 callable in the
+/// file) -- every one of them is checked against the same span read
+/// straight off the fixture file, independently of the cache.
+#[test]
+fn test_two_locations_in_one_file_render_identical_excerpts_to_single_reads() {
+    let (_dir, output) = run_scan(&fixture_root(), |_| {});
+    let sample_path = Path::new("src/Sample.java");
+    let sample_locations: Vec<_> = output
+        .report
+        .findings
+        .iter()
+        .map(|finding| &finding.location)
+        .chain(
+            output
+                .report
+                .top25
+                .iter()
+                .map(|callable| &callable.location),
+        )
+        .filter(|location| location.relative_path == sample_path)
+        .collect();
+    let mut distinct_spans: Vec<(usize, usize)> = sample_locations
+        .iter()
+        .map(|location| (location.start_line, location.end_line))
+        .collect();
+    distinct_spans.sort_unstable();
+    distinct_spans.dedup();
+    assert!(
+        distinct_spans.len() >= 2,
+        "need at least two distinct Sample.java spans to exercise the cache across locations: {distinct_spans:?}"
+    );
+
+    let raw = fs::read_to_string(fixture_root().join(sample_path)).expect("read fixture directly");
+    let raw_lines: Vec<&str> = raw.lines().collect();
+    for location in &sample_locations {
+        let start_index = location.start_line.saturating_sub(1);
+        let end_index = location.end_line.min(raw_lines.len());
+        let expected = raw_lines[start_index..end_index].join("\n");
+        assert_eq!(
+            location.excerpt, expected,
+            "cached excerpt for {location:?} should match a direct read of the same span"
+        );
+    }
+}
