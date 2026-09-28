@@ -415,8 +415,7 @@ overlap -- so C1 clears the noise floor. The verdict holds on A1-A4/B1-B4
 alone, before either re-run is folded in: `max(B1-B4) = 3.99s` is still
 less than `min(A1-A4) = 4.10s`. Including the contended pair as originally
 read (B5 = 4.71s) would fail the rule instead -- `max(B with contended B5)
-= 4.71s` is not less than `min(A) = 4.10s` -- which is why the whole pair
-was re-run rather than dropped. Round 1's before-set was
+= 4.71s` is not less than `min(A) = 4.10s`. Round 1's before-set was
 measured on a noisier window (its own range spanned 5.86s-8.24s, 2.38s
 wide, against this round's A-range of only 0.23s and B-range of only
 0.27s), which is why round 1's sets are superseded by this round's
