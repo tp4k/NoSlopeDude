@@ -112,10 +112,11 @@ extract_skipped_count() {
 # reports any change under the paths that actually produce the scanned
 # binary. B12: this is how the HEAD sha reaches the appended row.
 head_sha_annotation() {
-  local sha dirty
-  sha="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+  local sha dirty status
+  sha="$(git -C "$REPO_ROOT" rev-parse HEAD)" || return 1
+  status="$(git -C "$REPO_ROOT" status --porcelain -- src Cargo.toml Cargo.lock)" || return 1
   dirty=""
-  if [ -n "$(git -C "$REPO_ROOT" status --porcelain -- src Cargo.toml Cargo.lock)" ]; then
+  if [ -n "$status" ]; then
     dirty="+dirty"
   fi
   printf '(nsd@%s%s)' "$sha" "$dirty"
@@ -124,9 +125,15 @@ head_sha_annotation() {
 # date_cell
 # Prints the row's date cell: the UTC date plus the HEAD sha annotation
 # above, following the same *placement* as the hand-annotated rows in
-# docs/measurements.md (a parenthetical in the date cell).
+# docs/measurements.md (a parenthetical in the date cell). B12/row 7: a
+# failing git inside head_sha_annotation must fail this function closed
+# too, not print a truncated cell -- `set -e` is not inherited by a
+# command substitution, so the failure is captured explicitly here
+# rather than relying on `$(head_sha_annotation)` propagating it.
 date_cell() {
-  printf '%s %s' "$(date -u +%Y-%m-%d)" "$(head_sha_annotation)"
+  local ann
+  ann="$(head_sha_annotation)" || return 1
+  printf '%s %s' "$(date -u +%Y-%m-%d)" "$ann"
 }
 
 main() {
@@ -167,8 +174,15 @@ main() {
   incomplete="$(extract_incomplete "$report_json")"
   skipped_count="$(extract_skipped_count "$report_json")"
 
+  # date_cell's own exit status must gate the row build directly: inside
+  # the interpolated string below it would be masked by uname's (the
+  # last substitution in that assignment), which is why it is computed
+  # here, on its own, first.
+  local date_cell_value
+  date_cell_value="$(date_cell)"
+
   local row
-  row="| $(date_cell) | $(uname -srm) | spring-framework@$spring_sha | angular@$angular_sha | $scanned_lines | ${wall_seconds}s | ${peak_rss_mb} MB | $incomplete | $skipped_count |"
+  row="| $date_cell_value | $(uname -srm) | spring-framework@$spring_sha | angular@$angular_sha | $scanned_lines | ${wall_seconds}s | ${peak_rss_mb} MB | $incomplete | $skipped_count |"
 
   echo "$row" >>"$MEASUREMENTS_FILE"
   echo "$row"
