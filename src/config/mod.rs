@@ -259,7 +259,11 @@ pub struct ConfigError {
 }
 
 impl ConfigError {
-    fn new(message: impl Into<String>) -> ConfigError {
+    /// `pub(crate)` (not just private, A4): `src/policy/mod.rs` also needs
+    /// to raise a `CODE_INVALID_CONFIG` error, for the practically
+    /// unreachable case where hashing an already-read worktree candidate's
+    /// bytes fails.
+    pub(crate) fn new(message: impl Into<String>) -> ConfigError {
         ConfigError {
             code: CODE_INVALID_CONFIG,
             message: message.into(),
@@ -314,8 +318,10 @@ fn build_override(patterns: &[String]) -> Result<Override, ConfigError> {
 }
 
 /// Finds the snapshot entry whose raw path is exactly `nsd.yml` (D17): no
-/// `sub/nsd.yml`, no `NSD.yml`.
-fn find_root_entry(entries: &[Entry]) -> Option<&Entry> {
+/// `sub/nsd.yml`, no `NSD.yml`. `pub(crate)` (A4): `src/policy/mod.rs`
+/// also looks up a base or commit/index candidate's root entry, to compare
+/// blob oids when the base's own bytes could not be read.
+pub(crate) fn find_root_entry(entries: &[Entry]) -> Option<&Entry> {
     entries
         .iter()
         .find(|entry| entry.path.as_bytes() == CONFIG_FILE_NAME.as_bytes())
