@@ -155,5 +155,71 @@ fn test_row_carries_the_head_sha() -> anyhow::Result<()> {
         40,
         "expected a 40-hex HEAD sha right after `nsd@`, got: {stdout}"
     );
+    let head = Command::new("git")
+        .arg("-C")
+        .arg(env!("CARGO_MANIFEST_DIR"))
+        .args(["rev-parse", "HEAD"])
+        .output()?;
+    assert!(
+        head.status.success(),
+        "git rev-parse HEAD failed: {}",
+        String::from_utf8_lossy(&head.stderr)
+    );
+    let expected_head = String::from_utf8_lossy(&head.stdout).trim().to_string();
+    assert_eq!(
+        hex, expected_head,
+        "expected the date cell's sha to be this checkout's own HEAD, got: {stdout}"
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_row_marks_a_dirty_src_tree() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let repo = dir.path();
+    let run_git = |args: &[&str]| -> anyhow::Result<Output> {
+        Ok(Command::new("git").arg("-C").arg(repo).args(args).output()?)
+    };
+    run_git(&["init"])?;
+    run_git(&[
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "x",
+    ])?;
+
+    let clean = run_sourced(&format!("REPO_ROOT='{}'; date_cell", repo.display()))?;
+    assert!(
+        clean.status.success(),
+        "date_cell failed on a clean tree: {}",
+        String::from_utf8_lossy(&clean.stderr)
+    );
+    let clean_stdout = String::from_utf8_lossy(&clean.stdout);
+    assert!(
+        !clean_stdout.contains("+dirty"),
+        "expected a clean src tree to carry no +dirty, got: {clean_stdout}"
+    );
+
+    std::fs::create_dir_all(repo.join("src"))?;
+    std::fs::write(repo.join("src/x.rs"), "")?;
+
+    let dirty = run_sourced(&format!("REPO_ROOT='{}'; date_cell", repo.display()))?;
+    assert!(
+        dirty.status.success(),
+        "date_cell failed on a dirty tree: {}",
+        String::from_utf8_lossy(&dirty.stderr)
+    );
+    let dirty_stdout = String::from_utf8_lossy(&dirty.stdout);
+    assert!(
+        dirty_stdout.trim_end().ends_with("+dirty)"),
+        "expected an untracked src/ file to mark the row +dirty, got: {dirty_stdout}"
+    );
     Ok(())
 }
