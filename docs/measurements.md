@@ -90,9 +90,10 @@ row's own `scanned_lines` (584779) and `skipped files` (7662) exactly,
 corroborating that this is the scan's current, standing behaviour rather
 than a one-off measurement.
 
-All rows were taken with a **warm page cache** (`/usr/bin/time -l`'s own
-`block input operations: 0`), so wall-clock seconds do not include
-first-touch disk I/O. Across these two fixtures, peak RSS scales roughly
+Every row not marked `block input operations not recorded` was taken with a
+**warm page cache** (`/usr/bin/time -l`'s own `block input operations: 0`),
+so wall-clock seconds do not include first-touch disk I/O. Across these two
+fixtures, peak RSS scales roughly
 linearly with total source bytes at **≈27×** (the pipeline retains every
 parsed tree and source file simultaneously rather than streaming
 file-by-file), so extrapolating to a much larger corpus should scale the
