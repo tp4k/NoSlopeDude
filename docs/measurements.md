@@ -186,8 +186,8 @@ change: a syntax-error file is no longer a whole-file skip, only its
 touched callables are fail-closed excluded), so `report.json`'s
 `skipped_files` cannot answer "did the gate clear" either way — this is
 exactly why `tests/grammar_gate.rs` reads `PipelineOutput::parse_failures`
-directly instead. (The two much older `2026-09-18`/`2026-09-23` rows in `## Rows` below
-read `7720`, i.e. `7662 + 58`, at this same pin because they predate the
+directly instead. (The two much older `2026-09-18`/`2026-09-23` rows in
+`## Rows` below read `7720`, i.e. `7662 + 58`, at this same pin because they predate the
 WS-6 change entirely: back then the 55 Java + 3 TS syntax-error files were
 still whole-file skips. That -58 is WS-6's own delta, already explained by
 `tests/neutrality.rs::DECLARED_DELTAS`'s comment on the malformed corpus,
@@ -436,6 +436,18 @@ scanned shas · the scanner's own reported scanned-source-line count
 | 2026-09-28 (nsd@cce8f918aa1d97dc19f3050d8d6fd40a6e5915ac — WS-12 (C3) alternating, Y4, used in the decision set; ps top-2 before this run: OrbStack Helper 19.1%, zen 15.5%) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.83s | 1788.55 MB | true | 7662 |
 | 2026-09-28 (nsd@62de9bb3458cc3e1fd95c3d70122e7da6a326aca — WS-12 (C3) alternating, X5, used in the decision set; ps top-2 before this run: zen 15.6%, gpu-helper 12.4% (quiet, after a 15s wait for OrbStack Helper to drop from 113.6%)) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.97s | 1788.98 MB | true | 7662 |
 | 2026-09-28 (nsd@cce8f918aa1d97dc19f3050d8d6fd40a6e5915ac — WS-12 (C3) alternating, Y5, used in the decision set; ps top-2 before this run: zen 15.1%, OrbStack Helper 13.4%) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.65s | 1788.75 MB | true | 7662 |
+| 2026-09-28 (nsd@079ca5288bda6db24a26d0ecaca38e56c47639c8 — WS-14 (Part C cumulative) alternating, A-side (frozen reference, before any Part C change) discarded warm-up) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.51s | 1837.55 MB | true | 7662 |
+| 2026-09-28 (nsd@53eab9f54ed50b2db7965985a0cb314cfaa333e2 — WS-14 (Part C cumulative) alternating, B-side (final head, C1+C7 kept/C2+C3+C4+C6 reverted) discarded warm-up) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 3.49s | 1788.20 MB | true | 7662 |
+| 2026-09-28 (nsd@079ca5288bda6db24a26d0ecaca38e56c47639c8 — WS-14 (Part C cumulative) alternating, A1, used in the decision set; ps top-2 before this run: OrbStack Helper 135.4%, WindowServer 42.2% (quiet: no vitest/cargo/nsd)) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.25s | 1837.50 MB | true | 7662 |
+| 2026-09-28 (nsd@53eab9f54ed50b2db7965985a0cb314cfaa333e2 — WS-14 (Part C cumulative) alternating, B1, used in the decision set) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 3.58s | 1784.89 MB | true | 7662 |
+| 2026-09-28 (nsd@079ca5288bda6db24a26d0ecaca38e56c47639c8 — WS-14 (Part C cumulative) alternating, A2, used in the decision set; ps top-2 before this run: WindowServer 38.5%, gpu-helper 19.3% (quiet)) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.10s | 1837.89 MB | true | 7662 |
+| 2026-09-28 (nsd@53eab9f54ed50b2db7965985a0cb314cfaa333e2 — WS-14 (Part C cumulative) alternating, B2, used in the decision set) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 3.39s | 1787.16 MB | true | 7662 |
+| 2026-09-28 (nsd@079ca5288bda6db24a26d0ecaca38e56c47639c8 — WS-14 (Part C cumulative) alternating, A3, used in the decision set; ps top-2 before this run: WindowServer 16.7%, gpu-helper 16.5% (quiet)) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.00s | 1836.08 MB | true | 7662 |
+| 2026-09-28 (nsd@53eab9f54ed50b2db7965985a0cb314cfaa333e2 — WS-14 (Part C cumulative) alternating, B3, used in the decision set) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 3.29s | 1785.23 MB | true | 7662 |
+| 2026-09-28 (nsd@079ca5288bda6db24a26d0ecaca38e56c47639c8 — WS-14 (Part C cumulative) alternating, A4, used in the decision set; ps top-2 before this run: OrbStack Helper 24.0%, WindowServer 18.4% (quiet)) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.09s | 1837.42 MB | true | 7662 |
+| 2026-09-28 (nsd@53eab9f54ed50b2db7965985a0cb314cfaa333e2 — WS-14 (Part C cumulative) alternating, B4, used in the decision set) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 3.28s | 1785.73 MB | true | 7662 |
+| 2026-09-28 (nsd@079ca5288bda6db24a26d0ecaca38e56c47639c8 — WS-14 (Part C cumulative) alternating, A5, used in the decision set; ps top-2 before this run: WindowServer 19.4%, StocksWidget 17.0% (quiet)) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.17s | 1791.02 MB | true | 7662 |
+| 2026-09-28 (nsd@53eab9f54ed50b2db7965985a0cb314cfaa333e2 — WS-14 (Part C cumulative) alternating, B5, used in the decision set) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 3.37s | 1785.23 MB | true | 7662 |
 
 ## Part C (run 2026-09-25-1744-m1m2-followup)
 
@@ -562,7 +574,7 @@ all 8610 `KindIds::build` calls together cost 0.087s (2% of that delta —
 recover at most that 2%. Measured as the cause: the cost is per lookup.
 `KindIds::is` hashes its `&str` name into a `HashMap<&str, Vec<u16>>` on
 every call (34.5–45.8ns, against 10.5–15.3ns for the
-`node_kind_for_id(id) == Some(lit)` compare it replaced — 2.4–3.3× slower
+`node_kind_for_id(id) == Some(lit)` compare it replaced — 2.99–3.29× slower
 per call), and each node tries several such calls before matching.
 `89f2a66` was therefore not the best in-spec C2: a const-slot/id-indexed
 variant that resolves each name to an integer slot once at build time,
@@ -844,3 +856,29 @@ probed, within the same `[profile.release]` table: `update` still has
 parallel CPU, and the binary is 7.04 MB.
 Both scratch worktrees (`ws12-x`, `ws12-y`) were removed via `git
 worktree remove --force` after the last pair.
+
+WS-14 closes this section with the mandatory final-head-vs-frozen-reference
+cumulative measurement (task.md A3), using the same alternating protocol as
+WS-9 r2/WS-10/WS-11 r2/WS-12 above: two scratch worktrees under this
+session's scratchpad, `ws14-A` at `079ca52` (the frozen Part C reference,
+WS-8's last commit, before any Part C change) and `ws14-B` at `53eab9f`
+(this run's final head, with C1 and C7 kept and C2, C3, C4 and C6
+reverted), each built with `cargo build --release --locked` and reading
+the same `$TMPDIR/nsd-perf-fixture`. One discarded warm-up per side, then
+5 alternating pairs (A1 B1 … A5 B5), with a `ps -Ao %cpu,comm -r` top-2
+check before each pair; every check showed only background processes
+(WindowServer, a browser GPU helper, OrbStack Helper, or similar) with no
+`vitest`/`tsc`/`cargo`/`nsd` contender, so no pair was re-run. Decision
+set: A (frozen reference) = {4.25s, 4.10s, 4.00s, 4.09s, 4.17s} (min
+4.00s, max 4.25s, mean 4.122s); B (final head) = {3.58s, 3.39s, 3.29s,
+3.28s, 3.37s} (min 3.28s, max 3.58s, mean 3.382s). Decision 11's rule is
+`max(after) < min(before)`: here `max(B) = 3.58s` is less than
+`min(A) = 4.00s`, a clean 0.42s gap with no overlap, so the cumulative
+Part C change clears the accept rule (mean speedup 4.122s / 3.382s ≈
+1.22×). This is a wall-clock outcome only, not a per-change attribution:
+C1 (kept, `24ecf8a`) and C7 (kept, `21a710f`) each individually cleared
+Decision 11 in their own rounds (WS-9 r2, WS-11 r2), while C2, C3, C4 and
+C6 were each individually reverted for failing it, so this cumulative
+number is consistent with — but does not re-derive — those per-item
+verdicts. Both scratch worktrees (`ws14-A`, `ws14-B`) were removed via
+`git worktree remove --force` after the last pair.
