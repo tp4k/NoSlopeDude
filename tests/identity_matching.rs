@@ -737,7 +737,7 @@ fn test_ambiguity_lists_are_sorted_by_path_and_index() {
 /// in a debug build (`debug_assert!` compiles away entirely in release).
 #[test]
 #[cfg(debug_assertions)]
-#[should_panic(expected = "match_callables assumes paths are unique per side")]
+#[should_panic(expected = "duplicate base path")]
 fn test_duplicate_path_on_one_side_panics_in_debug() {
     let base = vec![
         synth_file("A.java", &[(synth_identity("a", &[]), "blake3:a")]),
@@ -747,6 +747,27 @@ fn test_duplicate_path_on_one_side_panics_in_debug() {
         "A.java",
         &[(synth_identity("a", &[]), "blake3:a")],
     )];
+
+    let _ = match_callables(&base, &candidate, &[]);
+}
+
+/// The candidate-side twin of the test above: nothing else in
+/// `match_callables` reaches `candidate_by_path`'s own `insert` before tier
+/// 1's path lookups, so without this test a duplicate candidate path (with
+/// a unique base side) leaves the suite green even if the candidate-side
+/// `debug_assert!` were deleted entirely.
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "duplicate candidate path")]
+fn test_duplicate_candidate_path_panics_in_debug() {
+    let base = vec![synth_file(
+        "A.java",
+        &[(synth_identity("a", &[]), "blake3:a")],
+    )];
+    let candidate = vec![
+        synth_file("A.java", &[(synth_identity("a", &[]), "blake3:a")]),
+        synth_file("A.java", &[(synth_identity("b", &[]), "blake3:b")]),
+    ];
 
     let _ = match_callables(&base, &candidate, &[]);
 }
