@@ -92,6 +92,48 @@ fn test_skipped_count_survives_an_unbalanced_bracket_in_a_path() -> anyhow::Resu
 
 #[cfg(unix)]
 #[test]
+fn test_skipped_count_survives_an_escaped_quote_before_a_bracket() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let report = dir.path().join("report.json");
+    // The first skipped entry's own path contains an escaped '"' right
+    // before a ']' (`\"]`); a blank_strings that does not skip the
+    // character after a backslash toggles `in_str` on that escaped quote
+    // and reads the following ']' as real array structure, closing the
+    // capture early. The second entry repeats the same `\"]` inside
+    // `detail` instead of the path, to confirm the escape is honoured
+    // wherever it appears, not just in `relative_path`.
+    std::fs::write(
+        &report,
+        r#"{
+  "overall": { "scanned_lines": 42 },
+  "incomplete": true,
+  "skipped_files": [
+    {"relative_path": "src/a\"]b.js", "reason": "parse_SyntaxError", "detail": null},
+    {"relative_path": "src/second.js", "reason": "parse_SyntaxError", "detail": "note: a\"]b"},
+    {"relative_path": "src/other.java", "reason": "parse_SyntaxError", "detail": null}
+  ]
+}
+"#,
+    )?;
+
+    let output = run_sourced(&format!("extract_skipped_count '{}'", report.display()))?;
+
+    assert!(
+        output.status.success(),
+        "extract_skipped_count failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        "3",
+        "expected all three skipped entries to survive the escaped '\"]' in a path and a detail, got: {stdout}"
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
 fn test_row_carries_the_head_sha() -> anyhow::Result<()> {
     let output = run_sourced("date_cell")?;
     assert!(
