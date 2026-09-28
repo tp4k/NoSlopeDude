@@ -120,7 +120,7 @@ about the branch, not about this fix.
 
 The fusion's own effect was, for that reason, unmeasured here for want of
 a control. Round 4 supplied a first attempt: the two unlabeled
-`2026-09-23` rows above measure `e83228b` (the fusion commit) via two
+`2026-09-23` rows in `## Rows` below measure `e83228b` (the fusion commit) via two
 back-to-back `scripts/perf_scan.sh` runs at 18:53. About 20 minutes
 later, in a separate detached worktree (the `git worktree add --detach`
 pattern `scripts/neutrality_gate.sh` uses for its own pre-IR reference
