@@ -544,11 +544,23 @@ fn test_stray_damage_outside_any_callable_or_block_does_not_reach_metrics() {
 /// ≈220s × (1200/20000)² ≈ 0.8s, comfortably under 20s, so reintroducing the
 /// linear membership scan in `prune_damage` leaves this test green.
 ///
+/// The *scaling* assertion this row exists to add cannot be timed through
+/// `run_scan`: `clones::run`'s own inherent, documented `Θ(n)`-per-container
+/// cost (`src/clones/mod.rs::enumerate_container_candidates`) dominates
+/// full-pipeline wall time at this exact fixture shape regardless of which
+/// form `prune_damage`'s membership test takes, because each malformed
+/// one-line function body leaks its own clean, undamaged `return` statement
+/// as a sibling into one shared top-level clone-candidate container that
+/// grows with N -- measured directly: full-pipeline `elapsed_4n/elapsed_n`
+/// is ≈14.6x with the O(1) fix in place and ≈15.2x with it reverted to the
+/// linear form, both over any usable threshold, so a full-pipeline scaling
+/// assert can never discriminate this regression and must not gate on it.
+///
 /// A second, 4x-scaled fixture no longer goes through `run_scan`'s full
 /// pipeline (WS-6 round 4/B8, code + perf: that pass cost ~21-23s of suite
-/// wall time and, per the same paragraph above, could never discriminate the
-/// scaling regression anyway). It is lowered in isolation instead --
-/// `lower_only`, below -- and the "every callable stays unmeasured" check
+/// wall time and, per the `clones::run` paragraph above, could never
+/// discriminate the scaling regression anyway). It is lowered in isolation
+/// instead -- `lower_only`, below -- and the "every callable stays unmeasured" check
 /// this row exists to keep now reads the 4N `IrFile`s that call returns
 /// directly, the same fail-closed guarantee one layer earlier than
 /// `output.metrics.callables`.
@@ -592,8 +604,8 @@ fn test_many_damaged_callables_do_not_cause_a_quadratic_blowup() {
     }
 
     // Isolates exactly the `discover` + `parse` + `lower::lower_all` cost
-    // the WS-6 round 4 doc comment above explains the full pipeline below
-    // cannot discriminate. Returns the lowered files alongside the elapsed
+    // the WS-6 round 4 doc comment above explains the N-side `run_scan`
+    // above cannot discriminate. Returns the lowered files alongside the elapsed
     // time so B8's 4N "stays unmeasured" check can read them directly
     // instead of re-running a second, separate pipeline pass. Called three
     // times per side below (B7): the minimum of the three denoises the
