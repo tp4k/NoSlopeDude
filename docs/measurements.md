@@ -335,7 +335,7 @@ scanned shas · the scanner's own reported scanned-source-line count
 | 2026-09-28 (nsd@d61fefe58a0ede6166fe9a2febaaa35cf16d0877 — WS-9 r2 alternating, A4) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.10s | 1838.31 MB | true | 7662 |
 | 2026-09-28 (nsd@24ecf8acd6b95375cd713114a7d3e56def40b8a5 — WS-9 r2 alternating, B4) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 3.72s | 1794.06 MB | true | 7662 |
 | 2026-09-28 (nsd@d61fefe58a0ede6166fe9a2febaaa35cf16d0877 — WS-9 r2 alternating, A5, pair discarded: its paired B5 run below showed contention, whole pair re-run per protocol) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.17s | 1838.28 MB | true | 7662 |
-| 2026-09-28 (nsd@24ecf8acd6b95375cd713114a7d3e56def40b8a5 — WS-9 r2 alternating, B5, contended: OrbStack Helper CPU rose to ~34% during/after this run and cargo's own build check took 0.20s versus this session's usual 0.03-0.06s, discarded, whole pair re-run per protocol) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.71s | 1788.75 MB | true | 7662 |
+| 2026-09-28 (nsd@24ecf8acd6b95375cd713114a7d3e56def40b8a5 — WS-9 r2 alternating, B5, contended: OrbStack Helper CPU climbed to ~34% immediately after this run and cargo's own build check took 0.20s versus this session's usual 0.03-0.06s, discarded, whole pair re-run per protocol) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.71s | 1788.75 MB | true | 7662 |
 | 2026-09-28 (nsd@d61fefe58a0ede6166fe9a2febaaa35cf16d0877 — WS-9 r2 alternating, A5 re-run, contention cleared, used in the decision set) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.33s | 1838.11 MB | true | 7662 |
 | 2026-09-28 (nsd@24ecf8acd6b95375cd713114a7d3e56def40b8a5 — WS-9 r2 alternating, B5 re-run, contention cleared, used in the decision set) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 3.74s | 1785.11 MB | true | 7662 |
 | 2026-09-28 (nsd@997a9821cf2bb16e14c46a6cf7b1a0d5d7142d5a — WS-9 r2 post-restore verification sanity run in the primary worktree, not part of the Decision 11 alternating set) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 8.12s | 1530.03 MB | true | 7662 |
@@ -375,7 +375,7 @@ Decision 11's accept rule is `max(after) < min(before)` on wall clock; here
 `max(after) = 5.93s` is not less than `min(before) = 5.86s` -- the two
 5-run ranges overlap by 0.07s, so this does not clear the noise floor by
 the letter of the rule, even though the after-set's mean (5.67s) sits
-visibly below the before-set's mean (7.07s) and four of its five runs sit
+visibly below the before-set's mean (7.07s) and all five of its runs sit
 below all but the single fastest before-run. Per task.md Part C ("don't
 keep it on faith") and this stream's own observable acceptance ("If the
 measurement is below the noise floor, the Part C rule still applies: the
@@ -411,7 +411,12 @@ A5 re-run, and B1-B4 plus the B5 re-run: A = {4.14s, 4.20s, 4.30s, 4.10s,
 3.72s, 3.74s} (min 3.72s, max 3.99s, mean 3.82s). Decision 11's rule is
 `max(after) < min(before)`: here `max(B) = 3.99s` is less than `min(A) =
 4.10s`, a clean 0.11s gap with no overlap, unlike round 1's 0.07s
-overlap -- so C1 clears the noise floor. Round 1's before-set was
+overlap -- so C1 clears the noise floor. The verdict holds on A1-A4/B1-B4
+alone, before either re-run is folded in: `max(B1-B4) = 3.99s` is still
+less than `min(A1-A4) = 4.10s`. Including the contended pair as originally
+read (B5 = 4.71s) would fail the rule instead -- `max(B with contended B5)
+= 4.71s` is not less than `min(A) = 4.10s` -- which is why the whole pair
+was re-run rather than dropped. Round 1's before-set was
 measured on a noisier window (its own range spanned 5.86s-8.24s, 2.38s
 wide, against this round's A-range of only 0.23s and B-range of only
 0.27s), which is why round 1's sets are superseded by this round's
