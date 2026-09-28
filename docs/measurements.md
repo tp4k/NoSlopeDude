@@ -353,6 +353,16 @@ scanned shas · the scanner's own reported scanned-source-line count
 | 2026-09-28 (nsd@89f2a66075595414c942800676b1f2bbccc968cf — WS-10 alternating, B4) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 6.79s | 1790.69 MB | true | 7662 |
 | 2026-09-28 (nsd@eb26b40a4c36567444efb49356e311c637b0ab83 — WS-10 alternating, A5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.86s | 1779.22 MB | true | 7662 |
 | 2026-09-28 (nsd@89f2a66075595414c942800676b1f2bbccc968cf — WS-10 alternating, B5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 6.40s | 1793.33 MB | true | 7662 |
+| 2026-09-28 (nsd@49c464eeb1b9b2cfb3f470f1722a270f4cb63cf1 — WS-11 (C4) first measurement, superseded, A1; not retained) | not retained | not retained | not retained | not retained | 5.82s | not retained | not retained | not retained |
+| 2026-09-28 (nsd@a9a363c17de776ac637c892e18a1ee17faf49691 — WS-11 (C4) first measurement, superseded, B1; not retained) | not retained | not retained | not retained | not retained | 5.42s | not retained | not retained | not retained |
+| 2026-09-28 (nsd@49c464eeb1b9b2cfb3f470f1722a270f4cb63cf1 — WS-11 (C4) first measurement, superseded, A2; not retained) | not retained | not retained | not retained | not retained | 5.47s | not retained | not retained | not retained |
+| 2026-09-28 (nsd@a9a363c17de776ac637c892e18a1ee17faf49691 — WS-11 (C4) first measurement, superseded, B2; not retained) | not retained | not retained | not retained | not retained | 5.70s | not retained | not retained | not retained |
+| 2026-09-28 (nsd@49c464eeb1b9b2cfb3f470f1722a270f4cb63cf1 — WS-11 (C4) first measurement, superseded, A3; not retained) | not retained | not retained | not retained | not retained | 6.15s | not retained | not retained | not retained |
+| 2026-09-28 (nsd@a9a363c17de776ac637c892e18a1ee17faf49691 — WS-11 (C4) first measurement, superseded, B3; not retained) | not retained | not retained | not retained | not retained | 5.37s | not retained | not retained | not retained |
+| 2026-09-28 (nsd@49c464eeb1b9b2cfb3f470f1722a270f4cb63cf1 — WS-11 (C4) first measurement, superseded, A4; not retained) | not retained | not retained | not retained | not retained | 5.36s | not retained | not retained | not retained |
+| 2026-09-28 (nsd@a9a363c17de776ac637c892e18a1ee17faf49691 — WS-11 (C4) first measurement, superseded, B4; not retained) | not retained | not retained | not retained | not retained | 5.59s | not retained | not retained | not retained |
+| 2026-09-28 (nsd@49c464eeb1b9b2cfb3f470f1722a270f4cb63cf1 — WS-11 (C4) first measurement, superseded, A5; not retained) | not retained | not retained | not retained | not retained | 5.75s | not retained | not retained | not retained |
+| 2026-09-28 (nsd@a9a363c17de776ac637c892e18a1ee17faf49691 — WS-11 (C4) first measurement, superseded, B5; not retained) | not retained | not retained | not retained | not retained | 5.45s | not retained | not retained | not retained |
 | 2026-09-28 (nsd@49c464eeb1b9b2cfb3f470f1722a270f4cb63cf1 — WS-11 (C4) alternating, A-side discarded warm-up) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 6.39s | 1781.22 MB | true | 7662 |
 | 2026-09-28 (nsd@a9a363c17de776ac637c892e18a1ee17faf49691 — WS-11 (C4) alternating, B-side discarded warm-up) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.72s | 1783.94 MB | true | 7662 |
 | 2026-09-28 (nsd@49c464eeb1b9b2cfb3f470f1722a270f4cb63cf1 — WS-11 (C4) alternating, A1) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.49s | 1785.31 MB | true | 7662 |
@@ -365,7 +375,7 @@ scanned shas · the scanner's own reported scanned-source-line count
 | 2026-09-28 (nsd@a9a363c17de776ac637c892e18a1ee17faf49691 — WS-11 (C4) alternating, B4) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.65s | 1783.56 MB | true | 7662 |
 | 2026-09-28 (nsd@49c464eeb1b9b2cfb3f470f1722a270f4cb63cf1 — WS-11 (C4) alternating, A5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.67s | 1783.08 MB | true | 7662 |
 | 2026-09-28 (nsd@a9a363c17de776ac637c892e18a1ee17faf49691 — WS-11 (C4) alternating, B5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.42s | 1784.56 MB | true | 7662 |
-| 2026-09-28 (nsd@4f3009d3a189451179bd0b4c648d3ed4dbe0f8fb — WS-11 (C6) alternating, A-side discarded warm-up; A-side is `a9a363c`, C6's parent, unlike the C4 rows above where `a9a363c` was the "with" side) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.55s | 1713.56 MB | true | 7662 |
+| 2026-09-28 (nsd@4f3009d3a189451179bd0b4c648d3ed4dbe0f8fb — WS-11 (C6) alternating, A-side discarded warm-up; A-side is `a9a363c`, C6's parent, unlike the C4 rows above where `a9a363c` was the "with" side; the sha cell reads the B-side commit, so which binary produced this warm-up is not established — it enters no decision set) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.55s | 1713.56 MB | true | 7662 |
 | 2026-09-28 (nsd@4f3009d3a189451179bd0b4c648d3ed4dbe0f8fb — WS-11 (C6) alternating, B-side discarded warm-up) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.44s | 1788.25 MB | true | 7662 |
 | 2026-09-28 (nsd@a9a363c17de776ac637c892e18a1ee17faf49691 — WS-11 (C6) alternating, A1; peak RSS not retained across this session's context compaction, wall clock is) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.38s | not retained | true | 7662 |
 | 2026-09-28 (nsd@4f3009d3a189451179bd0b4c648d3ed4dbe0f8fb — WS-11 (C6) alternating, B1; peak RSS not retained across this session's context compaction, wall clock is) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.24s | not retained | true | 7662 |
@@ -396,6 +406,21 @@ scanned shas · the scanner's own reported scanned-source-line count
 | 2026-09-28 (nsd@4f3009d3a189451179bd0b4c648d3ed4dbe0f8fb — WS-11 (C7) alternating, A5, second attempt, still contended: `ps` showed multiple `node (vitest N)` workers at 58-75% immediately before this run, discarded, waited for contention to clear, whole pair re-run per protocol) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 13.61s | 1782.31 MB | true | 7662 |
 | 2026-09-28 (nsd@4f3009d3a189451179bd0b4c648d3ed4dbe0f8fb — WS-11 (C7) alternating, A5 re-run, contention cleared, used in the decision set) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.93s | 1791.20 MB | true | 7662 |
 | 2026-09-28 (nsd@eb8e4d71f0f4b3181d8e93816bd981a26747efa5 — WS-11 (C7) alternating, B5 re-run, contention cleared, used in the decision set) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.85s | 1789.50 MB | true | 7662 |
+| 2026-09-28 (nsd@21a710f120df9192bcf49822a0b1d4da766f59a4 — WS-11 r2 (C7 re-measure) alternating, X-side (with C7) discarded warm-up; ps top-2 before this run: WindowServer 24.1%, zen 21.5% (quiet)) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.59s | 1786.55 MB | true | 7662 |
+| 2026-09-28 (nsd@66787a07c0a30285cf20ef477e615a573ac0dba7 — WS-11 r2 (C7 re-measure) alternating, Y-side (parent, without C7) discarded warm-up; ps top-2 before this run: OrbStack Helper 136.9%, zen 16.0% (no vitest/cargo/nsd)) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.98s | 1781.83 MB | true | 7662 |
+| 2026-09-28 (nsd@21a710f120df9192bcf49822a0b1d4da766f59a4 — WS-11 r2 (C7 re-measure) alternating, X1, used in the decision set; ps top-2 before this run: zen 29.3%, cmux 25.1%) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.19s | 1787.05 MB | true | 7662 |
+| 2026-09-28 (nsd@66787a07c0a30285cf20ef477e615a573ac0dba7 — WS-11 r2 (C7 re-measure) alternating, Y1, used in the decision set; ps top-2 before this run: zen 18.6%, gpu-helper 16.0%) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.58s | 1782.89 MB | true | 7662 |
+| 2026-09-28 (nsd@21a710f120df9192bcf49822a0b1d4da766f59a4 — WS-11 r2 (C7 re-measure) alternating, X2, used in the decision set; ps top-2 before this run: zen 17.8%, WindowServer 15.5%) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.37s | 1788.41 MB | true | 7662 |
+| 2026-09-28 (nsd@66787a07c0a30285cf20ef477e615a573ac0dba7 — WS-11 r2 (C7 re-measure) alternating, Y2, used in the decision set; ps top-2 before this run: Firefox plugin-container 33.9%, OrbStack Helper 23.4% (no vitest/cargo/nsd)) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.58s | 1784.05 MB | true | 7662 |
+| 2026-09-28 (nsd@21a710f120df9192bcf49822a0b1d4da766f59a4 — WS-11 r2 (C7 re-measure) alternating, X3, first attempt; ps top-2 before this run: zen 18.2%, gpu-helper 16.5% (unremarkable); the paired Y3 attempt read a 7.23s outlier, so this attempt is also discarded and the whole pair re-run per protocol) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.98s | 1786.09 MB | true | 7662 |
+| 2026-09-28 (nsd@66787a07c0a30285cf20ef477e615a573ac0dba7 — WS-11 r2 (C7 re-measure) alternating, Y3, first attempt, contended: a 7.23s outlier against this side's other four decision-set runs (5.55s-6.15s) despite an unremarkable ps snapshot (OrbStack Helper 18.6%, WindowServer 17.8%) immediately before this run, discarded, whole pair re-run per protocol) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 7.23s | 1782.39 MB | true | 7662 |
+| 2026-09-28 (nsd@21a710f120df9192bcf49822a0b1d4da766f59a4 — WS-11 r2 (C7 re-measure) alternating, X3 re-run, used in the decision set; ps top-2 before this run: zen 15.2%, WindowServer 14.8%) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.41s | 1592.97 MB | true | 7662 |
+| 2026-09-28 (nsd@66787a07c0a30285cf20ef477e615a573ac0dba7 — WS-11 r2 (C7 re-measure) alternating, Y3 re-run, used in the decision set; ps top-2 before this run: zen 17.3%, gpu-helper 14.9%) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 6.15s | 1787.61 MB | true | 7662 |
+| 2026-09-28 (nsd@21a710f120df9192bcf49822a0b1d4da766f59a4 — WS-11 r2 (C7 re-measure) alternating, X4, used in the decision set; ps top-2 before this run: WindowServer 24.9%, zen 18.9% — `node (vitest)` at 56.2% and `node (vitest 1)` at 49.3% had been observed just before and were allowed to clear first) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.43s | 1783.00 MB | true | 7662 |
+| 2026-09-28 (nsd@66787a07c0a30285cf20ef477e615a573ac0dba7 — WS-11 r2 (C7 re-measure) alternating, Y4, used in the decision set; ps top-2 before this run: OrbStack Helper 46.1%, zen 19.0% (no vitest/cargo/nsd)) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.55s | 1786.88 MB | true | 7662 |
+| 2026-09-28 (nsd@21a710f120df9192bcf49822a0b1d4da766f59a4 — WS-11 r2 (C7 re-measure) alternating, X5, first attempt; ps top-2 before this run: WindowServer 18.9%, zen 18.3% (clean; an earlier check had shown OrbStack Helper at 185.6% and this session waited 30s for it to clear before running); discarded because the paired Y5 attempt then read a contended ps — tsc at 229.3% CPU — before it could be run, so the whole pair was re-run per protocol before Y5's first attempt was ever measured) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.23s | 1788.44 MB | true | 7662 |
+| 2026-09-28 (nsd@21a710f120df9192bcf49822a0b1d4da766f59a4 — WS-11 r2 (C7 re-measure) alternating, X5 re-run, used in the decision set; ps top-2 before this run: zen 17.0%, WindowServer 15.7%) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.46s | 1778.44 MB | true | 7662 |
+| 2026-09-28 (nsd@66787a07c0a30285cf20ef477e615a573ac0dba7 — WS-11 r2 (C7 re-measure) alternating, Y5 re-run, used in the decision set — X5's first attempt was discarded before Y5's first attempt was ever run, so only one Y5 reading exists; ps top-2 before this run: WindowServer 26.5%, zen 18.3%) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.68s | 1782.66 MB | true | 7662 |
 
 ## Part C (run 2026-09-25-1744-m1m2-followup)
 
@@ -548,7 +573,9 @@ this file. After one discarded warm-up per side, 5 pairs were run
 alternately (A1 B1 A2 B2 A3 B3 A4 B4 A5 B5), checking `ps -Ao %cpu,comm
 -r` for contention before each run; none of the five pairs showed a
 result inconsistent with its own side's other readings, so none was
-re-run. The decision set is A = {5.49s, 5.50s, 5.80s, 5.53s, 5.67s} (min
+re-run. No `ps` reading was recorded for any C4 run; the re-run decision
+was made on the readings' consistency, not on `ps`. The decision set is A
+= {5.49s, 5.50s, 5.80s, 5.53s, 5.67s} (min
 5.49s, max 5.80s, mean 5.598s); B = {5.49s, 5.34s, 5.46s, 5.65s, 5.42s}
 (min 5.34s, max 5.65s, mean 5.472s). Decision 11's rule is `max(after) <
 min(before)`: here `max(B) = 5.65s` is not less than `min(A) = 5.49s` —
@@ -562,7 +589,8 @@ before they could be written here; that earlier measurement's wall-clock
 decision sets — A = {5.82s, 5.47s, 6.15s, 5.36s, 5.75s}, B = {5.42s,
 5.70s, 5.37s, 5.59s, 5.45s} — reached the same verdict, `max(B) = 5.70s`
 not less than `min(A) = 5.36s`, and are not the rows recorded in `##
-Rows` above; the rows above are this fresh, fully-verified re-measurement
+Rows` above; their warm-up readings were not retained; the rows above are
+this fresh, fully-verified re-measurement
 against the same two commits.) Both scratch worktrees were removed via
 `git worktree remove --force` after the last pair.
 
@@ -571,11 +599,19 @@ same commit that is C4's own "with" side above) versus `4f3009d`
 (worktree B, with C6: an `if damage.is_empty()` fast path in
 `cascade_exclusions`, plus the same short-circuit around the
 `redact_targets` scans and `kept_callables`/`kept_blocks` rebuild in
-`lower_file`, `src/lower/mod.rs`).** Two detached worktrees were built in
-release mode under this session's scratch directory. After one discarded
-warm-up per side (5.55s/1713.56 MB, 5.44s/1788.25 MB), 5 pairs were run
-alternately, checking `ps -Ao %cpu,comm -r` for contention before each
-run. The A4/B4 pair was contended on its first attempt — `ps` showed
+`lower_file`, `src/lower/mod.rs`).** `4f3009d`'s fast path did not skip
+WS-4's owner compaction and remap (`src/lower/mod.rs:224-242` at
+`4f3009d`), which the plan's reading includes; all of serial `lower_file`
+is 1.32 s of CPU (review-ws11-r1-perf.md) and at most 0.09 s of wall at 15
+threads, so including it cannot change the verdict. Two detached
+worktrees were built in release mode under this session's scratch
+directory. After one discarded warm-up per side (5.55s/1713.56 MB; the
+sha cell reads the B-side commit, so which binary produced this warm-up
+is not established — it enters no decision set, 5.44s/1788.25 MB), 5
+pairs were run alternately, checking `ps -Ao %cpu,comm -r` for contention
+before each run. Only the `ps` readings quoted below were retained; the
+other runs' readings were not recorded. The A4/B4 pair was contended on
+its first attempt — `ps` showed
 `node (vitest)` at 60.7% before A4 and OrbStack Helper at 195.3% plus
 `node (vitest)` at 89.1% before B4 — and was re-run per protocol; both
 attempts are recorded in `## Rows` above. Peak RSS for A1/B1/A2/B2 was
@@ -603,7 +639,9 @@ Vec<String>>` cache threaded through `read_excerpt`/`build_finding`/
 worktrees were built in release mode under this session's scratch
 directory. After one discarded warm-up per side, 5 pairs were run
 alternately, checking `ps -Ao %cpu,comm -r` for contention before each
-run. Three of the five pairs needed a re-run: B1's first attempt (7.51s)
+run. Only the `ps` readings quoted below were retained; the other runs'
+readings were not recorded. Three of the five pairs needed a re-run: B1's
+first attempt (7.51s)
 was a clear outlier against B's other four runs (4.63s-5.85s) despite an
 unremarkable `ps` snapshot at the time, so the whole A1/B1 pair was
 re-run; A4's first attempt (13.24s) coincided with `node (vitest)` at
@@ -629,11 +667,78 @@ noise floor, reverted**: C7 does not clear Decision 11 and is reverted
 the strength of its lower mean. Both scratch worktrees were removed via
 `git worktree remove --force` after the last pair.
 
-All three of WS-11's rows (C4, C6, C7) therefore end up reverted: none
-clears Decision 11's strict `max(after) < min(before)` rule on this
-session's noise floor, even though C6 and C7 both showed a lower mean on
-the "after" side. This mirrors WS-9 round 1 and WS-10's own experience
-that a plausible allocation- or scan-avoidance argument is not sufficient
-on its own; only C1 (WS-9 round 2, re-measured on a quieter window) and
-the Java-grammar-swap (M0c-10) rows in this file have actually cleared
-the rule.
+**WS-11 round 2 (C7 re-measure) — the round-1 revert above was wrong.**
+review-ws11-r1-perf.md's stage probe found `report::aggregate` taking
+0.621-0.657s at the parent and 0.069-0.072s with C7 (a 0.56s saving on
+the serial path, matching the wall-mean delta of -0.54s above), which is
+larger than any of this session's quiet-window range widths (0.29-0.40s).
+Per the triage's fix, C7 was restored with `git revert --no-edit
+c2da01e` (commit `21a710f`, reverting the revert; `git diff --stat 49c464e
+HEAD -- src tests` reads the same 124 insertions/15 deletions as the
+original C7 commit) and re-measured with the WS-9 r2 alternating protocol
+in a quiet window. Two detached worktrees were built in release mode:
+`ws11c7-x` at `21a710f` (with C7) and `ws11c7-y` at `66787a0` (the
+revert-commit's parent, without C7; src/tests byte-identical to
+`49c464e`) — the parent placed in `ws11c7-y`, the path playing the role
+`ws11-c7-B` held last round (C7's own "with" side then), so any
+worktree-order bias works against C7 this time (perf note 3). Both were
+built with `cargo build --release --locked` and each measures its own
+binary, writing to its own copy of this file; both read the same
+`$TMPDIR/nsd-perf-fixture`. Before starting, `ps -Ao %cpu,comm -r` showed
+OrbStack Helper at 158.5%; after a 20s wait it read WindowServer 24.1%,
+zen 21.5%, with no `node (vitest…)`, no `cargo`/`target/*/deps/*` and no
+other `nsd` process, so the window counted as quiet. After one discarded
+warm-up per side, 5 pairs were run alternately (X1 Y1 X2 Y2 X3 Y3 X4 Y4
+X5 Y5), checking `ps -Ao %cpu,comm -r` for contention before each run; its
+top-2 line is recorded with every row above. Three pairs needed a re-run:
+Y3's first attempt (7.23s) was a clear outlier against Y's other four
+decision-set runs (5.55s-6.15s) despite an unremarkable `ps` snapshot at
+the time (matching round 1's own B1 precedent), so the whole X3/Y3 pair
+was re-run; before X4 ran, `ps` showed `node (vitest)` at 56.2% and `node
+(vitest 1)` at 49.3%, so this session waited about 50s for the load to
+clear (confirmed by a fresh, quiet `ps` snapshot) before running that
+pair; before Y5 could run, `ps` showed `tsc` at 229.3% CPU (X5's own
+first attempt, at 5.23s, had itself run against a clean `ps` snapshot),
+so the whole X5/Y5 pair was re-run before Y5's first attempt was ever
+measured, leaving X5 with two readings and Y5 with one, the same
+asymmetry round 1's own A4/B4 pair showed. All contended and clean
+attempts are recorded in `## Rows` above. The decision set is X (with C7)
+= {5.19s, 5.37s, 5.41s (X3 re-run), 5.43s, 5.46s (X5 re-run)} (min 5.19s,
+max 5.46s, mean 5.372s); Y (parent, without C7) = {5.58s, 5.58s, 6.15s
+(Y3 re-run), 5.55s, 5.68s (Y5 re-run)} (min 5.55s, max 6.15s, mean
+5.708s). Decision 11's rule is `max(after) < min(before)`: here `max(X) =
+5.46s` **is** less than `min(Y) = 5.55s` — a clean 0.09s gap, no overlap,
+unlike round 1's 0.41s overlap on a noisier window. **Kept**: C7 clears
+Decision 11 on this quiet-window re-measurement; the restore commit
+(`21a710f`) stands and no further revert follows. Both scratch worktrees
+(`ws11c7-x`, `ws11c7-y`) were removed via `git worktree remove --force`
+after the last pair.
+
+C4 and C6 end up reverted: neither clears Decision 11's strict
+`max(after) < min(before)` rule on this session's noise floor, even
+though both showed a lower mean on the "after" side (C4's after-mean was
+5.472s against a before-mean of 5.598s; C6's was 5.272s against 5.422s).
+`49c464e`'s release binary is code-identical to `24ecf8a`'s, which WS-9
+r2 measured at 3.72-3.99s; C4's A side read 5.49-5.80s here, so all three
+WS-11 round-1 windows ran about 45% slower than WS-9 r2's. C7, unlike C4
+and C6, clears Decision 11 in the quiet-window round-2 re-measurement
+above and is kept. Of the Part C rows measured so far, only C1 (WS-9
+round 2) and C7 (WS-11 round 2) have cleared Decision 11.
+
+A stage-level probe (review-ws11-r1-perf.md; release build, best of 5,
+whole perf fixture) explains why neither C4's nor C6's lower wall-clock
+mean is a real gain. Serial `lower_file` over all 8610 files took
+1.336/1.317/1.337s at the parent and 1.319/1.320/1.332s with C6; at
+`RAYON_NUM_THREADS=1`, `lower_all` took 1.325/1.313s against 1.300/1.309s.
+C6 therefore saves at most 0.02s of CPU (only 3 of the 8610 files have
+non-empty `damage`, so the fast path is taken almost everywhere and still
+saves almost nothing), spread over 15 rayon threads — about 0.02s / 15 ≈
+1ms of wall. That is roughly 10x smaller than C6's own -0.15s mean wall
+delta (5.422s to 5.272s), so that wall-clock difference is a
+worktree/order artifact, not a gain. `clones::run_with_ir` at one thread
+took 3.861/3.895s at the parent against 3.682/3.705s with C4, a saving of
+about 0.19s of CPU inside `enumerate_candidates`'s `par_iter`
+(`src/clones/mod.rs:155-165`, about 0.19s / 15 ≈ 0.013s of wall) — but at
+full threads the stage read 2.920/3.002/2.862s at the parent against
+2.977/3.002/2.879s with C4, so no change is visible there either. Neither
+C4 nor C6 can clear Decision 11 in any window; their reverts stand.
