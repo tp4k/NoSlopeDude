@@ -4,10 +4,46 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use nsd::model::{RemoteTarget, Revision, ScanSettings, Target, DEFAULT_MIN_CLONE_LINES};
 use nsd::pipeline::{self, PipelineOutput};
 use nsd::report::{self, ReportInput};
+
+/// A real, on-disk git worktree (system `git` binary, same as
+/// `target::local_git_revision`) for a test that needs `git status` to
+/// observe an actual dirty edit -- unlike `tests/common`'s
+/// `init_repo`/`commit_entries`, which write only to the git2 index (see
+/// `test_dirty_flag_value_tracks_a_real_worktree_edit` below). Kept local to
+/// this file rather than `tests/common/mod.rs`: each `tests/*.rs` file is
+/// its own crate for `cargo clippy`'s dead-code lint, and no other test file
+/// calls this helper, so sharing it there would leave it (and `run_git`)
+/// flagged as unused dead code in every other suite under `-D warnings`.
+fn init_git_worktree(dir: &Path) {
+    run_git(dir, &["init"]);
+    run_git(dir, &["config", "user.email", "fixture@example.invalid"]);
+    run_git(dir, &["config", "user.name", "nsd test fixture"]);
+}
+
+/// Stages every file under `dir` and commits it to `HEAD`.
+fn git_commit_all(dir: &Path, message: &str) {
+    run_git(dir, &["add", "-A"]);
+    run_git(dir, &["commit", "-m", message]);
+}
+
+fn run_git(dir: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .status()
+        .expect("spawn git");
+    assert!(
+        status.success(),
+        "git {args:?} failed in {}",
+        dir.display()
+    );
+}
 
 fn fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/report")
@@ -277,6 +313,42 @@ fn test_scan_settings_round_trip() {
     assert!(
         !output.report.incomplete,
         "a scan with no parse failure should not be marked incomplete"
+    );
+}
+
+#[test]
+fn test_dirty_flag_value_tracks_a_real_worktree_edit() {
+    // Unlike `test_scan_settings_round_trip` above (git2-index-only via
+    // `common::init_repo`/`commit_entries`), this pins the D6 `dirty`
+    // flag's actual *value* against a real on-disk edit `git status` can
+    // see, so a mutant that hardcodes `dirty: Some(false)`
+    // (`src/report/mod.rs:260`) survives the type-level coverage but not
+    // this test.
+    let repo_dir = tempfile::tempdir().expect("tempdir");
+    init_git_worktree(repo_dir.path());
+    fs::write(repo_dir.path().join("A.java"), "public class A {}\n").expect("write A.java");
+    git_commit_all(repo_dir.path(), "initial commit");
+
+    let (_dir, output) = run_scan(repo_dir.path(), |_| {});
+    assert_eq!(
+        output.report.scan.revision.dirty,
+        Some(false),
+        "a freshly committed worktree should not be dirty: {:?}",
+        output.report.scan.revision
+    );
+
+    fs::write(
+        repo_dir.path().join("A.java"),
+        "public class A { void x() {} }\n",
+    )
+    .expect("edit A.java");
+
+    let (_dir2, output2) = run_scan(repo_dir.path(), |_| {});
+    assert_eq!(
+        output2.report.scan.revision.dirty,
+        Some(true),
+        "an edited worktree file should be observed as dirty: {:?}",
+        output2.report.scan.revision
     );
 }
 
