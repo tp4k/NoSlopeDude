@@ -25,11 +25,11 @@ fn terminator_kind(kind: &str) -> Option<TerminatorKind> {
     }
 }
 
-/// D8's JS/TS callable kinds (`metrics::JSTS_CALLABLE_KINDS`, private to a
-/// module this stream may not touch -- re-derived here rather than shared),
-/// and M1-7's grammar-free `CallableKind` each maps to -- see
-/// `java::callable_kind_for`'s doc comment for why this is the sole
-/// membership gate.
+/// D8's JS/TS callable kinds -- this lowering's own table, not shared with
+/// `src/metrics/mod.rs` (which no longer classifies callable kinds itself;
+/// see `java::callable_kind_for`'s doc comment) -- and M1-7's grammar-free
+/// `CallableKind` each maps to; see that same doc comment for why this is
+/// the sole membership gate.
 fn callable_kind_for(kind: &str) -> Option<CallableKind> {
     match kind {
         "function_declaration" => Some(CallableKind::JsFunctionDeclaration),
@@ -152,8 +152,9 @@ fn is_hoisted_or_type_only(kind: &str) -> bool {
     )
 }
 
-/// Mirrors `metrics::is_block_kind`'s JS/TS arm (private to `src/metrics/
-/// mod.rs`): a `{ … }` scope is a `statement_block` only -- deliberately not
+/// The self-is-block predicate for JS/TS (see `java::is_block_kind`'s own
+/// doc comment on why `src/metrics/mod.rs` no longer carries its own copy):
+/// a `{ … }` scope is a `statement_block` only -- deliberately not
 /// `program`, the top-level module scope, which is never itself a braced
 /// block. Returns the matched arm's own literal rather than a bool -- see
 /// `java::is_block_kind`'s doc comment for why.

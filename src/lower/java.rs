@@ -27,10 +27,10 @@ fn terminator_kind(kind: &str) -> Option<TerminatorKind> {
     }
 }
 
-/// D8's Java callable kinds (`metrics::JAVA_CALLABLE_KINDS`, private to a
-/// module this stream may not touch -- re-derived here rather than shared,
-/// same as `is_block_kind` and `TERMINATOR_KINDS` already were), and M1-7's
-/// grammar-free `CallableKind` each maps to. The sole membership gate for
+/// D8's Java callable kinds -- this lowering's own table, not shared with
+/// `src/metrics/mod.rs` (which no longer classifies callable kinds itself;
+/// it consumes `IrFile::callables` directly) -- and M1-7's grammar-free
+/// `CallableKind` each maps to. The sole membership gate for
 /// `callable_info` below: unlike the pre-M1-7 shape (a separate
 /// `CALLABLE_KINDS.contains()` check plus a would-be lookup), there is only
 /// one table here, so it cannot drift out of sync with itself.
@@ -193,9 +193,10 @@ fn callable_info(
     })
 }
 
-/// Mirrors `metrics::is_block_kind`'s Java arm (private to `src/metrics/
-/// mod.rs`): a `{ … }` scope is a `block` or a constructor's
-/// `constructor_body`. Returns the matched arm's own literal rather than a
+/// The self-is-block predicate for Java: a `{ … }` scope is a `block` or a
+/// constructor's `constructor_body`. `src/metrics/mod.rs` no longer carries
+/// its own copy of this classification -- it consumes `IrFile::blocks`
+/// directly. Returns the matched arm's own literal rather than a
 /// bool: `Node::kind()` in tree-sitter 0.27 borrows from `node`'s own
 /// lifetime rather than promising `'static`, but `IrBlock::kind` is
 /// `&'static str` (`model::SyntaxBlock::kind` must not move), so the caller
