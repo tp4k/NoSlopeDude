@@ -125,13 +125,9 @@ pub fn redundant_occurrences(group: &CloneGroup) -> &[CloneLocation] {
 }
 
 /// Runs the clones stage over every successfully parsed file: enumerates
-/// candidates (D15) in parallel — one rayon task per file, matching the
-/// upstream `parse`/`metrics` stages (perf row 3; `enumerate_candidates` is
-/// pure per file and shares nothing) — groups them by fingerprint (D14),
-/// drops subsumed groups, and ranks the rest by redundant lines descending.
-/// Output order does not depend on this parallelism: `GroupBuilder` sorts
-/// each group's locations canonically and the final sort below is a total
-/// order over the resulting groups.
+/// candidates (D15), groups them by fingerprint (D14), drops subsumed
+/// groups, and ranks the rest by redundant lines descending.
+///
 /// Lowers each file itself (`lower::lower_all`) and delegates to
 /// `run_with_ir` below -- a thin wrapper kept so this signature's existing
 /// call sites (mostly tests) stay untouched.
@@ -144,12 +140,18 @@ pub fn run(parsed_files: &[ParsedFile], min_clone_lines: u32) -> ClonesResult {
 /// single lowering pass instead of lowering `parsed_files` again --
 /// `pipeline::run`'s production path calls this directly, `ir_files`
 /// index-aligned with `parsed_files` (`lower::lower_all`'s own
-/// `par_iter` preserves order).
+/// `par_iter` preserves order). Enumerates candidates (D15) in parallel —
+/// one rayon task per file, matching the upstream `parse`/`metrics` stages
+/// (perf row 3; `enumerate_candidates` is pure per file and shares
+/// nothing). Output order does not depend on this parallelism:
+/// `GroupBuilder` sorts each group's locations canonically and the final
+/// sort below is a total order over the resulting groups.
 pub(crate) fn run_with_ir(
     parsed_files: &[ParsedFile],
     ir_files: &[lower::IrFile],
     min_clone_lines: u32,
 ) -> ClonesResult {
+    debug_assert_eq!(parsed_files.len(), ir_files.len());
     let per_file: Vec<(LanguageFamily, Vec<(u128, Candidate)>)> = parsed_files
         .par_iter()
         .zip(ir_files.par_iter())

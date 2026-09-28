@@ -37,12 +37,15 @@ pub fn run(parsed_files: &[ParsedFile], incomplete: bool) -> MetricsResult {
 /// single lowering pass instead of lowering `parsed_files` again --
 /// `pipeline::run`'s production path calls this directly, `ir_files`
 /// index-aligned with `parsed_files` (`lower::lower_all`'s own
-/// `par_iter` preserves order).
+/// `par_iter` preserves order). One rayon task per file (D21) since
+/// `parse_all` already fans out the same way and this walk is the larger
+/// half of the work.
 pub(crate) fn run_with_ir(
     parsed_files: &[ParsedFile],
     ir_files: &[lower::IrFile],
     incomplete: bool,
 ) -> MetricsResult {
+    debug_assert_eq!(parsed_files.len(), ir_files.len());
     let per_file: Vec<(Vec<Callable>, Vec<SyntaxBlock>, FileScanSummary)> = parsed_files
         .par_iter()
         .zip(ir_files.par_iter())

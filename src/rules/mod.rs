@@ -71,6 +71,7 @@ pub(crate) fn run_with_ir(
     metrics: &MetricsResult,
     clones: &ClonesResult,
 ) -> RulesResult {
+    debug_assert_eq!(parsed_files.len(), ir_files.len());
     let summaries_by_path: HashMap<&Path, &FileScanSummary> = metrics
         .file_scan_summaries
         .iter()
