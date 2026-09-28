@@ -398,6 +398,44 @@ fn commit_link_target_bounded_by_ceiling() {
     );
 }
 
+/// A2/round 3: on a Unix host, `WorktreeSnapshot::open` always has a real
+/// `observed_exec_bit(&metadata)` reading (never `None`), so the only way to
+/// kill the `observed_exec_bit(&metadata)` -> `None` mutant at that call
+/// site is a real chmod observed through `open` itself; the unit tests in
+/// `src/git/snapshot.rs` all drive `refresh_from_disk`/`worktree_file_kind`
+/// with an explicit `Option<bool>` and never exercise the real reading.
+#[test]
+#[cfg(unix)]
+fn worktree_observes_a_chmod_of_a_tracked_regular_file() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (dir, repo) = common::init_repo();
+    let commit_oid = common::commit_entries(
+        &repo,
+        &[(b"run.sh".to_vec(), MODE_REGULAR, b"#!/bin/sh\n".to_vec())],
+    );
+    sync_index_to_commit(&repo, commit_oid);
+    std::fs::write(dir.path().join("run.sh"), b"#!/bin/sh\n").expect("write run.sh");
+    std::fs::set_permissions(
+        dir.path().join("run.sh"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .expect("chmod run.sh to 0o755");
+
+    let snapshot = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let entry = snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.path.as_bytes() == b"run.sh")
+        .expect("run.sh entry present");
+    assert_eq!(
+        entry.kind,
+        EntryKind::Executable,
+        "a chmod to the exec bit on a tracked regular file must be observed as Executable \
+         through WorktreeSnapshot::open"
+    );
+}
+
 #[test]
 fn conflicted_index_is_g101() {
     let (_dir, repo) = common::init_repo();
