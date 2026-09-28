@@ -16,6 +16,7 @@ mod jsts;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tree_sitter::Node;
 
@@ -81,6 +82,19 @@ pub struct IrFile {
     pub owners: Vec<OwnerEntry>,
 }
 
+/// WS-9 (C1): total number of `lower_file` calls made so far in this
+/// process. Not `#[cfg(test)]`: `tests/ir_isolation.rs` links the
+/// non-test library build, like every other integration test, so a
+/// `#[cfg(test)]` counter would not be visible there.
+static LOWERING_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+/// Reads `LOWERING_COUNT`'s current value. `#[doc(hidden)]`: an
+/// observability seam for `tests/ir_isolation.rs`, not public API.
+#[doc(hidden)]
+pub fn lowering_count() -> usize {
+    LOWERING_COUNT.load(Ordering::Relaxed)
+}
+
 /// Lowers every parsed file, one rayon task per file (D21), matching the
 /// upstream stages' own per-file parallelism.
 pub fn lower_all(parsed_files: &[ParsedFile]) -> Vec<IrFile> {
@@ -117,7 +131,13 @@ pub fn lower_all(parsed_files: &[ParsedFile]) -> Vec<IrFile> {
 /// the pruned-entity count). Each entity's own dirty bit is read exactly
 /// once here (fixing (e): the old double `is_clear_of_damage` evaluation
 /// -- once to build the prune list, once again in `retain` -- is gone).
+///
+/// WS-9 (C1): increments `LOWERING_COUNT` on every call, the seam
+/// `tests/ir_isolation.rs::test_pipeline_lowers_each_file_once` reads
+/// through `lowering_count()` below to observe that `pipeline::run` lowers
+/// each file exactly once.
 pub fn lower_file(file: &ParsedFile) -> IrFile {
+    LOWERING_COUNT.fetch_add(1, Ordering::Relaxed);
     let mut damage = Vec::new();
     let mut callables = Vec::new();
     let mut blocks = Vec::new();

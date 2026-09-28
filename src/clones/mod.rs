@@ -132,14 +132,32 @@ pub fn redundant_occurrences(group: &CloneGroup) -> &[CloneLocation] {
 /// Output order does not depend on this parallelism: `GroupBuilder` sorts
 /// each group's locations canonically and the final sort below is a total
 /// order over the resulting groups.
+/// Lowers each file itself (`lower::lower_all`) and delegates to
+/// `run_with_ir` below -- a thin wrapper kept so this signature's existing
+/// call sites (mostly tests) stay untouched.
 pub fn run(parsed_files: &[ParsedFile], min_clone_lines: u32) -> ClonesResult {
+    let ir_files = lower::lower_all(parsed_files);
+    run_with_ir(parsed_files, &ir_files, min_clone_lines)
+}
+
+/// WS-9 (C1): identical to `run` above, but takes the pipeline's own
+/// single lowering pass instead of lowering `parsed_files` again --
+/// `pipeline::run`'s production path calls this directly, `ir_files`
+/// index-aligned with `parsed_files` (`lower::lower_all`'s own
+/// `par_iter` preserves order).
+pub(crate) fn run_with_ir(
+    parsed_files: &[ParsedFile],
+    ir_files: &[lower::IrFile],
+    min_clone_lines: u32,
+) -> ClonesResult {
     let per_file: Vec<(LanguageFamily, Vec<(u128, Candidate)>)> = parsed_files
         .par_iter()
+        .zip(ir_files.par_iter())
         .enumerate()
-        .map(|(file_index, file)| {
+        .map(|(file_index, (file, ir_file))| {
             (
                 file.language,
-                enumerate_candidates(file, file_index as u32, min_clone_lines),
+                enumerate_candidates(file, ir_file, file_index as u32, min_clone_lines),
             )
         })
         .collect();
@@ -268,12 +286,14 @@ fn is_subsumed(candidate: &GroupBuilder, other: &GroupBuilder) -> bool {
 /// shorter than `MIN_CANDIDATE_STATEMENTS`, so calling it unconditionally
 /// costs one cheap length check per node rather than a container-kind
 /// dispatch.
+/// WS-9 (C1): `ir_file` is the caller's own lowering (`run_with_ir`'s
+/// `ir_files`, index-aligned with `parsed_files`), not lowered again here.
 fn enumerate_candidates(
     file: &ParsedFile,
+    ir_file: &lower::IrFile,
     file_index: u32,
     min_clone_lines: u32,
 ) -> Vec<(u128, Candidate)> {
-    let ir_file = lower::lower_file(file);
     let mut candidates = Vec::new();
     for_each_ir_node(&ir_file.root, &mut |node| {
         let statements: Vec<&IrNode> = node

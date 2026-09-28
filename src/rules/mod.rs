@@ -41,19 +41,33 @@ pub const ALL_RULE_IDS: [RuleId; 6] = [
 ];
 
 /// Runs the rules stage: every rule finding (D22) plus the D23 verbosity
-/// score, overall and per language family (D20). One rayon pass over
-/// `parsed_files` (D21) lowers each file exactly once (`lower::lower_file`)
-/// and derives both a file's findings (`findings_from_ir`) and its
-/// D11-filtered executable-line set (`executable_lines_from_ir`) from that
-/// single `IrFile` -- `metrics/mod.rs` and `clones/mod.rs` still each lower
-/// independently for their own stages, but this is the one place in the
-/// rules stage that used to lower every file twice. `files` follows
-/// `metrics.file_scan_summaries`'s order. `find_findings` and
-/// `file_language_lines` below still each lower independently; they are not
-/// on this path any more, kept only so `tests/rules.rs` and this file's own
-/// `#[cfg(test)] mod tests` can call one function or the other directly.
+/// score, overall and per language family (D20). Lowers each file itself
+/// (`lower::lower_all`) and delegates to `run_with_ir` below -- a thin
+/// wrapper kept so this signature's existing call sites (mostly tests)
+/// stay untouched. `find_findings` and `file_language_lines` below still
+/// each lower independently; they are not on this path any more, kept
+/// only so `tests/rules.rs` and this file's own `#[cfg(test)] mod tests`
+/// can call one function or the other directly.
 pub fn run(
     parsed_files: &[ParsedFile],
+    metrics: &MetricsResult,
+    clones: &ClonesResult,
+) -> RulesResult {
+    let ir_files = lower::lower_all(parsed_files);
+    run_with_ir(parsed_files, &ir_files, metrics, clones)
+}
+
+/// WS-9 (C1): identical to `run` above, but takes the pipeline's own
+/// single lowering pass instead of lowering `parsed_files` again --
+/// `pipeline::run`'s production path calls this directly, `ir_files`
+/// index-aligned with `parsed_files` (`lower::lower_all`'s own `par_iter`
+/// preserves order). One rayon pass over `parsed_files` (D21) derives
+/// both a file's findings (`findings_from_ir`) and its D11-filtered
+/// executable-line set (`executable_lines_from_ir`) from that same
+/// `IrFile`. `files` follows `metrics.file_scan_summaries`'s order.
+pub(crate) fn run_with_ir(
+    parsed_files: &[ParsedFile],
+    ir_files: &[lower::IrFile],
     metrics: &MetricsResult,
     clones: &ClonesResult,
 ) -> RulesResult {
@@ -65,10 +79,10 @@ pub fn run(
 
     let per_file: Vec<PerFileScan> = parsed_files
         .par_iter()
-        .map(|file| {
-            let ir_file = lower::lower_file(file);
-            let findings = findings_from_ir(file, &ir_file);
-            let executable_lines = executable_lines_from_ir(&ir_file);
+        .zip(ir_files.par_iter())
+        .map(|(file, ir_file)| {
+            let findings = findings_from_ir(file, ir_file);
+            let executable_lines = executable_lines_from_ir(ir_file);
             let file_lines = summaries_by_path
                 .get(file.relative_path.as_path())
                 .map(|summary| FileLanguageLines {
