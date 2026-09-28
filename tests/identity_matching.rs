@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use nsd::git::diff::{self, Change};
 use nsd::git::path::RepoPath;
 use nsd::identity::matching::{match_callables, CallableRef, FileCallables, MatchTier};
-use nsd::identity::{self, CallableIdentity};
+use nsd::identity::{self, CallableIdentity, OwnerDigest};
 use nsd::ir::CallableKind;
 use nsd::lower::{self, IrFile};
 use nsd::model::{Grammar, LanguageFamily};
@@ -97,7 +97,7 @@ fn file_callables(path: &str, ir_file: &IrFile, source: &str) -> FileCallables {
 /// lowering.
 fn synth_identity(name: &str, signature: &[&str]) -> CallableIdentity {
     CallableIdentity {
-        owner_chain: Vec::new(),
+        owner_digest: OwnerDigest::default(),
         kind: CallableKind::JavaMethod,
         name: name.to_string(),
         signature: signature.iter().map(|part| part.to_string()).collect(),

@@ -283,16 +283,19 @@ class Sibling {
     let sibling_identity = identity::callable_identity(&ir_file, sibling_method);
 
     assert_eq!(
-        inner_identity.owner_chain,
+        identity::owner_chain(&ir_file, inner_method.owner),
         vec![owner_named_type("Outer"), owner_named_type("Inner"),]
     );
-    assert_eq!(outer_identity.owner_chain, vec![owner_named_type("Outer")]);
     assert_eq!(
-        lambda_identity.owner_chain,
+        identity::owner_chain(&ir_file, outer_method.owner),
+        vec![owner_named_type("Outer")]
+    );
+    assert_eq!(
+        identity::owner_chain(&ir_file, lambda.owner),
         vec![owner_named_type("Outer"), owner_callable("method")]
     );
     assert_eq!(
-        sibling_identity.owner_chain,
+        identity::owner_chain(&ir_file, sibling_method.owner),
         vec![owner_named_type("Sibling")]
     );
 
@@ -694,7 +697,7 @@ fn test_owner_segments_are_stored_once_per_owner() {
     let expected_owner_chain = vec![owner_callable(&name)];
     for arrow in arrows {
         assert_eq!(
-            identity::callable_identity(&ir_file, arrow).owner_chain,
+            identity::owner_chain(&ir_file, arrow.owner),
             expected_owner_chain
         );
     }
@@ -752,8 +755,14 @@ function f() {
 
     let a_identity = identity::callable_identity(&ir_file, a_m);
     let b_identity = identity::callable_identity(&ir_file, b_m);
-    assert_eq!(a_identity.owner_chain, vec![owner_named_type("A")]);
-    assert_eq!(b_identity.owner_chain, vec![owner_named_type("B")]);
+    assert_eq!(
+        identity::owner_chain(&ir_file, a_m.owner),
+        vec![owner_named_type("A")]
+    );
+    assert_eq!(
+        identity::owner_chain(&ir_file, b_m.owner),
+        vec![owner_named_type("B")]
+    );
     assert_ne!(
         a_identity, b_identity,
         "distinct abstract-class owner chains"
@@ -762,9 +771,15 @@ function f() {
     let module_identity = identity::callable_identity(&ir_file, module_f);
     let namespace_identity = identity::callable_identity(&ir_file, namespace_f);
     let top_level_identity = identity::callable_identity(&ir_file, top_level_f);
-    assert_eq!(module_identity.owner_chain, vec![owner_namespace("M")]);
-    assert_eq!(namespace_identity.owner_chain, vec![owner_namespace("N")]);
-    assert_eq!(top_level_identity.owner_chain, Vec::new());
+    assert_eq!(
+        identity::owner_chain(&ir_file, module_f.owner),
+        vec![owner_namespace("M")]
+    );
+    assert_eq!(
+        identity::owner_chain(&ir_file, namespace_f.owner),
+        vec![owner_namespace("N")]
+    );
+    assert_eq!(identity::owner_chain(&ir_file, top_level_f.owner), Vec::new());
     assert_ne!(module_identity, namespace_identity);
     assert_ne!(module_identity, top_level_identity);
     assert_ne!(namespace_identity, top_level_identity);
@@ -831,16 +846,23 @@ enum Op {
     let minus_identity = identity::callable_identity(&enum_ir, minus_apply);
     let shared_identity = identity::callable_identity(&enum_ir, shared_apply);
     assert_eq!(
-        plus_identity.owner_chain,
+        identity::owner_chain(&enum_ir, plus_apply.owner),
         vec![owner_named_type("Op"), owner_anonymous_class_body()]
     );
     assert_eq!(
-        minus_identity.owner_chain,
+        identity::owner_chain(&enum_ir, minus_apply.owner),
         vec![owner_named_type("Op"), owner_anonymous_class_body()]
     );
-    assert_eq!(shared_identity.owner_chain, vec![owner_named_type("Op")]);
+    assert_eq!(
+        identity::owner_chain(&enum_ir, shared_apply.owner),
+        vec![owner_named_type("Op")]
+    );
     assert_ne!(
         plus_identity, shared_identity,
+        "an enum constant's own body is an anonymous class body, not the enum's NamedType"
+    );
+    assert_ne!(
+        minus_identity, shared_identity,
         "an enum constant's own body is an anonymous class body, not the enum's NamedType"
     );
 
@@ -856,9 +878,8 @@ class A {
 ";
     let anonymous_ir = lower_java(anonymous_class_body_source);
     let run_method = callable_at_line(&anonymous_ir, 4);
-    let run_identity = identity::callable_identity(&anonymous_ir, run_method);
     assert_eq!(
-        run_identity.owner_chain,
+        identity::owner_chain(&anonymous_ir, run_method.owner),
         vec![
             owner_named_type("A"),
             owner_callable("m"),
@@ -876,9 +897,134 @@ class A {
 ";
     let annotation_ir = lower_java(annotation_source);
     let loader_run = callable_at_line(&annotation_ir, 3);
-    let loader_run_identity = identity::callable_identity(&annotation_ir, loader_run);
     assert_eq!(
-        loader_run_identity.owner_chain,
+        identity::owner_chain(&annotation_ir, loader_run.owner),
         vec![owner_named_type("Config"), owner_named_type("Loader")]
+    );
+}
+
+// ---------------------------------------------------------------------
+// A5: `CallableIdentity::owner_digest` is a compact `OwnerDigest` in place
+// of a deep-copied `Vec<OwnerSegment>`; equality must still track the full
+// owner chain (no ordinal, per this module's own doc comment).
+// ---------------------------------------------------------------------
+
+/// Two sibling classes' same-named method share kind/name/signature but
+/// differ in exactly one ancestor -- their `owner_digest`s (and so their
+/// whole `CallableIdentity`s) must differ. Repeated with a JS named-vs-
+/// anonymous enclosing function, since an anonymous owner segment carries no
+/// name at all (`None`), the other case this digest must still separate.
+#[test]
+fn test_owner_identity_distinguishes_chains_that_differ_only_in_one_ancestor() {
+    let java_source = "\
+class A {
+    class B {
+        void f() {
+            System.out.println(\"b\");
+        }
+    }
+
+    class C {
+        void f() {
+            System.out.println(\"c\");
+        }
+    }
+}
+";
+    let ir_file = lower_java(java_source);
+    let b_f = callable_at_line(&ir_file, 3);
+    let c_f = callable_at_line(&ir_file, 9);
+    let b_identity = identity::callable_identity(&ir_file, b_f);
+    let c_identity = identity::callable_identity(&ir_file, c_f);
+
+    assert_eq!(b_identity.kind, c_identity.kind);
+    assert_eq!(b_identity.name, c_identity.name);
+    assert_eq!(b_identity.signature, c_identity.signature);
+    assert_ne!(
+        b_identity.owner_digest, c_identity.owner_digest,
+        "chains differ only in one ancestor (B vs C), digests must still differ"
+    );
+    assert_ne!(b_identity, c_identity);
+
+    let js_source = "\
+function named() {
+    () => 1;
+}
+
+(function () {
+    () => 2;
+})();
+";
+    let ir_file = lower_ts(js_source);
+    let named_arrow = callable_at_line(&ir_file, 2);
+    let anonymous_arrow = callable_at_line(&ir_file, 6);
+    let named_identity = identity::callable_identity(&ir_file, named_arrow);
+    let anonymous_identity = identity::callable_identity(&ir_file, anonymous_arrow);
+
+    assert_eq!(named_identity.kind, anonymous_identity.kind);
+    assert_eq!(named_identity.name, anonymous_identity.name);
+    assert_eq!(named_identity.signature, anonymous_identity.signature);
+    assert_ne!(
+        named_identity.owner_digest, anonymous_identity.owner_digest,
+        "a named vs anonymous enclosing function must still give distinct digests"
+    );
+    assert_ne!(named_identity, anonymous_identity);
+}
+
+/// The exact same owner chain, built from two independently lowered files
+/// whose owner tables have different raw indices (a leading unrelated class
+/// shifts every later index in the first file), must still hash to the same
+/// `OwnerDigest` -- and so give equal whole `CallableIdentity`s. A third
+/// file with a differently-named enclosing class proves the equality above
+/// is not vacuous (i.e. not every two files' digests collide).
+#[test]
+fn test_owner_identity_is_equal_for_equal_chains_across_files() {
+    let first_source = "\
+class Unrelated {
+}
+
+class A {
+    void f() {
+        System.out.println(\"f\");
+    }
+}
+";
+    let second_source = "\
+class A {
+    void f() {
+        System.out.println(\"f\");
+    }
+}
+";
+    let different_source = "\
+class B {
+    void f() {
+        System.out.println(\"f\");
+    }
+}
+";
+    let first_ir = lower_java(first_source);
+    let second_ir = lower_java(second_source);
+    let different_ir = lower_java(different_source);
+
+    let first_f = callable_at_line(&first_ir, 5);
+    let second_f = callable_at_line(&second_ir, 2);
+    let different_f = callable_at_line(&different_ir, 2);
+
+    assert_ne!(
+        first_f.owner, second_f.owner,
+        "the leading Unrelated class shifts the owner table index"
+    );
+
+    let first_identity = identity::callable_identity(&first_ir, first_f);
+    let second_identity = identity::callable_identity(&second_ir, second_f);
+    let different_identity = identity::callable_identity(&different_ir, different_f);
+
+    assert_eq!(first_identity.owner_digest, second_identity.owner_digest);
+    assert_eq!(first_identity, second_identity);
+
+    assert_ne!(
+        first_identity.owner_digest, different_identity.owner_digest,
+        "a differently-named enclosing class must not collide"
     );
 }
