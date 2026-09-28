@@ -391,10 +391,11 @@ fn root_config_bytes(
 }
 
 /// Loads a trusted `--config` file from the filesystem (M2-2): bound by
-/// `SOURCE_CEILING_BYTES` the same way a snapshot's own bytes are, since
-/// this path is attacker-controlled the same way a repository entry is
-/// (D21's "candidate config validated through C101 but cannot affect its
-/// own check" companion: a trusted file is validated too). Missing,
+/// `SOURCE_CEILING_BYTES` the same way a snapshot's own bytes are, even
+/// though this path is operator-chosen rather than attacker-controlled the
+/// way a repository entry is (D21's "candidate config validated through
+/// C101 but cannot affect its own check" companion: a trusted file is
+/// validated too). Missing,
 /// unreadable, over-ceiling and invalid-shape all report `NSD-C102`
 /// (`ConfigError::new`'s default code).
 ///
@@ -413,9 +414,15 @@ fn root_config_bytes(
 pub fn load_trusted(path: &Path) -> Result<Config, ConfigError> {
     match fs::metadata(path) {
         Ok(metadata) if metadata.is_file() => {}
-        _ => {
+        Ok(_) => {
             return Err(ConfigError::new(format!(
-                "trusted config {} is missing or not a regular file",
+                "trusted config {} is not a regular file",
+                path.display()
+            )))
+        }
+        Err(err) => {
+            return Err(ConfigError::new(format!(
+                "cannot read trusted config {}: {err}",
                 path.display()
             )))
         }
