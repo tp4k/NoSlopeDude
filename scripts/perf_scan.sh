@@ -145,7 +145,10 @@ main() {
   (cd "$REPO_ROOT" && cargo build --release)
   local bin="$REPO_ROOT/target/release/nsd"
 
-  local output_dir time_log
+  # Not `local`: the EXIT trap below fires after main() returns, once the
+  # script reaches its own end, outside main's dynamic scope -- a `local`
+  # binding here would already be gone by then (`set -u` catches exactly
+  # that as "unbound variable").
   output_dir="$(mktemp -d)"
   time_log="$(mktemp)"
   trap 'rm -rf "$output_dir" "$time_log"' EXIT
