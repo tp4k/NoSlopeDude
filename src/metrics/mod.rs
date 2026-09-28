@@ -23,31 +23,13 @@ use crate::parse::ParsedFile;
 /// How many rows the top-callables ranking keeps.
 const TOP_CALLABLES: usize = 25;
 
-/// Runs the metrics stage over every successfully parsed file. Lowers each
-/// file itself (`lower::lower_all`) and delegates to `run_with_ir` below --
-/// a thin wrapper kept so this signature's existing call sites (mostly
-/// tests) stay untouched. `incomplete` marks the result D18-incomplete
-/// when at least one file failed to parse.
+/// Runs the metrics stage over every successfully parsed file, one rayon
+/// task per file (D21) since `parse_all` already fans out the same way and
+/// this walk is the larger half of the work. `incomplete` marks the result
+/// D18-incomplete when at least one file failed to parse.
 pub fn run(parsed_files: &[ParsedFile], incomplete: bool) -> MetricsResult {
-    let ir_files = lower::lower_all(parsed_files);
-    run_with_ir(parsed_files, &ir_files, incomplete)
-}
-
-/// WS-9 (C1): identical to `run` above, but takes the pipeline's own
-/// single lowering pass instead of lowering `parsed_files` again --
-/// `pipeline::run`'s production path calls this directly, `ir_files`
-/// index-aligned with `parsed_files` (`lower::lower_all`'s own
-/// `par_iter` preserves order).
-pub(crate) fn run_with_ir(
-    parsed_files: &[ParsedFile],
-    ir_files: &[lower::IrFile],
-    incomplete: bool,
-) -> MetricsResult {
-    let per_file: Vec<(Vec<Callable>, Vec<SyntaxBlock>, FileScanSummary)> = parsed_files
-        .par_iter()
-        .zip(ir_files.par_iter())
-        .map(|(file, ir_file)| scan_file(file, ir_file))
-        .collect();
+    let per_file: Vec<(Vec<Callable>, Vec<SyntaxBlock>, FileScanSummary)> =
+        parsed_files.par_iter().map(scan_file).collect();
 
     let mut callables = Vec::new();
     let mut syntax_blocks = Vec::new();
@@ -132,13 +114,12 @@ pub fn rank_top_callables(callables: &[Callable]) -> Vec<Callable> {
 /// cc/SLOC, D9) and `IrFile::blocks` into `SyntaxBlock`s — at module level
 /// and inside callables alike, both tables already in document order — and
 /// accumulates the file's D12 scanned-line count over the whole IR tree,
-/// unexcluded. WS-9 (C1): `ir_file` is the caller's own lowering
-/// (`run_with_ir`'s `ir_files`, index-aligned with `parsed_files`), not
-/// lowered again here.
-fn scan_file(
-    file: &ParsedFile,
-    ir_file: &lower::IrFile,
-) -> (Vec<Callable>, Vec<SyntaxBlock>, FileScanSummary) {
+/// unexcluded.
+fn scan_file(file: &ParsedFile) -> (Vec<Callable>, Vec<SyntaxBlock>, FileScanSummary) {
+    // Lowered once per file: every callable's own cc/SLOC walk, the block
+    // table and the D12 line count below all read off this same IR tree.
+    let ir_file = lower::lower_file(file);
+
     let mut scanned_lines = 0usize;
     let mut last_counted_line = 0usize;
     walk_ir_excluding(&ir_file.root, &[], |node| {
@@ -163,7 +144,7 @@ fn scan_file(
         .callables
         .iter()
         .map(|callable| {
-            let CallableMetrics { cc, sloc } = scan_callable_body(callable.body_span, ir_file);
+            let CallableMetrics { cc, sloc } = scan_callable_body(callable.body_span, &ir_file);
             Callable {
                 relative_path: file.relative_path.clone(),
                 language: file.language,
