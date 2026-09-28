@@ -99,9 +99,13 @@ over the failure, is:
    escape hatch, so it is red by construction on every run made after M0c
    regardless of corpus drift — measured on this stream's own `HEAD`,
    `bash scripts/neutrality_gate.sh` prints `NEUTRALITY: clean corpus
-   diverged at /scores/java/erosion`, the M0c-10 grammar-swap delta, not a
-   corpus-membership bug and not something re-pointing `PRE_IR_SHA`
-   forward would honestly fix (see the trust-anchor paragraph below).
+   diverged at /scores/java/erosion` — the first pointer jq reports
+   (sorted keys) comes from salvage now measuring five previously
+   skipped files; the same run also carries M0c-10's four verbosity
+   pointers and M0c-13's `/top25/*/location` spans, 76 pointers in all,
+   none of them a corpus-membership bug, and not something re-pointing
+   `PRE_IR_SHA` forward would honestly fix (see the trust-anchor
+   paragraph below).
    Treat Proof B as this procedure's actual corpus-drift check; Proof A
    stays meaningful only run against a pre-M0c commit, or once a human
    deliberately re-pins `PRE_IR_SHA` to a post-M0c commit with its own
@@ -294,7 +298,7 @@ implementer report for the full committed diff.
 B4 (task.md) needed a fixture with a callable at exactly
 `cc == CC_EROSION_THRESHOLD`: the code reviewer's mutation survivor
 (`cc > CC_EROSION_THRESHOLD` mutated to `cc >=`) passed every existing
-neutrality/metrics test because no committed fixture sat on that
+neutrality test because no committed fixture sat on that
 boundary. The new file, `tests/fixtures/erosion_boundary/Boundary.java`
 (nine independent `if` branches, no `else`, one callable at `cc == 10`),
 joins `clean_corpus_sources()`'s membership walk like any other fixture —
@@ -305,9 +309,11 @@ otherwise widen the `/findings` array, past what corpus growth alone
 predicts.
 
 Predicted bound before capturing: the new callable is Java, so
-`scores.{overall,java}.verbosity.scanned_lines` (and `erosion`/`ratio`
-moving arithmetically with them) should move by its own contribution;
-`js_ts` untouched; no new `skipped_files` entry (the file parses clean);
+`scores.{overall,java}.verbosity.scanned_lines` should move by its own
+contribution, with `ratio` moving via that same `scanned_lines` rise and
+`erosion` moving via the callable's own mass entering Σmass (its `cc`
+exceeds the threshold, so it counts as eroded); `js_ts` untouched; no new
+`skipped_files` entry (the file parses clean);
 no new `findings` entry (the fixture trips none of the six wasteful-code
 rules); and, since `cc == 10` outranks the corpus's lowest existing
 `top25` entries, exactly one low-ranked callable is displaced out.
@@ -315,8 +321,10 @@ rules); and, since `cc == 10` outranks the corpus's lowest existing
 **Capture**: `bash scripts/neutrality_gate.sh --capture` re-captured
 `clean.report.json` from `HEAD`. The resulting diff matched the
 prediction exactly: `scores.{overall,java}.verbosity.scanned_lines` moved
-`+13`/`+13` (overall/java; `js_ts` untouched), `erosion`/`ratio` moving
-arithmetically with them; the new `classify` callable (`cc == 10`)
+`+13`/`+13` (overall/java; `js_ts` untouched), moving `ratio` via that
+same `scanned_lines` rise; `erosion` moved because Σmass rose by
+`classify`'s own `10·√11 = 33.166` while the eroded mass (`cc > 10`)
+stayed unchanged; the new `classify` callable (`cc == 10`)
 entered `top25` and displaced `parity/Constructs.java`'s `forConstruct`
 (`cc == 2`, the lowest-ranked row); nothing else moved — no `findings`,
 no `skipped_files`. `malformed.report.json`'s own would-be rewrite (the

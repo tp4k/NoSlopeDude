@@ -468,8 +468,9 @@ fn test_unparseable_file_is_skipped_and_marks_incomplete() {
 }
 
 /// B4 (task.md): the code reviewer's erosion-boundary mutation survivor —
-/// `cc > CC_EROSION_THRESHOLD` mutated to `cc >=` — passes 8/8 existing
-/// neutrality tests because no committed fixture sits at exactly
+/// `cc > CC_EROSION_THRESHOLD` mutated to `cc >=` — passes every existing
+/// `tests/neutrality.rs` test (8/8 in task.md's count) because no
+/// committed fixture sits at exactly
 /// `cc == CC_EROSION_THRESHOLD`. `Boundary.java` declares exactly one
 /// callable at that boundary (nine independent `if` branches, no `else`,
 /// D7's `Branch` decision each, `CC = 1 + 9 == 10`), so `cc > 10` and
