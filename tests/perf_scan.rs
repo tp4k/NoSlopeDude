@@ -230,6 +230,53 @@ fn test_row_marks_a_dirty_src_tree() -> anyhow::Result<()> {
 
 #[cfg(unix)]
 #[test]
+fn test_row_marks_a_dirty_cargo_manifest() -> anyhow::Result<()> {
+    // Same as test_row_marks_a_dirty_src_tree, but the untracked change is
+    // to Cargo.toml alone (no src/): B12's pathspec is `-- src Cargo.toml
+    // Cargo.lock`, and narrowing it to `-- src` alone still passes every
+    // other test, so this is the only assertion that exercises the
+    // Cargo.toml/Cargo.lock half of that pathspec.
+    let dir = tempfile::tempdir()?;
+    let repo = dir.path();
+    let run_git = |args: &[&str]| -> anyhow::Result<Output> {
+        Ok(Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()?)
+    };
+    run_git(&["init"])?;
+    run_git(&[
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "x",
+    ])?;
+
+    std::fs::write(repo.join("Cargo.toml"), "")?;
+
+    let output = run_sourced(&format!("REPO_ROOT='{}'; date_cell", repo.display()))?;
+    assert!(
+        output.status.success(),
+        "date_cell failed on an untracked Cargo.toml-only tree: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.trim_end().ends_with("+dirty)"),
+        "expected an untracked Cargo.toml to mark the row +dirty, got: {stdout}"
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
 fn test_date_cell_fails_outside_a_git_repo() -> anyhow::Result<()> {
     // A REPO_ROOT that is not inside any git repository: `git rev-parse
     // HEAD` and `git status --porcelain` both fail there. Command
