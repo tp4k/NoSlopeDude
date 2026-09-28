@@ -768,4 +768,37 @@ mod tests {
             "an observed exec bit set makes an untracked entry Executable too"
         );
     }
+
+    /// Kills the `Some(original_kind)` -> `None` mutant at `refresh_from_disk`'s
+    /// `worktree_file_kind` call: on a Unix host `observed_exec_bit(metadata)`
+    /// is always `Some`, so no test reached the `None` arm through the real
+    /// classifier. Driving the bit in as a parameter makes `None` reachable
+    /// from any host.
+    #[test]
+    fn test_refresh_from_disk_keeps_the_tracked_kind_when_the_bit_is_unobservable() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file_path = dir.path().join("f");
+        fs::write(&file_path, b"content").expect("write file");
+        let metadata = fs::symlink_metadata(&file_path).expect("symlink_metadata");
+        let path = RepoPath::from_bytes(b"f".to_vec());
+
+        let refreshed = refresh_from_disk(&path, &metadata, None, EntryKind::Executable, None)
+            .expect("refresh_from_disk")
+            .expect("entry still present");
+        assert_eq!(
+            refreshed.kind,
+            EntryKind::Executable,
+            "an unobservable exec bit (None) must keep the tracked Executable kind"
+        );
+
+        let refreshed =
+            refresh_from_disk(&path, &metadata, Some(false), EntryKind::Executable, None)
+                .expect("refresh_from_disk")
+                .expect("entry still present");
+        assert_eq!(
+            refreshed.kind,
+            EntryKind::Regular,
+            "an observed exec bit of false decides Regular regardless of the tracked kind"
+        );
+    }
 }
