@@ -337,17 +337,7 @@ pub fn diff_commit_to_worktree(
                 // filter (`diff_tform.c`) excludes a symlink from ever being a
                 // rename source/target by content anyway, so hashing it here
                 // (never writing it, even in Phase 2) is enough either way.
-                let target = worktree.link_target(repo, entry)?.ok_or_else(|| {
-                    GitError::new(
-                        CODE_SNAPSHOT_UNAVAILABLE,
-                        format!(
-                            "worktree symlink entry {} unexpectedly has no target bytes",
-                            entry.path.render()
-                        ),
-                    )
-                })?;
-                let oid = Oid::hash_object(ObjectType::Blob, &target)
-                    .map_err(|err| wrap_git_error("cannot hash a symlink target", &err))?;
+                let oid = worktree_symlink_oid(repo, worktree, entry)?;
                 insert_index_entry(&mut index, &entry.path, MODE_SYMLINK, entry.size, oid)?;
             }
             EntryKind::Regular | EntryKind::Executable => {
@@ -556,6 +546,27 @@ pub(super) fn worktree_blob_oid(
                 .map_err(|err| wrap_git_error("cannot hash an over-ceiling worktree file", &err))
         }
     }
+}
+
+/// A worktree symlink entry's real object id (A8): hashes its on-disk
+/// target bytes as a blob, with no ODB write (D2) — the shared body behind
+/// both `diff_commit_to_worktree`'s Phase 1 and `SnapshotId::of_worktree`.
+pub(super) fn worktree_symlink_oid(
+    repo: &Repository,
+    worktree: &WorktreeSnapshot,
+    entry: &Entry,
+) -> Result<Oid, GitError> {
+    let target = worktree.link_target(repo, entry)?.ok_or_else(|| {
+        GitError::new(
+            CODE_SNAPSHOT_UNAVAILABLE,
+            format!(
+                "worktree symlink entry {} unexpectedly has no target bytes",
+                entry.path.render()
+            ),
+        )
+    })?;
+    Oid::hash_object(ObjectType::Blob, &target)
+        .map_err(|err| wrap_git_error("cannot hash a symlink target", &err))
 }
 
 /// A complete mapping between a base and a candidate byte buffer (D11:

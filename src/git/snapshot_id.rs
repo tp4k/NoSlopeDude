@@ -9,15 +9,15 @@
 
 use std::path::Path;
 
-use git2::{ObjectType, Oid, Repository};
+use git2::{Oid, Repository};
 
 use crate::hashing::Digest;
 
-use super::diff::worktree_blob_oid;
+use super::diff::{worktree_blob_oid, worktree_symlink_oid};
 use super::snapshot::{
     worktree_dir, CommitSnapshot, Entry, EntryKind, IndexSnapshot, WorktreeSnapshot,
 };
-use super::{wrap_git_error, GitError, CODE_SNAPSHOT_UNAVAILABLE};
+use super::{GitError, CODE_SNAPSHOT_UNAVAILABLE};
 
 /// `Digest`'s domain separator for this module (do-not-reuse:
 /// `src/profile.rs::FINGERPRINT_FAMILY_PREFIX` is the measurement-profile
@@ -122,20 +122,7 @@ fn worktree_entry_oid(
         EntryKind::Regular | EntryKind::Executable => {
             Ok(Some(worktree_blob_oid(repo, workdir, snapshot, entry)?))
         }
-        EntryKind::Symlink => {
-            let target = snapshot.link_target(repo, entry)?.ok_or_else(|| {
-                GitError::new(
-                    CODE_SNAPSHOT_UNAVAILABLE,
-                    format!(
-                        "worktree symlink entry {} unexpectedly has no target bytes",
-                        entry.path.render()
-                    ),
-                )
-            })?;
-            let oid = Oid::hash_object(ObjectType::Blob, &target)
-                .map_err(|err| wrap_git_error("cannot hash a symlink target", &err))?;
-            Ok(Some(oid))
-        }
+        EntryKind::Symlink => Ok(Some(worktree_symlink_oid(repo, snapshot, entry)?)),
         EntryKind::Submodule => {
             let oid = entry.oid.ok_or_else(|| {
                 GitError::new(
