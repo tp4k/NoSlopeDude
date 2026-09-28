@@ -917,6 +917,22 @@ class A {
 /// whole `CallableIdentity`s) must differ. Repeated with a JS named-vs-
 /// anonymous enclosing function, since an anonymous owner segment carries no
 /// name at all (`None`), the other case this digest must still separate.
+///
+/// Round 2 triage row 1: also repeated with `X.Y.f` vs `Z.Y.f` -- the
+/// *outer* ancestor differs (`X` vs `Z`) while the inner segment (`Y`) is
+/// identical, so this fails under the mutant that drops
+/// `digest.push(&parent_digest.0.to_le_bytes())` from `hash_owner_entry`:
+/// without that fold, `Y`'s own digest depends only on its own kind and
+/// name, ignoring which class it is nested in, and `X.Y.f`/`Z.Y.f` would
+/// collide.
+///
+/// Round 2 triage row 2: also repeated with a TS `namespace N { function f()
+/// {} }` vs a `function N() { function f() {} }` -- same owner name (`N`)
+/// and same inner callable, differing only in the owner's `OwnerKind`
+/// (`Namespace` vs `Callable`). This fails under the mutant that drops
+/// `digest.push(&[owner_kind_tag(segment.kind)])`: without that tag, an
+/// owner's digest depends only on its name, ignoring its kind, and the two
+/// `N`-owners would collide.
 #[test]
 fn test_owner_identity_distinguishes_chains_that_differ_only_in_one_ancestor() {
     let java_source = "\
@@ -972,6 +988,89 @@ function named() {
         "a named vs anonymous enclosing function must still give distinct digests"
     );
     assert_ne!(named_identity, anonymous_identity);
+
+    // Round 2 triage row 1: differ only in the outer ancestor (`X` vs `Z`),
+    // the inner segment (`Y`) identical in name and kind.
+    let xy_zy_source = "\
+class X {
+    class Y {
+        void f() {
+            System.out.println(\"y\");
+        }
+    }
+}
+class Z {
+    class Y {
+        void f() {
+            System.out.println(\"y\");
+        }
+    }
+}
+";
+    let ir_file = lower_java(xy_zy_source);
+    let x_y_f = callable_at_line(&ir_file, 3);
+    let z_y_f = callable_at_line(&ir_file, 10);
+    assert_eq!(
+        identity::owner_chain(&ir_file, x_y_f.owner),
+        vec![owner_named_type("X"), owner_named_type("Y")]
+    );
+    assert_eq!(
+        identity::owner_chain(&ir_file, z_y_f.owner),
+        vec![owner_named_type("Z"), owner_named_type("Y")]
+    );
+    let x_y_identity = identity::callable_identity(&ir_file, x_y_f);
+    let z_y_identity = identity::callable_identity(&ir_file, z_y_f);
+    assert_eq!(x_y_identity.kind, z_y_identity.kind);
+    assert_eq!(x_y_identity.name, z_y_identity.name);
+    assert_eq!(x_y_identity.signature, z_y_identity.signature);
+    assert_ne!(
+        x_y_identity.owner_digest, z_y_identity.owner_digest,
+        "chains differ only in the outer ancestor (X vs Z), digests must still differ"
+    );
+    assert_ne!(x_y_identity, z_y_identity);
+
+    // Round 2 triage row 2: same owner name (`N`), differing only in
+    // `OwnerKind` (`Namespace` vs `Callable`).
+    let namespace_source = "\
+namespace N {
+    function f() {
+    }
+}
+";
+    let namespace_ir = lower_ts(namespace_source);
+    let namespace_f = callable_at_line(&namespace_ir, 2);
+    assert_eq!(
+        identity::owner_chain(&namespace_ir, namespace_f.owner),
+        vec![owner_namespace("N")]
+    );
+
+    let function_owner_source = "\
+function N() {
+    function f() {
+    }
+}
+";
+    let function_owner_ir = lower_ts(function_owner_source);
+    let function_owner_f = callable_at_line(&function_owner_ir, 2);
+    assert_eq!(
+        identity::owner_chain(&function_owner_ir, function_owner_f.owner),
+        vec![owner_callable("N")]
+    );
+
+    let namespace_identity = identity::callable_identity(&namespace_ir, namespace_f);
+    let function_owner_identity =
+        identity::callable_identity(&function_owner_ir, function_owner_f);
+    assert_eq!(namespace_identity.kind, function_owner_identity.kind);
+    assert_eq!(namespace_identity.name, function_owner_identity.name);
+    assert_eq!(
+        namespace_identity.signature,
+        function_owner_identity.signature
+    );
+    assert_ne!(
+        namespace_identity.owner_digest, function_owner_identity.owner_digest,
+        "a namespace-owner and a function-owner named the same must still give distinct digests"
+    );
+    assert_ne!(namespace_identity, function_owner_identity);
 }
 
 /// The exact same owner chain, built from two independently lowered files
