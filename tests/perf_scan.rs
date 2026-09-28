@@ -243,5 +243,91 @@ fn test_date_cell_fails_outside_a_git_repo() -> anyhow::Result<()> {
         "expected date_cell to fail outside a git repo, got success with stdout {:?}",
         String::from_utf8_lossy(&output.stdout)
     );
+
+    // The same failure, exercised through the command-substitution shape
+    // `main` actually uses (`date_cell_value="$(date_cell)"`, :182), not
+    // just a direct call: the :135 guard is the one that only matters in
+    // this shape, since a direct call's own exit status already propagates
+    // without it.
+    let sub_output = run_sourced(&format!(
+        "REPO_ROOT='{}'; cell=\"$(date_cell)\"",
+        dir.path().display()
+    ))?;
+    assert!(
+        !sub_output.status.success(),
+        "expected date_cell to fail outside a git repo via command substitution, got success with stdout {:?}",
+        String::from_utf8_lossy(&sub_output.stdout)
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_date_cell_fails_on_an_unborn_head() -> anyhow::Result<()> {
+    // A repo with no commits yet: `git rev-parse HEAD` fails ("unknown
+    // revision or path not in the working tree"), but `git status
+    // --porcelain` still succeeds. Without the :116 `|| return 1` guard,
+    // head_sha_annotation keeps going with an empty/garbage sha instead of
+    // failing closed.
+    let dir = tempfile::tempdir()?;
+    let repo = dir.path();
+    let init = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .arg("init")
+        .output()?;
+    assert!(
+        init.status.success(),
+        "git init failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    let output = run_sourced(&format!("REPO_ROOT='{}'; date_cell", repo.display()))?;
+    assert!(
+        !output.status.success(),
+        "expected date_cell to fail on an unborn HEAD, got success with stdout {:?}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_date_cell_fails_when_git_status_fails() -> anyhow::Result<()> {
+    // A repo with a real commit but a corrupted `.git/index`: `git
+    // rev-parse HEAD` succeeds, but `git status --porcelain` fails
+    // ("index file smaller than expected"). Without the :117 `|| return 1`
+    // guard, head_sha_annotation would print a clean-looking `(nsd@<sha>)`
+    // even though the dirty check never ran.
+    let dir = tempfile::tempdir()?;
+    let repo = dir.path();
+    let run_git = |args: &[&str]| -> anyhow::Result<Output> {
+        Ok(Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()?)
+    };
+    run_git(&["init"])?;
+    run_git(&[
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "x",
+    ])?;
+    std::fs::write(repo.join(".git/index"), "garbage")?;
+
+    let output = run_sourced(&format!("REPO_ROOT='{}'; date_cell", repo.display()))?;
+    assert!(
+        !output.status.success(),
+        "expected date_cell to fail when git status fails on a corrupt index, got success with stdout {:?}",
+        String::from_utf8_lossy(&output.stdout)
+    );
     Ok(())
 }
