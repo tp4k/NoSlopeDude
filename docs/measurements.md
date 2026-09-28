@@ -448,7 +448,8 @@ this repo (`nsd-scratch/ws10-a` at `eb26b40`, `nsd-scratch/ws10-b` at
 this file; both read the same `$TMPDIR/nsd-perf-fixture`. After one
 discarded warm-up per side, 5 pairs were run alternately (A1 B1 A2 B2 A3
 B3 A4 B4 A5 B5), checking `ps -Ao %cpu,comm -r` for contention before each
-run. The A1/B1 pair was contended: a `tsc` process was observed at 130.8%
+run. Only the B1 reading was retained; the other runs' `ps` readings were
+not recorded. The A1/B1 pair was contended: a `tsc` process was observed at 130.8%
 CPU immediately before B1 (it had appeared only after A1 itself had
 already been measured clean). Per protocol the whole pair was re-run
 rather than dropped; both the contended A1/B1 and the clean re-run are
@@ -469,17 +470,25 @@ regression is a cost difference, not a correctness difference. Per
 task.md Part C ("If a row's measured gain is below the noise floor,
 revert it and record that; don't keep it on faith") and this stream's own
 Decision 11 obligation, C2 fails the accept rule and is reverted forward
-in the next commit rather than kept. The likely mechanism (recorded for
-whoever next picks this up): `KindIds::build` sweeps
-`0..language.node_kind_count()` (on the order of several hundred ids per
-grammar) once per `lower_file` call, i.e. once per scanned file, to track
-only `kind_ids::KIND_NAMES`' 59 names — on a fixture with many
-small-to-medium files, that per-file sweep-and-hash-map-build cost
-apparently outweighs what it saves over the plain string comparisons it
-replaces; a table cached per `Language` (there are only four: Java,
-JavaScript, TypeScript, Tsx) rather than rebuilt per file might recover
-the intended win, but that is a different design than the one C2 as
-written called for, and is left to `docs/deferred-work.md` rather than
-attempted here. Both scratch worktrees (`nsd-scratch/ws10-a`,
+in the next commit rather than kept. Not measured as the cause:
+`KindIds::build`'s per-file sweep. A release-mode serial `lower_file`
+probe (best of 5, whole perf fixture, 8610 files, 8,034,787 nodes) put
+parent `eb26b40` at 1.319s and `89f2a66` at 5.668s, a +4.35s CPU delta;
+all 8610 `KindIds::build` calls together cost 0.087s (2% of that delta —
+9.3µs per file for Java, 21.3µs for Tsx), so a per-`Language` cache would
+recover at most that 2%. Measured as the cause: the cost is per lookup.
+`KindIds::is` hashes its `&str` name into a `HashMap<&str, Vec<u16>>` on
+every call (34.5–45.8ns, against 10.5–15.3ns for the
+`node_kind_for_id(id) == Some(lit)` compare it replaced — 2.4–3.3× slower
+per call), and each node tries several such calls before matching.
+`89f2a66` was therefore not the best in-spec C2: a const-slot/id-indexed
+variant that resolves each name to an integer slot once at build time,
+leaving only an index or integer compare on the hot path, measured
+1.210s/1.205s serial (about 8% faster than parent's 1.319s). Lowering is
+about 4% of scan wall clock (about 0.25s of about 5.8s), so even that
+best in-spec form saves only about 0.04s of wall — far below this
+window's A-range spread (5.56s–5.96s). C2 is therefore recorded as not
+clearing Decision 11 in any in-spec form, not only in the `89f2a66`
+implementation measured above. Both scratch worktrees (`nsd-scratch/ws10-a`,
 `nsd-scratch/ws10-b`) were removed via `git worktree remove --force`
 after the last pair.
