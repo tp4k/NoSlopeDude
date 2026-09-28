@@ -80,6 +80,7 @@ extract_skipped_block() {
       in_str = 0
       for (i = 1; i <= length(s); i++) {
         c = substr(s, i, 1)
+        if (in_str && c == "\\") { i++; continue }
         if (c == "\"") { in_str = !in_str; continue }
         if (in_str) { continue }
         out = out c
