@@ -117,12 +117,13 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
     let mut blocks = Vec::new();
     let mut callable_dirty = Vec::new();
     let mut block_dirty = Vec::new();
-    // M1-7 round 2: owners are never filtered by the salvage exclusion pass
-    // below, unlike `callables`/`blocks` -- a kept callable's `owner` index
-    // must stay valid even if the node that contributed that owner entry
-    // sits inside since-excluded damage elsewhere, so this table is never
-    // reordered or pruned once built.
     let mut owners = Vec::new();
+    // A7 (WS-4): index-aligned with `owners`, this exact node's own span --
+    // internal only, so the pruning below can test containment inside a
+    // redaction target the same way `cascade_exclusions` already does for
+    // `callables`/`blocks`. `OwnerEntry` itself carries no span (its public
+    // shape is unchanged), so this table never leaves this function.
+    let mut owner_spans = Vec::new();
     let mut tables = IrTables {
         damage: &mut damage,
         callables: &mut callables,
@@ -130,6 +131,7 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
         callable_dirty: &mut callable_dirty,
         block_dirty: &mut block_dirty,
         owners: &mut owners,
+        owner_spans: &mut owner_spans,
     };
     let root = build_ir(
         file.tree.root_node(),
@@ -138,8 +140,14 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
         &mut tables,
     );
 
-    let exclusions =
-        cascade_exclusions(&damage, &callables, &callable_dirty, &blocks, &block_dirty);
+    let exclusions = cascade_exclusions(
+        &damage,
+        &callables,
+        &callable_dirty,
+        &blocks,
+        &block_dirty,
+        &owner_spans,
+    );
 
     let mut redact_targets: HashSet<Span> = damage.iter().map(|entry| entry.span).collect();
     for (index, callable) in callables.iter().enumerate() {
@@ -166,6 +174,34 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
         }
     }
 
+    // A7 (WS-4): compact `owners` the same way, dropping every entry whose
+    // own contributing node was inside a redaction target (`exclusions.
+    // owners[index]`, computed by the same cascade sweep above), then remap
+    // both `OwnerEntry::parent` and the surviving callables' own `owner`
+    // through the old-to-new index map -- a kept callable's chain never
+    // points into a redacted region (cascade already excludes it there too),
+    // so every remap lookup below always resolves.
+    let mut owner_remap: Vec<Option<u32>> = Vec::with_capacity(owners.len());
+    let mut kept_owners = Vec::with_capacity(owners.len());
+    for (index, owner) in owners.into_iter().enumerate() {
+        if exclusions.owners[index] {
+            owner_remap.push(None);
+            continue;
+        }
+        owner_remap.push(Some(kept_owners.len() as u32));
+        kept_owners.push(owner);
+    }
+    for owner in &mut kept_owners {
+        owner.parent = owner
+            .parent
+            .and_then(|old_index| owner_remap[old_index as usize]);
+    }
+    for callable in &mut kept_callables {
+        callable.owner = callable
+            .owner
+            .and_then(|old_index| owner_remap[old_index as usize]);
+    }
+
     let root = prune_damage(root, &redact_targets);
 
     IrFile {
@@ -175,17 +211,25 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
         damage,
         callables: kept_callables,
         blocks: kept_blocks,
-        owners,
+        owners: kept_owners,
     }
 }
 
-/// One (callable, block) entity table's final inclusion decision, aligned
-/// by index with the `callables`/`blocks` slices `cascade_exclusions` was
-/// given -- `true` means excluded (fail-closed: dropped from the IR's side
-/// tables and redacted from the tree).
+/// One (callable, block, owner) entity table's final inclusion decision,
+/// aligned by index with the `callables`/`blocks`/`owners` slices
+/// `cascade_exclusions` was given -- `true` means excluded (fail-closed:
+/// dropped from the IR's side tables and, for `callables`/`blocks`, redacted
+/// from the tree too). A7 (WS-4): `owners` carries no `own_dirty` bit of its
+/// own (an owner-kind node's own damage-ness is never independently tracked,
+/// unlike `callable_dirty`/`block_dirty`) -- an owner entry is excluded
+/// purely by containment inside a redaction target (`ancestor_excluded`
+/// below), the same "lies inside a bare damage span, or an excluded
+/// callable's or block's span" test `lower_file`'s own doc comment
+/// describes.
 struct Exclusions {
     callables: Vec<bool>,
     blocks: Vec<bool>,
+    owners: Vec<bool>,
 }
 
 /// Which entity table (and index into it) one sweep entry refers back to.
@@ -193,6 +237,7 @@ struct Exclusions {
 enum EntityRef {
     Callable(usize),
     Block(usize),
+    Owner(usize),
 }
 
 /// The cascade sweep `lower_file`'s own doc comment describes: callables,
@@ -245,9 +290,10 @@ fn cascade_exclusions(
     callable_dirty: &[bool],
     blocks: &[IrBlock],
     block_dirty: &[bool],
+    owners: &[Span],
 ) -> Exclusions {
     let mut entries: Vec<(Span, bool, Option<EntityRef>)> =
-        Vec::with_capacity(damage.len() + callables.len() + blocks.len());
+        Vec::with_capacity(damage.len() + callables.len() + blocks.len() + owners.len());
     for entry in damage {
         entries.push((entry.span, true, None));
     }
@@ -265,6 +311,17 @@ fn cascade_exclusions(
             Some(EntityRef::Block(index)),
         ));
     }
+    // A7 (WS-4): an owner entry carries no `own_dirty` of its own (`false`
+    // unconditionally) -- it is excluded purely via `ancestor_excluded`
+    // below, which is why owner entries are pushed last: when an owner
+    // shares its callable's exact span (the common case, an owner-kind node
+    // that is itself the callable), the callable's own entry above must be
+    // swept first so its frame is still open on `open_ancestors` when this
+    // owner entry is processed, letting `ancestor_excluded` see the
+    // callable's own exclusion rather than a still-default `false`.
+    for (index, span) in owners.iter().enumerate() {
+        entries.push((*span, false, Some(EntityRef::Owner(index))));
+    }
     // Row-1's security fix depends on `sort_by`'s stability: for two
     // entries with an identical span, it preserves push order, and damage
     // entries are pushed first (above), so a damage entry always sorts
@@ -280,6 +337,7 @@ fn cascade_exclusions(
 
     let mut callable_excluded = vec![false; callables.len()];
     let mut block_excluded = vec![false; blocks.len()];
+    let mut owner_excluded = vec![false; owners.len()];
     // One entry per still-open ancestor entity: its own `end_byte` (so the
     // sweep knows when it has moved past it) and whether it is itself
     // excluded.
@@ -298,6 +356,7 @@ fn cascade_exclusions(
             match entity_ref {
                 EntityRef::Callable(index) => callable_excluded[index] = excluded,
                 EntityRef::Block(index) => block_excluded[index] = excluded,
+                EntityRef::Owner(index) => owner_excluded[index] = excluded,
             }
         }
         open_ancestors.push((span.end_byte, excluded));
@@ -306,6 +365,7 @@ fn cascade_exclusions(
     Exclusions {
         callables: callable_excluded,
         blocks: block_excluded,
+        owners: owner_excluded,
     }
 }
 
@@ -603,6 +663,11 @@ struct IrTables<'a> {
     /// (below) indexes into, one `OwnerEntry` push per owner-kind node
     /// regardless of how many callables sit underneath it.
     owners: &'a mut Vec<OwnerEntry>,
+    /// A7 (WS-4): index-aligned with `owners`, this exact node's own span --
+    /// internal only (no `span` field is added to the public `OwnerEntry`),
+    /// so `lower_file` can sweep it through `cascade_exclusions` the same
+    /// way it already sweeps `callables`/`blocks`.
+    owner_spans: &'a mut Vec<Span>,
 }
 
 /// Builds `root`'s whole `IrNode` tree in one iterative pass: a single
@@ -689,6 +754,7 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
                 segment,
                 parent: owner_stack.last().copied(),
             });
+            tables.owner_spans.push(span);
             owner_stack.push((tables.owners.len() - 1) as u32);
         }
         let in_catch_body = classification.is_catch_body_root || parent_in_catch_body;
@@ -923,6 +989,7 @@ mod tests {
             let mut callable_dirty = Vec::new();
             let mut block_dirty = Vec::new();
             let mut owners = Vec::new();
+            let mut owner_spans = Vec::new();
             let mut tables = IrTables {
                 damage: &mut damage,
                 callables: &mut callables,
@@ -930,6 +997,7 @@ mod tests {
                 callable_dirty: &mut callable_dirty,
                 block_dirty: &mut block_dirty,
                 owners: &mut owners,
+                owner_spans: &mut owner_spans,
             };
             build_ir(tree.root_node(), language, &source, &mut tables);
 
@@ -1009,6 +1077,7 @@ mod tests {
             let mut callable_dirty = Vec::new();
             let mut block_dirty = Vec::new();
             let mut owners = Vec::new();
+            let mut owner_spans = Vec::new();
             let mut tables = IrTables {
                 damage: &mut damage,
                 callables: &mut callables,
@@ -1016,6 +1085,7 @@ mod tests {
                 callable_dirty: &mut callable_dirty,
                 block_dirty: &mut block_dirty,
                 owners: &mut owners,
+                owner_spans: &mut owner_spans,
             };
             let root = build_ir(tree.root_node(), language, &source, &mut tables);
 
