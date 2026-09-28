@@ -726,3 +726,27 @@ fn test_ambiguity_lists_are_sorted_by_path_and_index() {
         vec![callable_ref("A.java", 0), callable_ref("Z.java", 0)]
     );
 }
+
+// ---------------------------------------------------------------------
+// A6: `match_callables` pins its own "paths are unique per side" assumption
+// with a `debug_assert!` on the `HashMap` insert result.
+// ---------------------------------------------------------------------
+
+/// Two `FileCallables` entries at the same path on the base side trip the
+/// `debug_assert!` on `base_by_path`'s own `insert` call -- only reachable
+/// in a debug build (`debug_assert!` compiles away entirely in release).
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "match_callables assumes paths are unique per side")]
+fn test_duplicate_path_on_one_side_panics_in_debug() {
+    let base = vec![
+        synth_file("A.java", &[(synth_identity("a", &[]), "blake3:a")]),
+        synth_file("A.java", &[(synth_identity("b", &[]), "blake3:b")]),
+    ];
+    let candidate = vec![synth_file(
+        "A.java",
+        &[(synth_identity("a", &[]), "blake3:a")],
+    )];
+
+    let _ = match_callables(&base, &candidate, &[]);
+}
