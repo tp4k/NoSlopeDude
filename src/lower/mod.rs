@@ -13,6 +13,7 @@
 
 mod java;
 mod jsts;
+pub(crate) mod kind_ids;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -31,6 +32,8 @@ use crate::ir::{
 };
 use crate::model::LanguageFamily;
 use crate::parse::ParsedFile;
+#[cfg(test)]
+use kind_ids::KindIds;
 
 /// M0c's fingerprint keys on this alongside `ir::IR_VERSION`; bump it
 /// whenever the Java lowering's classification changes what an `IrNode`
@@ -1290,6 +1293,44 @@ mod tests {
                     is_clear_of_damage(node.span, &ir_file.damage),
                     "expected every executable/clone-candidate node to be damage-clear: {:?}",
                     node.span
+                );
+            }
+        }
+    }
+
+    /// C2 (task.md): `KindIds::build` must be alias-aware -- for every
+    /// grammar, every numeric id whose own `node_kind_for_id` resolves to one
+    /// of `kind_ids::KIND_NAMES`' literals must be present in that name's own
+    /// `KindIds::ids` set, not just the single id
+    /// `Language::id_for_node_kind` would have returned. Sweeps
+    /// `0..node_kind_count()` directly (the same sweep `KindIds::build` does
+    /// internally) rather than asserting a fixed id count or a single sample
+    /// id per name, so a regression to `id_for_node_kind` -- which silently
+    /// drops every alias but the first for a shared name -- is caught for
+    /// whichever name(s) happen to have more than one id in a given grammar,
+    /// without this test needing to know in advance which those are.
+    #[test]
+    fn kind_id_tables_cover_every_alias_of_each_kind() {
+        for grammar in [
+            Grammar::Java,
+            Grammar::JavaScript,
+            Grammar::TypeScript,
+            Grammar::Tsx,
+        ] {
+            let language = tree_sitter_language(grammar);
+            let ids = KindIds::build(&language, kind_ids::KIND_NAMES, kind_ids::FIELD_NAMES);
+            let count = language.node_kind_count() as u16;
+            for id in 0..count {
+                let Some(name) = language.node_kind_for_id(id) else {
+                    continue;
+                };
+                if !kind_ids::KIND_NAMES.contains(&name) {
+                    continue;
+                }
+                assert!(
+                    ids.ids(name).contains(&id),
+                    "{grammar:?}: id {id} (alias of {name:?}) missing from KindIds::ids({name:?}) = {:?}",
+                    ids.ids(name)
                 );
             }
         }
