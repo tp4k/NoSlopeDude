@@ -133,6 +133,28 @@ fn test_html_escapes_source_excerpts_and_paths() {
 }
 
 #[test]
+fn test_exclude_glob_echo_is_html_escaped() {
+    // B2: the --exclude glob is echoed verbatim into the scan-settings list
+    // (html.rs:83) through the same escape_html helper as everything else
+    // the scanned repository can influence, but it had no dedicated
+    // mutation test of its own -- a mutant turning escape_html(glob) into
+    // a plain glob at that one call site survived the suite.
+    let (_dir, output) = run_scan(&fixture_root(), |settings| {
+        settings.exclude = vec!["<script>x</script>/**".to_string()];
+    });
+    let html = written_html(&output);
+
+    assert!(
+        !html.contains("<script>x</script>/**"),
+        "the raw --exclude glob leaked unescaped into the HTML: {html}"
+    );
+    assert!(
+        html.contains("&lt;script&gt;x&lt;/script&gt;/**"),
+        "the --exclude glob should be escaped wherever it is echoed: {html}"
+    );
+}
+
+#[test]
 fn test_html_title_and_heading_name_nsd() {
     let (_dir, output) = run_scan(&fixture_root(), |_| {});
     let html = written_html(&output);
