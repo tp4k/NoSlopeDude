@@ -38,11 +38,7 @@ fn run_git(dir: &Path, args: &[&str]) {
         .args(args)
         .status()
         .expect("spawn git");
-    assert!(
-        status.success(),
-        "git {args:?} failed in {}",
-        dir.display()
-    );
+    assert!(status.success(), "git {args:?} failed in {}", dir.display());
 }
 
 fn fixture_root() -> PathBuf {
