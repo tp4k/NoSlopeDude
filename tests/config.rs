@@ -411,3 +411,71 @@ fn min_clone_lines_positive_value_exposed() {
         .expect("a valid config");
     assert_eq!(config.measurement.min_clone_lines, 25);
 }
+
+/// A1: runs `f` on a detached, `'static` thread and waits at most 5s for its
+/// result (same pattern as `tests/git_diff.rs:1122-1136`'s `with_timeout`,
+/// duplicated here since each `tests/*.rs` file is its own compilation
+/// unit). A hang inside `f` (the defect this guards against: `load_trusted`
+/// calling `File::open` on a FIFO with no writer) leaves the thread running
+/// forever, but the test process still exits: nothing here ever joins it.
+#[cfg(unix)]
+fn with_timeout<T: Send + 'static>(label: &str, f: impl FnOnce() -> T + Send + 'static) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+        Ok(value) => value,
+        Err(_) => panic!("{label} did not complete within the 5s guard; it is likely blocked"),
+    }
+}
+
+/// A1: a trusted `--config` path naming a FIFO with no writer must not
+/// block `File::open` — it must return `NSD-C102` promptly instead.
+#[test]
+#[cfg(unix)]
+fn test_load_trusted_fifo_is_c102_without_blocking() {
+    let dir = tempfile::TempDir::new().expect("create a temp dir for the fifo case");
+    let fifo_path = dir.path().join("trusted.yml");
+    let status = std::process::Command::new("/usr/bin/mkfifo")
+        .arg(&fifo_path)
+        .status()
+        .expect("spawn mkfifo for the trusted config path");
+    assert!(status.success(), "mkfifo must succeed");
+
+    let result = with_timeout("load_trusted on a FIFO with no writer", move || {
+        nsd::config::load_trusted(&fifo_path)
+    });
+    let err = result.expect_err("a FIFO trusted config path must not load");
+    assert_eq!(err.code(), CODE_INVALID_CONFIG);
+}
+
+/// A1: a trusted `--config` path naming a directory is `NSD-C102`, the same
+/// as a missing or over-ceiling one.
+#[test]
+fn test_load_trusted_directory_is_c102() {
+    let dir = tempfile::TempDir::new().expect("create a temp dir for the directory case");
+    let err = nsd::config::load_trusted(dir.path()).expect_err("a directory must not load");
+    assert_eq!(err.code(), CODE_INVALID_CONFIG);
+}
+
+/// A1: unlike a repository entry's never-follow `symlink_metadata` check, a
+/// trusted `--config` path is operator-chosen, so a symlink to a regular
+/// file must still load.
+#[test]
+#[cfg(unix)]
+fn test_load_trusted_follows_a_symlink_to_a_regular_file() {
+    let dir = tempfile::TempDir::new().expect("create a temp dir for the symlink case");
+    let real_path = dir.path().join("real.yml");
+    std::fs::write(
+        &real_path,
+        b"version: 1\nmeasurement:\n  min_clone_lines: 42\n",
+    )
+    .expect("write the real trusted config");
+    let link_path = dir.path().join("trusted.yml");
+    std::os::unix::fs::symlink(&real_path, &link_path).expect("create the symlink");
+
+    let config = nsd::config::load_trusted(&link_path)
+        .expect("a symlink to a regular trusted config file must still load");
+    assert_eq!(config.measurement.min_clone_lines, 42);
+}
