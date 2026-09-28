@@ -702,3 +702,144 @@ fn test_unreadable_subdirectory_skip_marks_incomplete() {
         "an unreadable-subdirectory skip should still mark the report incomplete"
     );
 }
+
+/// B5: the block-shaped twin of
+/// `test_a_clean_callable_contained_in_a_bare_damage_span_is_not_measured`
+/// (line 420 above), exercising the same `if let Some(entity_ref)` cascade
+/// arm's `EntityRef::Block` branch rather than its `EntityRef::Callable` one.
+/// `beta`'s malformed body dissolves tree-sitter's recovery into one
+/// top-level `ERROR` wrapping the whole file (`safe`, `beta`'s own loose
+/// tokens, and a clean, otherwise well-formed standalone `{ const marker =
+/// 4242; }` block all become direct children of that one `ERROR` node, with
+/// no enclosing callable/block entity between the block and the bare damage
+/// span) -- the same "entity nested directly in bare damage, no entity
+/// ancestor between them" shape the sibling test's own doc comment
+/// describes, this time landing on a block instead of a callable.
+#[test]
+fn test_a_clean_block_contained_in_a_bare_damage_span_is_excluded() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        dir.path().join("block.ts"),
+        "export function safe(x) {\n  return x;\n}\n\nfunction beta() {\n  { const marker = 4242; }\n  {{{};\n",
+    )
+    .expect("write block.ts");
+
+    let (_output_dir, output) = run_scan(dir.path(), |_| {});
+
+    assert!(
+        !output
+            .metrics
+            .syntax_blocks
+            .iter()
+            .any(|block| block.relative_path == Path::new("block.ts") && block.start_line == 6),
+        "expected the clean `{{ const marker = 4242; }}` block, nested directly inside the \
+         file-wide bare damage span with no enclosing callable/block entity between them, to be \
+         excluded: {:?}",
+        output.metrics.syntax_blocks
+    );
+    // Positive anchor: the file was scanned and salvaged, not silently
+    // dropped whole -- see the sibling test's own comment on the same
+    // pattern (L43).
+    assert!(
+        output
+            .metrics
+            .file_scan_summaries
+            .iter()
+            .any(|summary| summary.relative_path == Path::new("block.ts")),
+        "expected block.ts to have been scanned: {:?}",
+        output.metrics.file_scan_summaries
+    );
+}
+
+/// A7: an owner entry contributed by a node inside since-excluded damage
+/// must not survive salvage pruning, and a surviving callable's own owner
+/// chain must remap to the compacted table correctly rather than pointing
+/// at a stale (now-removed) index. `Outer` (`class`) owns `broken` (a
+/// damaged method whose own signature is missing its closing `)`) and
+/// `Kept` (a clean nested class); `broken` in turn owns a nested lambda
+/// `clean`. `broken`/`clean` are both excluded by cascade (the same
+/// mechanism `test_a_clean_callable_nested_inside_a_damaged_outer_callable_
+/// is_not_measured` already covers for `IrFile::callables`), so their own
+/// owner-table entries -- pushed by the exact same declaration nodes --
+/// must also be dropped. `Kept`'s own owner entry is pushed *after*
+/// `broken`'s and `clean`'s in document order, so once those two are
+/// pruned, `Kept` (and `keep`'s own owner-segment entry after it) shifts
+/// down by two positions in the compacted table: any remap bug that copies
+/// `OwnerEntry::parent`/`IrCallable::owner` verbatim rather than through
+/// the old-to-new index map would point `keep`'s owner at the wrong entry
+/// (or panic on an out-of-bounds index) here where a byte-for-byte-safe
+/// file (no exclusions at all) would never expose it.
+#[test]
+fn test_salvage_drops_owner_entries_of_excluded_callables() {
+    use nsd::ir::OwnerKind;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        dir.path().join("Owners.java"),
+        "class Outer {\n    void broken(int a {\n        Runnable clean = () -> {\n            System.out.println(\"hi\");\n        };\n    }\n    class Kept {\n        void keep() {}\n    }\n}\n",
+    )
+    .expect("write Owners.java");
+
+    let discovered = nsd::discover::discover(
+        dir.path(),
+        &nsd::model::ScanSettings {
+            output: tempfile::tempdir().expect("tempdir").path().to_path_buf(),
+            include_tests: true,
+            exclude: Vec::new(),
+            min_clone_lines: DEFAULT_MIN_CLONE_LINES,
+        },
+    )
+    .expect("discover");
+    let (parsed_files, _failures) = nsd::parse::parse_all(dir.path(), &discovered.discovered);
+    let parsed = parsed_files
+        .iter()
+        .find(|file| file.relative_path == Path::new("Owners.java"))
+        .expect("Owners.java should have parsed");
+    let ir_file = nsd::lower::lower_file(parsed);
+
+    assert!(
+        !ir_file
+            .owners
+            .iter()
+            .any(|entry| entry.segment.name.as_deref() == Some("broken")),
+        "expected no owner entry contributed from inside the excluded `broken`: {:?}",
+        ir_file.owners
+    );
+    assert!(
+        !ir_file
+            .owners
+            .iter()
+            .any(|entry| entry.segment.name.as_deref() == Some("clean")),
+        "expected no owner entry contributed from inside the excluded `clean`: {:?}",
+        ir_file.owners
+    );
+
+    let keep = ir_file
+        .callables
+        .iter()
+        .find(|callable| callable.name == "keep")
+        .unwrap_or_else(|| panic!("expected `keep` to survive: {:?}", ir_file.callables));
+
+    // Walk `keep`'s own owner chain through `ir_file.owners`, exactly the
+    // way `identity::callable_identity` would, and compare it to the chain
+    // an unpruned file would have produced: `Kept`, then `Outer`.
+    let mut chain = Vec::new();
+    let mut cursor = keep.owner;
+    while let Some(index) = cursor {
+        let entry = ir_file
+            .owners
+            .get(index as usize)
+            .unwrap_or_else(|| panic!("owner index {index} out of bounds: {:?}", ir_file.owners));
+        chain.push((entry.segment.kind, entry.segment.name.clone()));
+        cursor = entry.parent;
+    }
+    assert_eq!(
+        chain,
+        vec![
+            (OwnerKind::NamedType, Some("Kept".to_string())),
+            (OwnerKind::NamedType, Some("Outer".to_string())),
+        ],
+        "expected `keep`'s remapped owner chain to be identical to the unpruned walk: {:?}",
+        ir_file.owners
+    );
+}
