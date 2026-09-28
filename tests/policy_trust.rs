@@ -497,3 +497,133 @@ fn test_unborn_repository_uses_builtin_policy() {
         }]
     );
 }
+
+/// A4 (Codex's scenario): under a trusted config, an unreadable
+/// (over-ceiling) base must not swallow the candidate diff — its tree
+/// entry still carries a blob oid, so the diff falls back to comparing
+/// object ids, and a changed, invalid candidate still carries both codes.
+#[test]
+fn test_trusted_mode_unreadable_base_and_changed_invalid_candidate_reports_c101_and_c102() {
+    let (_dir, repo) = common::init_repo();
+    common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_REGULAR, oversized_valid_config())],
+    );
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+
+    common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_REGULAR, b"version: 2\n".to_vec())],
+    );
+    let candidate = CommitSnapshot::head_or_empty(&repo).expect("snapshot candidate commit");
+
+    let trusted_dir = tempfile::TempDir::new().expect("create a temp dir for the trusted config");
+    let trusted_path = trusted_dir.path().join("trusted.yml");
+    std::fs::write(&trusted_path, b"version: 1\n").expect("write trusted config");
+
+    let resolution = policy::resolve(
+        &repo,
+        Some(trusted_path.as_path()),
+        &base,
+        Candidate::Commit(&candidate),
+    )
+    .expect("a trusted config resolves even when the base is unreadable and the candidate changed");
+
+    assert_eq!(resolution.source, ConfigSource::Trusted);
+    assert_eq!(
+        resolution.diagnostics,
+        vec![
+            Diagnostic {
+                code: CODE_CONFIG_CHANGED
+            },
+            Diagnostic {
+                code: CODE_INVALID_CONFIG
+            },
+        ],
+        "the change must be visible (C101) and the shape failure reported (C102), even though \
+         the base itself could not be read"
+    );
+}
+
+/// A4: the same unreadable-base fallback, but the changed candidate is
+/// shape-valid — only C101 is reported, since only an invalid candidate
+/// also carries C102.
+#[test]
+fn test_trusted_mode_unreadable_base_and_changed_valid_candidate_reports_c101() {
+    let (_dir, repo) = common::init_repo();
+    common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_REGULAR, oversized_valid_config())],
+    );
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+
+    common::commit_entries(
+        &repo,
+        &[(
+            b"nsd.yml".to_vec(),
+            MODE_REGULAR,
+            b"version: 1\nmeasurement:\n  min_clone_lines: 5\n".to_vec(),
+        )],
+    );
+    let candidate = CommitSnapshot::head_or_empty(&repo).expect("snapshot candidate commit");
+
+    let trusted_dir = tempfile::TempDir::new().expect("create a temp dir for the trusted config");
+    let trusted_path = trusted_dir.path().join("trusted.yml");
+    std::fs::write(&trusted_path, b"version: 1\n").expect("write trusted config");
+
+    let resolution = policy::resolve(
+        &repo,
+        Some(trusted_path.as_path()),
+        &base,
+        Candidate::Commit(&candidate),
+    )
+    .expect("a trusted config resolves even when the base is unreadable and the candidate changed");
+
+    assert_eq!(resolution.source, ConfigSource::Trusted);
+    assert_eq!(
+        resolution.diagnostics,
+        vec![Diagnostic {
+            code: CODE_CONFIG_CHANGED
+        }],
+        "a shape-valid changed candidate must not carry C102"
+    );
+}
+
+/// A4: the worktree candidate path, which has no `Entry.oid` of its own
+/// (D2) and so falls back to `Oid::hash_object` over its already-read
+/// bytes, compared against the base's tree-entry oid.
+#[test]
+fn test_trusted_mode_unreadable_base_with_worktree_candidate_reports_the_change() {
+    let (dir, repo) = common::init_repo();
+    let base_oid = common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_REGULAR, oversized_valid_config())],
+    );
+    sync_index_to_commit(&repo, base_oid);
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+
+    std::fs::write(dir.path().join("nsd.yml"), b"version: 1\n")
+        .expect("write a diverging worktree nsd.yml");
+    let worktree_snapshot = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+
+    let trusted_dir = tempfile::TempDir::new().expect("create a temp dir for the trusted config");
+    let trusted_path = trusted_dir.path().join("trusted.yml");
+    std::fs::write(&trusted_path, b"version: 1\n").expect("write trusted config");
+
+    let resolution = policy::resolve(
+        &repo,
+        Some(trusted_path.as_path()),
+        &base,
+        Candidate::Worktree(&worktree_snapshot),
+    )
+    .expect("a trusted config resolves even when the base is unreadable and the worktree candidate changed");
+
+    assert_eq!(resolution.source, ConfigSource::Trusted);
+    assert_eq!(
+        resolution.diagnostics,
+        vec![Diagnostic {
+            code: CODE_CONFIG_CHANGED
+        }],
+        "the worktree candidate's hash_object oid must differ from the base's tree-entry oid"
+    );
+}
