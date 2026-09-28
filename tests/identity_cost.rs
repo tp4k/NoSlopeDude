@@ -100,8 +100,16 @@ fn test_identities_allocation_is_linear_in_owners_on_a_deep_chain() {
     let source = format!("const f = {}0;", "()=>".repeat(DEPTH));
     let parsed = parse_inline(&source, Grammar::TypeScript, LanguageFamily::JsTs);
     let ir_file = lower::lower_file(&parsed);
-    assert_eq!(ir_file.callables.len(), DEPTH, "fixture must have one callable per nesting level");
-    assert_eq!(ir_file.owners.len(), DEPTH, "fixture must have one owner per nesting level");
+    assert_eq!(
+        ir_file.callables.len(),
+        DEPTH,
+        "fixture must have one callable per nesting level"
+    );
+    assert_eq!(
+        ir_file.owners.len(),
+        DEPTH,
+        "fixture must have one owner per nesting level"
+    );
 
     let before = ALLOCATED_BYTES.load(Ordering::SeqCst);
     let identities = identity::identities(&ir_file);

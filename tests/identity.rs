@@ -779,7 +779,10 @@ function f() {
         identity::owner_chain(&ir_file, namespace_f.owner),
         vec![owner_namespace("N")]
     );
-    assert_eq!(identity::owner_chain(&ir_file, top_level_f.owner), Vec::new());
+    assert_eq!(
+        identity::owner_chain(&ir_file, top_level_f.owner),
+        Vec::new()
+    );
     assert_ne!(module_identity, namespace_identity);
     assert_ne!(module_identity, top_level_identity);
     assert_ne!(namespace_identity, top_level_identity);
