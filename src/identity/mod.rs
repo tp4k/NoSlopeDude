@@ -109,13 +109,19 @@ pub struct CallableIdentity {
 /// `name` here is the `ANONYMOUS_NAME` sentinel when `callable.is_anonymous`,
 /// never `callable.name`'s own line-embedding fallback.
 ///
-/// A5: recomputes the whole file's owner-digest table on every call -- fine
-/// for this single-callable convenience API (its only production caller is
-/// `identities()` itself, below, which instead computes the table once and
-/// reuses it per callable in O(1)).
+/// A5 (round 2, triage row 3): costs O(depth), not O(owners) -- walks
+/// `OwnerEntry::parent` from `callable.owner` out to the root and folds each
+/// ancestor's digest in turn (`owner_digest_walk`, below), bit-identical to
+/// `owner_digests(ir_file)`'s own per-entry result for the same owner index,
+/// since both fold root-to-leaf under the same `hash_owner_entry`. A caller
+/// that needs every callable's identity in one file should call
+/// `identities()` instead, which builds the whole file's owner-digest table
+/// once (O(owners) total) and reuses it per callable in O(1) -- calling
+/// `callable_identity` in a loop over every callable would cost
+/// O(callables * owners) instead.
 pub fn callable_identity(ir_file: &IrFile, callable: &IrCallable) -> CallableIdentity {
-    let digests = owner_digests(ir_file);
-    build_callable_identity(callable, &digests)
+    let owner_digest = owner_digest_walk(ir_file, callable.owner);
+    build_callable_identity(callable, owner_digest)
 }
 
 /// Every callable's `CallableIdentity` in `ir_file`, in `IrFile.callables`'
@@ -131,23 +137,26 @@ pub fn identities(ir_file: &IrFile) -> Vec<CallableIdentity> {
     ir_file
         .callables
         .iter()
-        .map(|callable| build_callable_identity(callable, &digests))
+        .map(|callable| {
+            let owner_digest = match callable.owner {
+                Some(index) => digests[index as usize],
+                None => OwnerDigest::default(),
+            };
+            build_callable_identity(callable, owner_digest)
+        })
         .collect()
 }
 
 /// Shared by `callable_identity` and `identities`: builds one
-/// `CallableIdentity` from an already-computed owner-digest table (`digests`,
-/// index-aligned with `ir_file.owners`) rather than walking the owner table
-/// itself.
-fn build_callable_identity(callable: &IrCallable, digests: &[OwnerDigest]) -> CallableIdentity {
+/// `CallableIdentity` from an already-resolved `owner_digest` -- the two
+/// callers differ only in how they get that digest (a table lookup in
+/// `identities()`, an O(depth) walk in `callable_identity`), never in how
+/// it is folded into the rest of the identity.
+fn build_callable_identity(callable: &IrCallable, owner_digest: OwnerDigest) -> CallableIdentity {
     let name = if callable.is_anonymous {
         ANONYMOUS_NAME.to_string()
     } else {
         callable.name.clone()
-    };
-    let owner_digest = match callable.owner {
-        Some(index) => digests[index as usize],
-        None => OwnerDigest::default(),
     };
     CallableIdentity {
         owner_digest,
@@ -155,6 +164,29 @@ fn build_callable_identity(callable: &IrCallable, digests: &[OwnerDigest]) -> Ca
         name,
         signature: callable.signature.clone(),
     }
+}
+
+/// A5 (round 2, triage row 3): `callable_identity`'s own single-callable
+/// owner digest, computed by walking `OwnerEntry::parent` from `owner` out
+/// to the root (O(depth), never touching an entry outside that one chain) --
+/// in place of `owner_digests`'s own whole-file table, which `identities()`
+/// uses instead for its bulk O(1)-per-callable lookup. The fold direction
+/// (root first, each ancestor's digest chained into the next) matches
+/// `owner_digests`'s own index-order fold exactly, so this always agrees
+/// with `owner_digests(ir_file)[index]` for the same owner index -- proven
+/// by `tests/identity.rs`'s own equality test against `identities()`.
+fn owner_digest_walk(ir_file: &IrFile, owner: Option<u32>) -> OwnerDigest {
+    let mut ancestors = Vec::new();
+    let mut current = owner;
+    while let Some(index) = current {
+        ancestors.push(index);
+        current = ir_file.owners[index as usize].parent;
+    }
+    let mut digest = OwnerDigest::default();
+    for index in ancestors.into_iter().rev() {
+        digest = hash_owner_entry(digest, &ir_file.owners[index as usize].segment);
+    }
+    digest
 }
 
 /// A5: one `OwnerDigest` per `ir_file.owners` entry, computed in index order
