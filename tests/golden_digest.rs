@@ -540,6 +540,47 @@ fn test_nsd_v1_digest_shares_the_m0b_revision() -> Result<()> {
     Ok(())
 }
 
+/// B3 (task.md, ledger row triage-ws4-r1): pins `pending_notice()`'s
+/// emission at all four `println!("{}", pending_notice())` call sites
+/// above (the archived-digest, live-nsd-v1-scan and both bare-pending-gate
+/// tests) by observing each one's own stdout from a fresh, re-executed
+/// child process, rather than by capturing stdout in-process -- an
+/// in-process capture would need a `gag`-style stdout-redirect crate, a new
+/// dependency the anti-scope forbids. Each child is `current_exe()` itself,
+/// run with `--exact <name> --nocapture` so libtest runs only that one test
+/// and does not swallow its stdout, and with `ARCHIVED_REPORT_ENV_VAR` /
+/// `REQUIRE_ARCHIVE_VERIFIED_ENV_VAR` removed so it takes the pending
+/// branch regardless of what this parent process's own environment
+/// happens to carry.
+#[test]
+fn test_pending_arms_print_the_notice() {
+    const PENDING_ARM_TESTS: [&str; 4] = [
+        "test_committed_digest_matches_the_archived_report",
+        "test_gate_is_reported_pending_when_the_archive_is_absent",
+        "test_nsd_v1_live_scan_is_reported_pending_when_the_archive_is_absent",
+        "test_nsd_v1_digest_matches_a_live_scan_of_java_fixture_01",
+    ];
+    let binary = std::env::current_exe().expect("the running test binary must have its own path");
+    let notice = pending_notice();
+    for test_name in PENDING_ARM_TESTS {
+        let output = std::process::Command::new(&binary)
+            .args(["--exact", test_name, "--nocapture"])
+            .env_remove(ARCHIVED_REPORT_ENV_VAR)
+            .env_remove(REQUIRE_ARCHIVE_VERIFIED_ENV_VAR)
+            .output()
+            .unwrap_or_else(|error| panic!("re-executing {test_name} failed: {error}"));
+        assert!(
+            output.status.success(),
+            "{test_name} did not pass in the re-executed child: {output:?}"
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains(&notice),
+            "{test_name}'s re-executed child did not print the pending notice: {stdout:?}"
+        );
+    }
+}
+
 /// Pure classification of a possibly-absent `NSD_GOLDEN_CAPTURE` value,
 /// split out the same way `classify_archive_gate` and
 /// `classify_verification_requirement` are: so `None` and `Some("")`
