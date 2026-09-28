@@ -391,7 +391,29 @@ fn root_config_bytes(
 /// own check" companion: a trusted file is validated too). Missing,
 /// unreadable, over-ceiling and invalid-shape all report `NSD-C102`
 /// (`ConfigError::new`'s default code).
+///
+/// A directory, FIFO, socket or other non-regular path is also
+/// `NSD-C102` (A1), checked with `fs::metadata` right before `File::open`
+/// so a FIFO with no writer is rejected instead of blocking there
+/// indefinitely. This is `fs::metadata`, which follows a symlink, not the
+/// snapshot layer's never-follow `fs::symlink_metadata`: a repository
+/// entry's on-disk shape is untrusted worktree content, but a trusted
+/// `--config` path is operator-chosen, so a symlink to a regular file is
+/// meant to keep working. The check still only narrows, not closes, the
+/// window where the path is swapped for a non-regular file between it and
+/// `File::open` below — the same residual race `WorktreeSnapshot::read`'s
+/// D25 re-check documents at `src/git/snapshot.rs:235-237`; closing it
+/// needs `O_NONBLOCK`, a `libc` dependency the anti-scope forbids.
 pub fn load_trusted(path: &Path) -> Result<Config, ConfigError> {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => {}
+        _ => {
+            return Err(ConfigError::new(format!(
+                "trusted config {} is missing or not a regular file",
+                path.display()
+            )))
+        }
+    }
     let file = fs::File::open(path).map_err(|err| {
         ConfigError::new(format!(
             "cannot read trusted config {}: {err}",
