@@ -712,6 +712,51 @@ fn test_trusted_mode_unchanged_symlink_base_reports_nothing() {
     );
 }
 
+/// triage-ws1-r2.md row 2: the candidate-side half of the kind gate. A
+/// regular base whose bytes are unreadable (over-ceiling), compared
+/// against a candidate whose `nsd.yml` is a symlink with byte-identical
+/// content, must still report a change — a kind change is a change in
+/// either direction. Only asserts `CODE_CONFIG_CHANGED` is present (not the
+/// full vector), since whether `CODE_INVALID_CONFIG` also appears depends
+/// on `fetch_candidate_bytes` reading the symlink candidate, not on this
+/// gate.
+#[test]
+fn test_trusted_mode_regular_base_replaced_by_identical_symlink_reports_c101() {
+    let (_dir, repo) = common::init_repo();
+    let content = oversized_valid_config();
+    common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_REGULAR, content.clone())],
+    );
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+
+    common::commit_entries(&repo, &[(b"nsd.yml".to_vec(), MODE_SYMLINK, content)]);
+    let candidate = CommitSnapshot::head_or_empty(&repo).expect("snapshot candidate commit");
+
+    let trusted_dir = tempfile::TempDir::new().expect("create a temp dir for the trusted config");
+    let trusted_path = trusted_dir.path().join("trusted.yml");
+    std::fs::write(&trusted_path, b"version: 1\n").expect("write trusted config");
+
+    let resolution = policy::resolve(
+        &repo,
+        Some(trusted_path.as_path()),
+        &base,
+        Candidate::Commit(&candidate),
+    )
+    .expect(
+        "a trusted config resolves even when the base is unreadable and the candidate is a symlink",
+    );
+
+    assert_eq!(resolution.source, ConfigSource::Trusted);
+    assert!(
+        resolution.diagnostics.contains(&Diagnostic {
+            code: CODE_CONFIG_CHANGED
+        }),
+        "a regular base replaced by a byte-identical symlink candidate must still be reported as \
+         changed, even though both entries share the same blob oid"
+    );
+}
+
 /// triage-ws1-r1.md row 1: no test previously reached the `Candidate::Index`
 /// arm of `BaseIdentity::Oid`, so the mutant `.and(None)` (dropping the
 /// index candidate's own oid to `None`) survived: an unchanged oversized
