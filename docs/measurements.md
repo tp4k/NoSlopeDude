@@ -339,6 +339,20 @@ scanned shas · the scanner's own reported scanned-source-line count
 | 2026-09-28 (nsd@d61fefe58a0ede6166fe9a2febaaa35cf16d0877 — WS-9 r2 alternating, A5 re-run, contention cleared, used in the decision set) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.33s | 1838.11 MB | true | 7662 |
 | 2026-09-28 (nsd@24ecf8acd6b95375cd713114a7d3e56def40b8a5 — WS-9 r2 alternating, B5 re-run, contention cleared, used in the decision set) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 3.74s | 1785.11 MB | true | 7662 |
 | 2026-09-28 (nsd@997a9821cf2bb16e14c46a6cf7b1a0d5d7142d5a — WS-9 r2 post-restore verification sanity run in the primary worktree, not part of the Decision 11 alternating set) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 8.12s | 1530.03 MB | true | 7662 |
+| 2026-09-28 (nsd@eb26b40a4c36567444efb49356e311c637b0ab83 — WS-10 alternating, A-side discarded warm-up) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 6.04s | 1782.94 MB | true | 7662 |
+| 2026-09-28 (nsd@89f2a66075595414c942800676b1f2bbccc968cf — WS-10 alternating, B-side discarded warm-up) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 6.48s | 1785.61 MB | true | 7662 |
+| 2026-09-28 (nsd@eb26b40a4c36567444efb49356e311c637b0ab83 — WS-10 alternating, A1) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.81s | 1788.78 MB | true | 7662 |
+| 2026-09-28 (nsd@89f2a66075595414c942800676b1f2bbccc968cf — WS-10 alternating, B1, contended: tsc at 130.8% CPU observed just before this run, whole pair re-run per protocol) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 6.88s | 1786.94 MB | true | 7662 |
+| 2026-09-28 (nsd@eb26b40a4c36567444efb49356e311c637b0ab83 — WS-10 alternating, A1 re-run, contention cleared, used in the decision set) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.92s | 1778.88 MB | true | 7662 |
+| 2026-09-28 (nsd@89f2a66075595414c942800676b1f2bbccc968cf — WS-10 alternating, B1 re-run, contention cleared, used in the decision set) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 7.10s | 1681.00 MB | true | 7662 |
+| 2026-09-28 (nsd@eb26b40a4c36567444efb49356e311c637b0ab83 — WS-10 alternating, A2) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.56s | 1783.50 MB | true | 7662 |
+| 2026-09-28 (nsd@89f2a66075595414c942800676b1f2bbccc968cf — WS-10 alternating, B2) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 6.59s | 1786.12 MB | true | 7662 |
+| 2026-09-28 (nsd@eb26b40a4c36567444efb49356e311c637b0ab83 — WS-10 alternating, A3) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.67s | 1784.12 MB | true | 7662 |
+| 2026-09-28 (nsd@89f2a66075595414c942800676b1f2bbccc968cf — WS-10 alternating, B3) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 6.58s | 1786.81 MB | true | 7662 |
+| 2026-09-28 (nsd@eb26b40a4c36567444efb49356e311c637b0ab83 — WS-10 alternating, A4) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.96s | 1532.45 MB | true | 7662 |
+| 2026-09-28 (nsd@89f2a66075595414c942800676b1f2bbccc968cf — WS-10 alternating, B4) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 6.79s | 1790.69 MB | true | 7662 |
+| 2026-09-28 (nsd@eb26b40a4c36567444efb49356e311c637b0ab83 — WS-10 alternating, A5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.86s | 1779.22 MB | true | 7662 |
+| 2026-09-28 (nsd@89f2a66075595414c942800676b1f2bbccc968cf — WS-10 alternating, B5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 6.40s | 1793.33 MB | true | 7662 |
 
 ## Part C (run 2026-09-25-1744-m1m2-followup)
 
@@ -422,3 +436,50 @@ wide, against this round's A-range of only 0.23s and B-range of only
 alternating measurement rather than trusted as-is; the frozen Part C
 reference above is unchanged (Decision 11: it is not re-frozen). **Kept**:
 the restore commit (`24ecf8a`) stands; no further revert follows.
+
+**WS-10 (C2) — alternating, parent `eb26b40` (worktree A, without C2)
+versus `89f2a66` (worktree B, with C2: `KindIds` numeric kind/field id
+tables replacing the string-based `node.kind()`/`child_by_field_name`
+lookups in `src/lower/java.rs`/`src/lower/jsts.rs`/`src/exec_lines.rs`,
+threaded through `classify`/`build_ir`/`lower_file`).** Two detached
+worktrees were built in release mode under a scratch directory outside
+this repo (`nsd-scratch/ws10-a` at `eb26b40`, `nsd-scratch/ws10-b` at
+`89f2a66`), each measuring its own binary and writing to its own copy of
+this file; both read the same `$TMPDIR/nsd-perf-fixture`. After one
+discarded warm-up per side, 5 pairs were run alternately (A1 B1 A2 B2 A3
+B3 A4 B4 A5 B5), checking `ps -Ao %cpu,comm -r` for contention before each
+run. The A1/B1 pair was contended: a `tsc` process was observed at 130.8%
+CPU immediately before B1 (it had appeared only after A1 itself had
+already been measured clean). Per protocol the whole pair was re-run
+rather than dropped; both the contended A1/B1 and the clean re-run are
+recorded above under `## Rows`, labelled accordingly. The decision set is
+the A1/B1 re-run plus A2-A5/B2-B5: A = {5.92s, 5.56s, 5.67s, 5.96s, 5.86s}
+(min 5.56s, max 5.96s, mean 5.794s); B = {7.10s, 6.59s, 6.58s, 6.79s,
+6.40s} (min 6.40s, max 7.10s, mean 6.692s). Decision 11's rule is
+`max(after) < min(before)`: here `max(B) = 7.10s` is not less than
+`min(A) = 5.56s` — the two ranges do not overlap at all, they are
+disjoint in the wrong direction, with every single B run slower than
+every single A run (B's own min, 6.40s, is still above A's own max,
+5.96s). This is not a borderline overlap of the kind WS-9's round 1 saw;
+it is a consistent, unambiguous regression of roughly 0.9s (~15.5%) per
+scan, present in all five pairs including the initially-contended one.
+Scanned-source-line count, `incomplete` and `skipped_files` match exactly
+between A and B on every run (584779, true, 7662), confirming the
+regression is a cost difference, not a correctness difference. Per
+task.md Part C ("If a row's measured gain is below the noise floor,
+revert it and record that; don't keep it on faith") and this stream's own
+Decision 11 obligation, C2 fails the accept rule and is reverted forward
+in the next commit rather than kept. The likely mechanism (recorded for
+whoever next picks this up): `KindIds::build` sweeps
+`0..language.node_kind_count()` (on the order of several hundred ids per
+grammar) once per `lower_file` call, i.e. once per scanned file, to track
+only `kind_ids::KIND_NAMES`' 59 names — on a fixture with many
+small-to-medium files, that per-file sweep-and-hash-map-build cost
+apparently outweighs what it saves over the plain string comparisons it
+replaces; a table cached per `Language` (there are only four: Java,
+JavaScript, TypeScript, Tsx) rather than rebuilt per file might recover
+the intended win, but that is a different design than the one C2 as
+written called for, and is left to `docs/deferred-work.md` rather than
+attempted here. Both scratch worktrees (`nsd-scratch/ws10-a`,
+`nsd-scratch/ws10-b`) were removed via `git worktree remove --force`
+after the last pair.
