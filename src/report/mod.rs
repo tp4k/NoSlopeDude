@@ -11,7 +11,6 @@
 
 mod html;
 
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -193,12 +192,6 @@ pub struct ReportInput<'a> {
 
 /// The one aggregation every rendering reads from.
 pub fn aggregate(input: &ReportInput) -> Report {
-    // C7: one file's lines are read and split at most once per `aggregate`
-    // call, no matter how many findings/duplicate locations/top25 callables
-    // land in it -- see `read_excerpt`'s own doc comment. Lives only for
-    // this call (a stack-local `HashMap`, threaded down by `&mut`
-    // reference), not a `ReportInput` field or anything cached across runs.
-    let mut excerpt_cache: ExcerptCache = HashMap::new();
     Report {
         scan: build_scan(input),
         scores: build_scores(input),
@@ -206,19 +199,19 @@ pub fn aggregate(input: &ReportInput) -> Report {
             .rules
             .findings
             .iter()
-            .map(|f| build_finding(input, f, &mut excerpt_cache))
+            .map(|f| build_finding(input, f))
             .collect(),
         duplicates: input
             .clones
             .groups
             .iter()
-            .map(|group| build_duplicate_group(input, group, &mut excerpt_cache))
+            .map(|group| build_duplicate_group(input, group))
             .collect(),
         top25: input
             .metrics
             .top25
             .iter()
-            .map(|c| build_callable(input, c, &mut excerpt_cache))
+            .map(|c| build_callable(input, c))
             .collect(),
         skipped_files: build_skipped_files(input),
         // WS-6's `SkipReason` split: a discovery-time skip only marks the
@@ -318,11 +311,7 @@ fn normalize_zero(value: f64) -> f64 {
     }
 }
 
-fn build_finding(
-    input: &ReportInput,
-    finding: &RuleFinding,
-    excerpt_cache: &mut ExcerptCache,
-) -> ReportFinding {
+fn build_finding(input: &ReportInput, finding: &RuleFinding) -> ReportFinding {
     ReportFinding {
         rule_id: finding.rule_id,
         language: family_label(finding.language),
@@ -331,17 +320,12 @@ fn build_finding(
             &finding.relative_path,
             finding.start_line,
             finding.end_line,
-            excerpt_cache,
         ),
         flagged_lines: finding.flagged_lines.clone(),
     }
 }
 
-fn build_duplicate_group(
-    input: &ReportInput,
-    group: &CloneGroup,
-    excerpt_cache: &mut ExcerptCache,
-) -> ReportDuplicateGroup {
+fn build_duplicate_group(input: &ReportInput, group: &CloneGroup) -> ReportDuplicateGroup {
     ReportDuplicateGroup {
         language: family_label(group.language),
         redundant_lines: group.redundant_lines,
@@ -354,18 +338,13 @@ fn build_duplicate_group(
                     &location.relative_path,
                     location.start_line,
                     location.end_line,
-                    excerpt_cache,
                 )
             })
             .collect(),
     }
 }
 
-fn build_callable(
-    input: &ReportInput,
-    callable: &Callable,
-    excerpt_cache: &mut ExcerptCache,
-) -> ReportCallable {
+fn build_callable(input: &ReportInput, callable: &Callable) -> ReportCallable {
     ReportCallable {
         name: callable.name.clone(),
         language: family_label(callable.language),
@@ -377,7 +356,6 @@ fn build_callable(
             &callable.relative_path,
             callable.start_line,
             callable.end_line,
-            excerpt_cache,
         ),
     }
 }
@@ -421,15 +399,8 @@ fn build_location(
     relative_path: &Path,
     start_line: usize,
     end_line: usize,
-    excerpt_cache: &mut ExcerptCache,
 ) -> SourceLocation {
-    let excerpt = read_excerpt(
-        excerpt_cache,
-        input.root,
-        relative_path,
-        start_line,
-        end_line,
-    );
+    let excerpt = read_excerpt(input.root, relative_path, start_line, end_line);
     let (link, is_remote_link) = match source_link(
         input.target,
         input.revision,
@@ -450,46 +421,15 @@ fn build_location(
     }
 }
 
-/// C7: `read_excerpt`'s per-file read/split, keyed by `relative_path`, live
-/// only for one `aggregate` call (a stack-local in `aggregate` itself,
-/// threaded down by `&mut` reference -- never a `ReportInput` field or
-/// anything `pub`). An unreadable file caches as an empty `Vec`, which
-/// `read_excerpt` below treats the same way a fresh failed read always
-/// did (`end_index` collapses to 0, so `start_index >= end_index` and it
-/// returns an empty excerpt), so a repeatedly-referenced unreadable path
-/// is not repeatedly retried either.
-type ExcerptCache = HashMap<PathBuf, Vec<String>>;
-
-/// This call's own already-read lines for `relative_path`, reading and
-/// splitting it off disk only on the first request for that path.
-fn cached_lines<'a>(
-    excerpt_cache: &'a mut ExcerptCache,
-    root: &Path,
-    relative_path: &Path,
-) -> &'a [String] {
-    excerpt_cache
-        .entry(relative_path.to_path_buf())
-        .or_insert_with(|| {
-            let Ok(text) = fs::read_to_string(root.join(relative_path)) else {
-                return Vec::new();
-            };
-            text.lines().map(str::to_string).collect()
-        })
-}
-
 /// Reads `relative_path`'s `[start_line, end_line]` span off disk (never
-/// re-parsed, D6/anti-scope), by way of `excerpt_cache` above. An I/O
-/// failure reading a file that already parsed successfully is not one of
-/// D18's three reserved fatal cases, so it degrades to an empty excerpt
-/// rather than failing the whole report.
-fn read_excerpt(
-    excerpt_cache: &mut ExcerptCache,
-    root: &Path,
-    relative_path: &Path,
-    start_line: usize,
-    end_line: usize,
-) -> String {
-    let lines = cached_lines(excerpt_cache, root, relative_path);
+/// re-parsed, D6/anti-scope). An I/O failure reading a file that already
+/// parsed successfully is not one of D18's three reserved fatal cases, so
+/// it degrades to an empty excerpt rather than failing the whole report.
+fn read_excerpt(root: &Path, relative_path: &Path, start_line: usize, end_line: usize) -> String {
+    let Ok(text) = fs::read_to_string(root.join(relative_path)) else {
+        return String::new();
+    };
+    let lines: Vec<&str> = text.lines().collect();
     let start_index = start_line.saturating_sub(1);
     let end_index = end_line.min(lines.len());
     if start_index >= end_index {
