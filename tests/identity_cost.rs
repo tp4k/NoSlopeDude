@@ -8,6 +8,10 @@
 //! (each `tests/*.rs` file compiles as its own separate binary, so this
 //! never touches any other test's allocator) -- measures bytes allocated
 //! strictly inside the `identities()` call, on a 4,000-deep `()=>` chain.
+//! This file holds two tests sharing that one counter; both take
+//! `MEASURE_LOCK` as their first statement, so the counter's before/after
+//! delta counts only the locked test's own allocations even when `cargo
+//! test`'s default runner schedules them on separate threads.
 //! Before A5, materializing every callable's own full owner chain (one
 //! `Vec<OwnerSegment>` per callable, summed over a 4,000-deep chain) copies
 //! on the order of 8,000,000 segments, several times over the 16 MiB bound
@@ -22,6 +26,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 use nsd::identity;
 use nsd::lower;
@@ -32,10 +37,19 @@ use nsd::parse::ParsedFile;
 /// default-implemented callers `alloc_zeroed`/`realloc`), process-wide.
 static ALLOCATED_BYTES: AtomicUsize = AtomicUsize::new(0);
 
+/// Serializes this file's two tests around the one process-wide
+/// `ALLOCATED_BYTES` counter, so `cargo test`'s default multi-threaded
+/// runner cannot interleave a sibling test's allocations into a locked
+/// test's own before/after delta. Poison-tolerant: a prior test panicking
+/// while holding the lock must not fail every later test in the same run
+/// with a poisoned-mutex panic instead of its own assertion.
+static MEASURE_LOCK: Mutex<()> = Mutex::new(());
+
 /// Wraps the real `System` allocator, tallying every allocation's own size
-/// into `ALLOCATED_BYTES` -- this file's only test reads the counter before
-/// and after calling `identity::identities`, so the delta is exactly what
-/// that one call allocated.
+/// into `ALLOCATED_BYTES` -- each of this file's two tests reads the counter
+/// before and after its own measured call while holding `MEASURE_LOCK`, so
+/// the delta is exactly what that one call allocated, never a sibling test's
+/// concurrent allocations.
 struct CountingAllocator;
 
 unsafe impl GlobalAlloc for CountingAllocator {
@@ -97,6 +111,7 @@ fn tree_sitter_language(grammar: Grammar) -> tree_sitter::Language {
 /// fixture allocates well over 16 MiB), passes after.
 #[test]
 fn test_identities_allocation_is_linear_in_owners_on_a_deep_chain() {
+    let _serial = MEASURE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let source = format!("const f = {}0;", "()=>".repeat(DEPTH));
     let parsed = parse_inline(&source, Grammar::TypeScript, LanguageFamily::JsTs);
     let ir_file = lower::lower_file(&parsed);
@@ -134,6 +149,7 @@ fn test_identities_allocation_is_linear_in_owners_on_a_deep_chain() {
 /// this one owner is `None` and its own O(depth) walk should touch nothing.
 #[test]
 fn test_single_callable_identity_call_does_not_build_the_whole_table() {
+    let _serial = MEASURE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let source = format!("const f = {}0;", "()=>".repeat(DEPTH));
     let parsed = parse_inline(&source, Grammar::TypeScript, LanguageFamily::JsTs);
     let ir_file = lower::lower_file(&parsed);
