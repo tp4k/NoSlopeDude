@@ -202,7 +202,13 @@ impl WorktreeSnapshot {
             let full_path = repo_path_to_fs(&workdir, path.as_bytes());
             match fs::symlink_metadata(&full_path) {
                 Ok(metadata) => {
-                    if let Some(refreshed) = refresh_from_disk(&path, &metadata, kind, Some(oid))? {
+                    if let Some(refreshed) = refresh_from_disk(
+                        &path,
+                        &metadata,
+                        observed_exec_bit(&metadata),
+                        kind,
+                        Some(oid),
+                    )? {
                         by_path.insert(path.clone(), refreshed);
                     }
                 }
@@ -517,9 +523,13 @@ fn worktree_file_kind(
 /// still exists on disk (D5: worktree bytes are always read fresh from
 /// disk). Returns `None` when the on-disk object can no longer be
 /// represented as source (e.g. a plain directory replaced a tracked blob).
+/// `observed_exec_bit` is the caller's `observed_exec_bit(&metadata)`
+/// reading, taken as a parameter rather than recomputed here so a test can
+/// drive the unobservable (`None`) arm from any host.
 fn refresh_from_disk(
     path: &RepoPath,
     metadata: &fs::Metadata,
+    observed_exec_bit: Option<bool>,
     original_kind: EntryKind,
     original_oid: Option<Oid>,
 ) -> Result<Option<Entry>, GitError> {
@@ -556,7 +566,7 @@ fn refresh_from_disk(
             size: 0,
         }));
     }
-    let kind = worktree_file_kind(observed_exec_bit(metadata), Some(original_kind));
+    let kind = worktree_file_kind(observed_exec_bit, Some(original_kind));
     Ok(Some(Entry {
         path: path.clone(),
         kind,
