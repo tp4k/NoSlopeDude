@@ -308,3 +308,37 @@ scanned shas · the scanner's own reported scanned-source-line count
 | 2026-09-28 (nsd@375b2c73e6eb34fb5f3792e5d40e1ed2dd9d9972 — contended: concurrent WS-5/6/7 cargo builds in this tree, discarded; block input operations not recorded) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 16.49s | 1596.62 MB | true | 7662 |
 | 2026-09-28 (nsd@9d4e7a6429c635a4ffa128ff0d1d36f0ff11dd03 — block input operations not recorded) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.81s | 1836.67 MB | true | 7662 |
 | 2026-09-28 (nsd@403aa7f74d545be0b567a212cfaebf8db8af2175 — block input operations not recorded) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.58s | 1840.81 MB | true | 7662 |
+| 2026-09-28 (nsd@079ca5288bda6db24a26d0ecaca38e56c47639c8 — contended: unrelated vitest workers running on the machine, discarded warm-up) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 17.67s | 1837.86 MB | true | 7662 |
+| 2026-09-28 (nsd@079ca5288bda6db24a26d0ecaca38e56c47639c8 — contended: unrelated vitest workers running on the machine, discarded) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 18.50s | 1837.72 MB | true | 7662 |
+| 2026-09-28 (nsd@079ca5288bda6db24a26d0ecaca38e56c47639c8 — discarded warm-up, contention just cleared) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 7.66s | 1840.75 MB | true | 7662 |
+| 2026-09-28 (nsd@079ca5288bda6db24a26d0ecaca38e56c47639c8 — discarded warm-up) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 6.33s | 1840.67 MB | true | 7662 |
+| 2026-09-28 (nsd@079ca5288bda6db24a26d0ecaca38e56c47639c8 — WS-9 Part C reference, run 1/5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.86s | 1838.64 MB | true | 7662 |
+| 2026-09-28 (nsd@079ca5288bda6db24a26d0ecaca38e56c47639c8 — WS-9 Part C reference, run 2/5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 6.48s | 1832.78 MB | true | 7662 |
+| 2026-09-28 (nsd@079ca5288bda6db24a26d0ecaca38e56c47639c8 — WS-9 Part C reference, run 3/5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 8.24s | 1841.38 MB | true | 7662 |
+| 2026-09-28 (nsd@079ca5288bda6db24a26d0ecaca38e56c47639c8 — WS-9 Part C reference, run 4/5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 7.59s | 1836.12 MB | true | 7662 |
+| 2026-09-28 (nsd@079ca5288bda6db24a26d0ecaca38e56c47639c8 — WS-9 Part C reference, run 5/5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 7.20s | 1838.20 MB | true | 7662 |
+
+## Part C (run 2026-09-25-1744-m1m2-followup)
+
+WS-9 opens this section (task.md Part C: "Measure every change before and
+after with `scripts/perf_scan.sh`, and record both in
+`docs/measurements.md`. If a row's measured gain is below the noise
+floor, revert it and record that; don't keep it on faith."). Decision 11
+sets the accept rule every Part C row below follows: 5 warm
+`perf_scan.sh` runs (a discarded warm-up after each fresh release build),
+kept only when the before and after ranges do not overlap —
+`max(after) < min(before)` on wall clock (or on peak RSS for a
+memory-targeted row). Each stream measures its own parent commit; WS-9's
+own before-set below is additionally frozen as the run's one fixed Part C
+reference, so the cumulative trend across every later stream's own
+before/after pair can be read against one fixed point instead of a
+moving baseline.
+
+**WS-9 (C1) reference — parent `079ca52`, before wiring one lowering into
+all three readers.** The five `WS-9 Part C reference` rows in `## Rows`
+above: 5.86s, 6.48s, 8.24s, 7.59s, 7.20s (min 5.86s, max 8.24s). Three
+earlier runs on the same build and same commit — two "contended" (an
+unrelated `vitest` workload sharing the machine) and two "discarded
+warm-up" — are excluded from the reference per the same discipline; none
+of the eight is cherry-picked, all eight are recorded in `## Rows` above
+with the reason each was or was not kept.
