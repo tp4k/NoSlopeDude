@@ -413,7 +413,7 @@ scanned shas · the scanner's own reported scanned-source-line count
 | 2026-09-28 (nsd@21a710f120df9192bcf49822a0b1d4da766f59a4 — WS-11 r2 (C7 re-measure) alternating, X2, used in the decision set; ps top-2 before this run: zen 17.8%, WindowServer 15.5%) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.37s | 1788.41 MB | true | 7662 |
 | 2026-09-28 (nsd@66787a07c0a30285cf20ef477e615a573ac0dba7 — WS-11 r2 (C7 re-measure) alternating, Y2, used in the decision set; ps top-2 before this run: Firefox plugin-container 33.9%, OrbStack Helper 23.4% (no vitest/cargo/nsd)) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.58s | 1784.05 MB | true | 7662 |
 | 2026-09-28 (nsd@21a710f120df9192bcf49822a0b1d4da766f59a4 — WS-11 r2 (C7 re-measure) alternating, X3, first attempt; ps top-2 before this run: zen 18.2%, gpu-helper 16.5% (unremarkable); the paired Y3 attempt read a 7.23s outlier, so this attempt is also discarded and the whole pair re-run per protocol) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.98s | 1786.09 MB | true | 7662 |
-| 2026-09-28 (nsd@66787a07c0a30285cf20ef477e615a573ac0dba7 — WS-11 r2 (C7 re-measure) alternating, Y3, first attempt, contended: a 7.23s outlier against this side's other four decision-set runs (5.55s-6.15s) despite an unremarkable ps snapshot (OrbStack Helper 18.6%, WindowServer 17.8%) immediately before this run, discarded, whole pair re-run per protocol) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 7.23s | 1782.39 MB | true | 7662 |
+| 2026-09-28 (nsd@66787a07c0a30285cf20ef477e615a573ac0dba7 — WS-11 r2 (C7 re-measure) alternating, Y3, first attempt, contended: a 7.23s outlier against this side's other four decision-set runs (Y1/Y2/Y4/Y5: 5.55s-5.68s; the kept Y3 re-run, 6.15s, is also above that range, which works against C7) despite an unremarkable ps snapshot (OrbStack Helper 18.6%, WindowServer 17.8%) immediately before this run, discarded, whole pair re-run per protocol) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 7.23s | 1782.39 MB | true | 7662 |
 | 2026-09-28 (nsd@21a710f120df9192bcf49822a0b1d4da766f59a4 — WS-11 r2 (C7 re-measure) alternating, X3 re-run, used in the decision set; ps top-2 before this run: zen 15.2%, WindowServer 14.8%) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.41s | 1592.97 MB | true | 7662 |
 | 2026-09-28 (nsd@66787a07c0a30285cf20ef477e615a573ac0dba7 — WS-11 r2 (C7 re-measure) alternating, Y3 re-run, used in the decision set; ps top-2 before this run: zen 17.3%, gpu-helper 14.9%) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 6.15s | 1787.61 MB | true | 7662 |
 | 2026-09-28 (nsd@21a710f120df9192bcf49822a0b1d4da766f59a4 — WS-11 r2 (C7 re-measure) alternating, X4, used in the decision set; ps top-2 before this run: WindowServer 24.9%, zen 18.9% — `node (vitest)` at 56.2% and `node (vitest 1)` at 49.3% had been observed just before and were allowed to clear first) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.43s | 1783.00 MB | true | 7662 |
@@ -692,7 +692,8 @@ warm-up per side, 5 pairs were run alternately (X1 Y1 X2 Y2 X3 Y3 X4 Y4
 X5 Y5), checking `ps -Ao %cpu,comm -r` for contention before each run; its
 top-2 line is recorded with every row above. Three pairs needed a re-run:
 Y3's first attempt (7.23s) was a clear outlier against Y's other four
-decision-set runs (5.55s-6.15s) despite an unremarkable `ps` snapshot at
+decision-set runs (Y1/Y2/Y4/Y5: 5.55s-5.68s; the kept Y3 re-run, 6.15s, is
+also above that range, which works against C7) despite an unremarkable `ps` snapshot at
 the time (matching round 1's own B1 precedent), so the whole X3/Y3 pair
 was re-run; before X4 ran, `ps` showed `node (vitest)` at 56.2% and `node
 (vitest 1)` at 49.3%, so this session waited about 50s for the load to
@@ -720,7 +721,11 @@ though both showed a lower mean on the "after" side (C4's after-mean was
 5.472s against a before-mean of 5.598s; C6's was 5.272s against 5.422s).
 `49c464e`'s release binary is code-identical to `24ecf8a`'s, which WS-9
 r2 measured at 3.72-3.99s; C4's A side read 5.49-5.80s here, so all three
-WS-11 round-1 windows ran about 45% slower than WS-9 r2's. C7, unlike C4
+WS-11 round-1 windows ran about 45% slower than WS-9 r2's. The round-2 C7
+window was no faster: its Y side (`66787a0`, code-identical to `24ecf8a`)
+read 5.55-6.15s, about 50% slower than WS-9 r2's; "quiet" in the round-2
+paragraph means only the triage's `ps` criteria (no `node (vitest…)`,
+`cargo`/`target/*/deps/*` or other `nsd` process). C7, unlike C4
 and C6, clears Decision 11 in the quiet-window round-2 re-measurement
 above and is kept. Of the Part C rows measured so far, only C1 (WS-9
 round 2) and C7 (WS-11 round 2) have cleared Decision 11.
