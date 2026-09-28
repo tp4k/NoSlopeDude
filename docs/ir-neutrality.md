@@ -75,24 +75,66 @@ will fail on the new file's presence alone, with no measurement bug
 involved. The procedure to move the baseline honestly, rather than paper
 over the failure, is:
 
+0. **Step 0, a precondition on every step below:** `git status --short
+   tests/fixtures` must print nothing. Step 3's `--capture` reads whatever
+   is on disk under `tests/fixtures/` at the moment it runs, committed or
+   not, and writes it straight into the golden file with no review step of
+   its own — an unrelated, uncommitted fixture edit sitting alongside the
+   one this procedure means to capture would be baked in silently,
+   indistinguishable afterwards from the intended change.
 1. **Proof A**, ground truth: `bash scripts/neutrality_gate.sh` with no
    arguments. It builds the pinned pre-IR commit in a detached worktree and
    the current `HEAD`, and diffs their `report.json` directly against each
    other on the same copied corpus, so it is immune to corpus drift by
    construction. It must print `NEUTRALITY: identical on 2 corpora`; if it
    reports a divergence, stop — a capture on a diverged tree is a silent
-   re-baseline, not an explained one.
+   re-baseline, not an explained one. **As of M0c, this step no longer
+   gates** (B16, task.md): `PRE_IR_SHA` (`scripts/neutrality_gate.sh:43`,
+   `5705e76522b7b0a16343cd861aa953e6ff37064a`) is the last commit before
+   any M0b IR-retargeting stream touched an analyzer, long before the M0c
+   Java grammar swap (`tree-sitter-java` 0.23.5 → `tree-sitter-java-orchard`
+   0.5.18, see *M0c-10* below) moved four `clean.report.json` pointers in a
+   deliberate, fully-explained way. Proof A diffs `HEAD` directly against
+   that pinned commit's own live render with no `DECLARED_DELTAS`-style
+   escape hatch, so it is red by construction on every run made after M0c
+   regardless of corpus drift — measured on this stream's own `HEAD`,
+   `bash scripts/neutrality_gate.sh` prints `NEUTRALITY: clean corpus
+   diverged at /scores/java/erosion`, the M0c-10 grammar-swap delta, not a
+   corpus-membership bug and not something re-pointing `PRE_IR_SHA`
+   forward would honestly fix (see the trust-anchor paragraph below).
+   Treat Proof B as this procedure's actual corpus-drift check; Proof A
+   stays meaningful only run against a pre-M0c commit, or once a human
+   deliberately re-pins `PRE_IR_SHA` to a post-M0c commit with its own
+   fresh proof that *that* commit is neutral against its predecessor.
 2. **Proof B**, a drift bound: a control scan of the clean corpus minus the
    changed/added fixtures, compared byte-for-byte against the *currently
    committed* `clean.report.json`. This proves no pre-existing fixture's
    numbers moved, so the only thing the re-capture can introduce is the
-   new file(s)' presence.
+   new file(s)' presence. **Fixture deletion is the mirror case:** scan
+   the clean corpus *as currently committed* — still including the
+   file(s) about to be deleted — against the same currently-committed
+   `clean.report.json` first; it must be byte-identical, since nothing has
+   changed yet. Delete the fixture(s), then proceed to step 3; step 4's
+   diff is then bounded to exactly the deleted file's own contribution
+   disappearing (its `/scores/*` share and any `/top25` row it held), the
+   same shape as an addition, signed the other way.
 3. Run `bash scripts/neutrality_gate.sh --capture` to rewrite the golden
    files from `HEAD`'s own render — never hand-edit or reconstruct the JSON.
 4. Check the resulting diff is bounded to exactly what corpus growth
    predicts: the affected `/scores/*` aggregates (denominators and any
    ratios/erosion derived from them) and, if the new file's callables rank
    into the top 25, the displaced `/top25` rows — nothing else.
+
+**`PRE_IR_SHA` (`scripts/neutrality_gate.sh:43`) is this gate's trust
+anchor and is never re-pointed to force Proof A green.** It fixes what
+"pre-IR" means for every re-capture that follows; moving it forward to
+make a present divergence disappear would let a later, unrelated
+measurement regression hide behind whatever the new pin's own behavior
+happens to be — the same failure mode `AGENTS.md` warns against for
+`--staged` and trusted policy ("candidate configuration cannot weaken its
+own gate"). A divergence Proof A reports is either fully explained (as
+M0c-10 is, both here and in `docs/measurements.md`) or it is a stop
+signal — never silently absorbed by moving the pin.
 
 `tests/fixtures/salvage/` (WS-6) was the fixture addition this note
 originally anticipated triggering this procedure, and it did: `Mixed.java`
@@ -246,6 +288,42 @@ the one test). The resulting diff matched the prediction exactly:
 `scanned_lines` moved `+10`/`+6`/`+4` (overall/java/js_ts) with
 `erosion`/`ratio` moving arithmetically, nothing else. See the round 3
 implementer report for the full committed diff.
+
+### Resolved (WS-7): `tests/fixtures/erosion_boundary/Boundary.java` joining the clean corpus
+
+B4 (task.md) needed a fixture with a callable at exactly
+`cc == CC_EROSION_THRESHOLD`: the code reviewer's mutation survivor
+(`cc > CC_EROSION_THRESHOLD` mutated to `cc >=`) passed every existing
+neutrality/metrics test because no committed fixture sat on that
+boundary. The new file, `tests/fixtures/erosion_boundary/Boundary.java`
+(nine independent `if` branches, no `else`, one callable at `cc == 10`),
+joins `clean_corpus_sources()`'s membership walk like any other fixture —
+the same re-capture this section's procedure exists for. No `else` is
+deliberate: an `else` after each branch's assignment would trip
+`JAVA-REDUNDANT-ELSE-AFTER-RETURN` (had the branches returned instead) or
+otherwise widen the `/findings` array, past what corpus growth alone
+predicts.
+
+Predicted bound before capturing: the new callable is Java, so
+`scores.{overall,java}.verbosity.scanned_lines` (and `erosion`/`ratio`
+moving arithmetically with them) should move by its own contribution;
+`js_ts` untouched; no new `skipped_files` entry (the file parses clean);
+no new `findings` entry (the fixture trips none of the six wasteful-code
+rules); and, since `cc == 10` outranks the corpus's lowest existing
+`top25` entries, exactly one low-ranked callable is displaced out.
+
+**Capture**: `bash scripts/neutrality_gate.sh --capture` re-captured
+`clean.report.json` from `HEAD`. The resulting diff matched the
+prediction exactly: `scores.{overall,java}.verbosity.scanned_lines` moved
+`+13`/`+13` (overall/java; `js_ts` untouched), `erosion`/`ratio` moving
+arithmetically with them; the new `classify` callable (`cc == 10`)
+entered `top25` and displaced `parity/Constructs.java`'s `forConstruct`
+(`cc == 2`, the lowest-ranked row); nothing else moved — no `findings`,
+no `skipped_files`. `malformed.report.json`'s own would-be rewrite (the
+same shared capture invocation touches both files) was reverted
+byte-for-byte before committing (`git checkout 683c70e -- tests/golden/
+neutrality/malformed.report.json`), confirmed with `git diff --quiet
+683c70e -- tests/golden/neutrality/malformed.report.json`.
 
 ## Normalization
 
