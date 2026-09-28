@@ -12,19 +12,19 @@
   },
   "scores": {
     "overall": {
-      "erosion": 0.3173652170244212,
+      "erosion": 0.3033434146761384,
       "verbosity": {
         "flagged_lines": 227,
-        "scanned_lines": 1019,
-        "ratio": 0.22276741903827282
+        "scanned_lines": 1032,
+        "ratio": 0.21996124031007752
       }
     },
     "java": {
-      "erosion": 0.392743515046639,
+      "erosion": 0.36341828999901393,
       "verbosity": {
         "flagged_lines": 154,
-        "scanned_lines": 637,
-        "ratio": 0.24175824175824176
+        "scanned_lines": 650,
+        "ratio": 0.23692307692307693
       }
     },
     "js_ts": {
@@ -668,6 +668,21 @@
       }
     },
     {
+      "name": "classify",
+      "language": "java",
+      "cc": 10,
+      "sloc": 11,
+      "mass": 33.166247903553995,
+      "location": {
+        "relative_path": "erosion_boundary/Boundary.java",
+        "start_line": 7,
+        "end_line": 19,
+        "excerpt": "    int classify(int a) {\n        int result = 0;\n        if (a == 0) { result = 1; }\n        if (a == 1) { result = 2; }\n        if (a == 2) { result = 3; }\n        if (a == 3) { result = 4; }\n        if (a == 4) { result = 5; }\n        if (a == 5) { result = 6; }\n        if (a == 6) { result = 7; }\n        if (a == 7) { result = 8; }\n        if (a == 8) { result = 9; }\n        return result;\n    }",
+        "link": "erosion_boundary/Boundary.java#L7-L19",
+        "is_remote_link": false
+      }
+    },
+    {
       "name": "m",
       "language": "java",
       "cc": 9,
@@ -964,21 +979,6 @@
         "end_line": 8,
         "excerpt": "    void ifConstruct(int a) {\n        if (a > 0) {\n            a = 1;\n        } else {\n            a = 2;\n        }\n    }",
         "link": "parity/Constructs.java#L2-L8",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "forConstruct",
-      "language": "java",
-      "cc": 2,
-      "sloc": 2,
-      "mass": 2.8284271247461903,
-      "location": {
-        "relative_path": "parity/Constructs.java",
-        "start_line": 10,
-        "end_line": 14,
-        "excerpt": "    void forConstruct(int a) {\n        for (int i = 0; i < a; i++) {\n            a++;\n        }\n    }",
-        "link": "parity/Constructs.java#L10-L14",
         "is_remote_link": false
       }
     }
