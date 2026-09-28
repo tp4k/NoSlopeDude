@@ -97,16 +97,29 @@ pub fn match_callables(
     candidate: &[FileCallables],
     changes: &[Change],
 ) -> MatchOutput {
-    let base_by_path: HashMap<&RepoPath, usize> = base
-        .iter()
-        .enumerate()
-        .map(|(index, file)| (&file.path, index))
-        .collect();
-    let candidate_by_path: HashMap<&RepoPath, usize> = candidate
-        .iter()
-        .enumerate()
-        .map(|(index, file)| (&file.path, index))
-        .collect();
+    // A6: tier 1/2's own path lookups below assume each side's
+    // `FileCallables` list carries no two entries at the same path -- a
+    // duplicate would make one of them invisible to those lookups. Built by
+    // explicit `insert` rather than `.collect()` so the insert's own return
+    // value (the previous value at that key, if any) can pin the
+    // assumption: a `Some` means a duplicate path on that side.
+    // `debug_assert!` costs nothing in a release build.
+    let mut base_by_path: HashMap<&RepoPath, usize> = HashMap::new();
+    for (index, file) in base.iter().enumerate() {
+        let previous = base_by_path.insert(&file.path, index);
+        debug_assert!(
+            previous.is_none(),
+            "match_callables assumes paths are unique per side: duplicate base path"
+        );
+    }
+    let mut candidate_by_path: HashMap<&RepoPath, usize> = HashMap::new();
+    for (index, file) in candidate.iter().enumerate() {
+        let previous = candidate_by_path.insert(&file.path, index);
+        debug_assert!(
+            previous.is_none(),
+            "match_callables assumes paths are unique per side: duplicate candidate path"
+        );
+    }
 
     let mut base_matched: Vec<Vec<bool>> = base
         .iter()
