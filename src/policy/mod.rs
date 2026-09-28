@@ -159,13 +159,13 @@ fn diagnostics_for_candidate(
                         Err(err) => return Err(err),
                     };
                     let oid = match &bytes {
-                        Some(content) => Some(
-                            Oid::hash_object(ObjectType::Blob, content).map_err(|err| {
+                        Some(content) => {
+                            Some(Oid::hash_object(ObjectType::Blob, content).map_err(|err| {
                                 ConfigError::new(format!(
                                     "cannot hash worktree nsd.yml content: {err}"
                                 ))
-                            })?,
-                        ),
+                            })?)
+                        }
                         None => None,
                     };
                     (oid, bytes)
