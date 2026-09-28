@@ -24,6 +24,10 @@ use std::path::{Path, PathBuf};
 
 use tree_sitter::Language;
 
+use nsd::lower;
+use nsd::model::{ScanSettings, DEFAULT_MIN_CLONE_LINES};
+use nsd::pipeline;
+
 /// The four grammars D20 pins, mirroring `src/parse/mod.rs::language_for`.
 fn grammar_languages() -> Vec<Language> {
     vec![
@@ -220,5 +224,73 @@ fn test_the_scan_catches_a_planted_grammar_string() {
         "src/lower/ is expected to contain at least one real grammar node-kind literal \
          (it is the one exempt directory) -- finding none means violations_in itself is \
          broken, not that src/lower/ became clean"
+    );
+}
+
+/// C1 (WS-9): three always-parseable, distinct files -- distinct content so
+/// none is a byte-identical duplicate of another, which could let a
+/// caching or dedup shortcut mask a miscount. Kept minimal on purpose:
+/// this test exists to count `lower::lower_file` calls, not to exercise
+/// metrics/clones/rules logic, which already has its own suites.
+const LOWERING_FIXTURE_A_JAVA: &str = "public class A {\n    void a() {}\n}\n";
+const LOWERING_FIXTURE_B_JAVA: &str = "public class B {\n    void b() {}\n}\n";
+const LOWERING_FIXTURE_C_JS: &str = "function c() {\n  return 1;\n}\n";
+
+/// Writes the fixture above under `root/src/`.
+fn write_lowering_fixture(root: &Path) {
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("create src dir");
+    fs::write(src.join("A.java"), LOWERING_FIXTURE_A_JAVA).expect("write A.java");
+    fs::write(src.join("B.java"), LOWERING_FIXTURE_B_JAVA).expect("write B.java");
+    fs::write(src.join("c.js"), LOWERING_FIXTURE_C_JS).expect("write c.js");
+}
+
+/// C1 (WS-9, task.md): `pipeline::run` must lower each successfully parsed
+/// file exactly once. Before the fix, `pipeline.rs` itself, `metrics::run`,
+/// `clones::run` and `rules::run` each lowered independently -- four
+/// lowerings per file; this reads `lower::lowering_count()`'s delta around
+/// one `pipeline::run` call over the 3-file fixture above, so it fails at
+/// 12 or more before the fix (or, with only one or two of the three
+/// readers rewired, at 6 or 9) and passes at exactly 3 -- one lowering
+/// per file -- after. `LOWERING_COUNT` (`src/lower/mod.rs`) is
+/// process-global; the two
+/// tests above this one are static source scans that lower nothing, so
+/// nothing else in this binary moves the counter concurrently with this
+/// test.
+#[test]
+fn test_pipeline_lowers_each_file_once() {
+    let fixture_dir = tempfile::tempdir().expect("fixture tempdir");
+    write_lowering_fixture(fixture_dir.path());
+    let output_dir = tempfile::tempdir().expect("output tempdir");
+    let settings = ScanSettings {
+        output: output_dir.path().to_path_buf(),
+        include_tests: false,
+        exclude: Vec::new(),
+        min_clone_lines: DEFAULT_MIN_CLONE_LINES,
+    };
+    let target_input = fixture_dir
+        .path()
+        .to_str()
+        .expect("fixture path is valid UTF-8")
+        .to_string();
+
+    let before = lower::lowering_count();
+    let output = pipeline::run(&target_input, settings).expect("pipeline run should succeed");
+    let after = lower::lowering_count();
+
+    let file_count = output.discover.discovered.len();
+    assert_eq!(
+        file_count, 3,
+        "fixture should discover all 3 files; discovery drifted"
+    );
+    assert!(
+        output.parse_failures.is_empty(),
+        "fixture files must all parse cleanly: {:?}",
+        output.parse_failures
+    );
+    assert_eq!(
+        after - before,
+        file_count,
+        "pipeline::run should lower each of the {file_count} files exactly once"
     );
 }
