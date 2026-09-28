@@ -288,7 +288,9 @@ scanned shas · the scanner's own reported scanned-source-line count
 `maximum resident set size`, converted from bytes) · the scanner's own
 `incomplete` flag · the scanner's own `skipped_files` count
 (discovery-time exclusions plus non-`SyntaxError` parse failures;
-`SyntaxError` files are salvaged and not listed).
+`SyntaxError` files are salvaged and not listed; the seven
+`2026-09-18`/`2026-09-23` rows predate this and also count the 58
+`SyntaxError` files).
 
 | date | machine | spring-framework | angular | scanned source lines | wall clock | peak RSS | incomplete | skipped files |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
