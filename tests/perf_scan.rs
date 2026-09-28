@@ -38,10 +38,7 @@ fn test_missing_overall_anchor_exits_1() -> anyhow::Result<()> {
 "#,
     )?;
 
-    let output = run_sourced(&format!(
-        "extract_scanned_lines '{}'",
-        report.display()
-    ))?;
+    let output = run_sourced(&format!("extract_scanned_lines '{}'", report.display()))?;
 
     assert!(
         !output.status.success(),
@@ -77,10 +74,7 @@ fn test_skipped_count_survives_an_unbalanced_bracket_in_a_path() -> anyhow::Resu
 "#,
     )?;
 
-    let output = run_sourced(&format!(
-        "extract_skipped_count '{}'",
-        report.display()
-    ))?;
+    let output = run_sourced(&format!("extract_skipped_count '{}'", report.display()))?;
 
     assert!(
         output.status.success(),
@@ -110,7 +104,10 @@ fn test_row_carries_the_head_sha() -> anyhow::Result<()> {
         .split("nsd@")
         .nth(1)
         .unwrap_or_else(|| panic!("expected the date cell to carry `nsd@<sha>`, got: {stdout}"));
-    let hex: String = after.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
+    let hex: String = after
+        .chars()
+        .take_while(|c| c.is_ascii_hexdigit())
+        .collect();
     assert_eq!(
         hex.len(),
         40,
