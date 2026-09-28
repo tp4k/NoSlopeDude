@@ -34,20 +34,24 @@ extract_overall_block() {
 }
 
 # extract_scanned_lines <report.json path>
-# Prints the `scanned_lines` value, preferring the `overall` block but
-# falling back to a plain top-level grep if that block-scoped read comes
-# back empty.
+# Prints the `overall` block's own `scanned_lines` value. B10:
+# `scanned_lines` also appears inside the per-family (java/js_ts) score
+# blocks, so a plain top-level grep can silently read the wrong one if
+# `"overall": {` is ever absent -- e.g. a key rename in `report.json`.
+# Exits 1 with an `error:` line instead of falling back to that plain
+# grep.
 extract_scanned_lines() {
   local file="$1"
   local overall_block
   overall_block="$(extract_overall_block "$file")"
+  if [ -z "$overall_block" ]; then
+    echo "error: \"overall\": { anchor not found in $file; refusing to fall back to a plain top-level grep" >&2
+    return 1
+  fi
   local scanned_lines
   scanned_lines="$(printf '%s\n' "$overall_block" | grep -m1 '"scanned_lines"' | grep -o '[0-9]\+' || true)"
-  if [ -z "$scanned_lines" ]; then
-    scanned_lines="$(grep -m1 '"scanned_lines"' "$file" | grep -o '[0-9]\+' || true)"
-  fi
   if [ -z "$scanned_lines" ] || [ "$scanned_lines" -eq 0 ]; then
-    echo "error: could not read a nonzero scanned_lines count from $file" >&2
+    echo "error: could not read a nonzero scanned_lines count from the overall block in $file" >&2
     return 1
   fi
   printf '%s' "$scanned_lines"
