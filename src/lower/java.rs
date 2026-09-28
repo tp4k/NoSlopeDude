@@ -3,37 +3,27 @@
 //! "no per-grammar strings on the IR itself" requirement -- only this file
 //! and `src/lower/mod.rs` (via `Classification`) ever read a Java grammar
 //! string.
-//!
-//! C2 (task.md): every match below is against `node.kind_id()`/
-//! `child_by_field_id`, resolved through the caller's already-built
-//! `KindIds` table (`kind_ids.rs`), not a per-call `node.kind()` string
-//! comparison -- see that module's own doc comment for why the table is
-//! built once per file rather than cached per grammar.
 
 use tree_sitter::Node;
 
-use crate::exec_lines::is_comment_id;
+use crate::exec_lines::is_comment_kind;
 use crate::ir::{
     CallableKind, DamageKind, DecisionKind, OwnerKind, OwnerSegment, Span, TerminatorKind,
 };
+use crate::model::LanguageFamily;
 
-use super::kind_ids::KindIds;
 use super::{CallableInfo, Classification};
 
 /// D22/D7's terminator kinds: identical node-kind literals to JS/TS's own
 /// table, kept as a separate copy since each lowering owns its table
 /// independently.
-fn terminator_kind(ids: &KindIds, kind_id: u16) -> Option<TerminatorKind> {
-    if ids.is("return_statement", kind_id) {
-        Some(TerminatorKind::Return)
-    } else if ids.is("break_statement", kind_id) {
-        Some(TerminatorKind::Break)
-    } else if ids.is("continue_statement", kind_id) {
-        Some(TerminatorKind::Continue)
-    } else if ids.is("throw_statement", kind_id) {
-        Some(TerminatorKind::Throw)
-    } else {
-        None
+fn terminator_kind(kind: &str) -> Option<TerminatorKind> {
+    match kind {
+        "return_statement" => Some(TerminatorKind::Return),
+        "break_statement" => Some(TerminatorKind::Break),
+        "continue_statement" => Some(TerminatorKind::Continue),
+        "throw_statement" => Some(TerminatorKind::Throw),
+        _ => None,
     }
 }
 
@@ -44,36 +34,30 @@ fn terminator_kind(ids: &KindIds, kind_id: u16) -> Option<TerminatorKind> {
 /// `callable_info` below: unlike the pre-M1-7 shape (a separate
 /// `CALLABLE_KINDS.contains()` check plus a would-be lookup), there is only
 /// one table here, so it cannot drift out of sync with itself.
-fn callable_kind_for(ids: &KindIds, kind_id: u16) -> Option<CallableKind> {
-    if ids.is("method_declaration", kind_id) {
-        Some(CallableKind::JavaMethod)
-    } else if ids.is("constructor_declaration", kind_id) {
-        Some(CallableKind::JavaConstructor)
-    } else if ids.is("compact_constructor_declaration", kind_id) {
-        Some(CallableKind::JavaCompactConstructor)
-    } else if ids.is("static_initializer", kind_id) {
-        Some(CallableKind::JavaStaticInitializer)
-    } else if ids.is("lambda_expression", kind_id) {
-        Some(CallableKind::JavaLambda)
-    } else {
-        None
+fn callable_kind_for(kind: &str) -> Option<CallableKind> {
+    match kind {
+        "method_declaration" => Some(CallableKind::JavaMethod),
+        "constructor_declaration" => Some(CallableKind::JavaConstructor),
+        "compact_constructor_declaration" => Some(CallableKind::JavaCompactConstructor),
+        "static_initializer" => Some(CallableKind::JavaStaticInitializer),
+        "lambda_expression" => Some(CallableKind::JavaLambda),
+        _ => None,
     }
 }
 
 /// D8's body-node finder: every callable kind exposes it through the `body`
 /// field, except `static_initializer`, whose direct `block` child carries no
 /// field name.
-fn callable_body<'tree>(node: Node<'tree>, ids: &KindIds) -> Option<Node<'tree>> {
-    ids.field("body")
-        .and_then(|field_id| node.child_by_field_id(field_id))
-        .or_else(|| first_child_of_kind(node, ids, "block"))
+fn callable_body(node: Node) -> Option<Node> {
+    node.child_by_field_name("body")
+        .or_else(|| first_child_of_kind(node, "block"))
 }
 
-fn first_child_of_kind<'tree>(node: Node<'tree>, ids: &KindIds, name: &str) -> Option<Node<'tree>> {
+fn first_child_of_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
     let mut cursor = node.walk();
     let found = node
         .children(&mut cursor)
-        .find(|child| ids.is(name, child.kind_id()));
+        .find(|child| child.kind() == kind);
     found
 }
 
@@ -82,34 +66,25 @@ fn first_child_of_kind<'tree>(node: Node<'tree>, ids: &KindIds, name: &str) -> O
 /// `pair` or `assignment_expression`; else `None`. `resolve_name` (below)
 /// and M1-7's `is_anonymous` fact both key on this exact same resolution --
 /// one table, not two that could drift apart.
-fn declared_name(node: Node, parent: Option<Node>, source: &str, ids: &KindIds) -> Option<String> {
-    if let Some(name_node) = ids
-        .field("name")
-        .and_then(|field_id| node.child_by_field_id(field_id))
-    {
+fn declared_name(node: Node, parent: Option<Node>, source: &str) -> Option<String> {
+    if let Some(name_node) = node.child_by_field_name("name") {
         return Some(node_text(name_node, source));
     }
     let parent = parent?;
-    let parent_kind_id = parent.kind_id();
-    let field = if ids.is("variable_declarator", parent_kind_id) {
-        Some("name")
-    } else if ids.is("pair", parent_kind_id) {
-        Some("key")
-    } else if ids.is("assignment_expression", parent_kind_id) {
-        Some("left")
-    } else {
-        None
+    let field = match parent.kind() {
+        "variable_declarator" => Some("name"),
+        "pair" => Some("key"),
+        "assignment_expression" => Some("left"),
+        _ => None,
     };
-    let name_node = field
-        .and_then(|field| ids.field(field))
-        .and_then(|field_id| parent.child_by_field_id(field_id))?;
+    let name_node = field.and_then(|field| parent.child_by_field_name(field))?;
     Some(node_text(name_node, source))
 }
 
 /// D10: `declared_name`, else `<anonymous>@<line>`. The same table as JS/TS's
 /// own copy -- see `IrCallable`'s doc comment on why both lowerings carry it.
-fn resolve_name(node: Node, parent: Option<Node>, source: &str, ids: &KindIds) -> String {
-    declared_name(node, parent, source, ids)
+fn resolve_name(node: Node, parent: Option<Node>, source: &str) -> String {
+    declared_name(node, parent, source)
         .unwrap_or_else(|| format!("<anonymous>@{}", node.start_position().row + 1))
 }
 
@@ -131,33 +106,25 @@ fn node_text(node: Node, source: &str) -> String {
 /// field's span) and `g(int x)`/`g(int x[])` (a `formal_parameter`'s own
 /// C-style `dimensions` field, also outside `type`'s span, was dropped
 /// entirely). Both are appended onto the whitespace-normalized `type` text.
-fn callable_signature(node: Node, source: &str, ids: &KindIds) -> Vec<String> {
-    let Some(parameters) = ids
-        .field("parameters")
-        .and_then(|field_id| node.child_by_field_id(field_id))
-    else {
+fn callable_signature(node: Node, source: &str) -> Vec<String> {
+    let Some(parameters) = node.child_by_field_name("parameters") else {
         return Vec::new();
     };
-    if !ids.is("formal_parameters", parameters.kind_id()) {
+    if parameters.kind() != "formal_parameters" {
         return Vec::new();
     }
-    let type_field = ids.field("type");
-    let dimensions_field = ids.field("dimensions");
     let mut cursor = parameters.walk();
     parameters
         .children(&mut cursor)
         .filter_map(|parameter| {
-            let type_node =
-                type_field.and_then(|field_id| parameter.child_by_field_id(field_id))?;
+            let type_node = parameter.child_by_field_name("type")?;
             let mut text = node_text(type_node, source)
                 .split_whitespace()
                 .collect::<Vec<_>>()
                 .join(" ");
-            if ids.is("spread_parameter", parameter.kind_id()) {
+            if parameter.kind() == "spread_parameter" {
                 text.push_str("...");
-            } else if let Some(dimensions) =
-                dimensions_field.and_then(|field_id| parameter.child_by_field_id(field_id))
-            {
+            } else if let Some(dimensions) = parameter.child_by_field_name("dimensions") {
                 text.extend(node_text(dimensions, source).split_whitespace());
             }
             Some(text)
@@ -177,56 +144,52 @@ fn callable_signature(node: Node, source: &str, ids: &KindIds) -> Vec<String> {
 /// `AnonymousClassBody`, distinguishing `PLUS { … }`'s own overriding methods
 /// from the enum's shared ones.
 fn owner_segment_for_type(
-    ids: &KindIds,
-    kind_id: u16,
-    parent_kind_id: Option<u16>,
+    kind: &str,
+    parent_kind: Option<&str>,
     node: Node,
     source: &str,
 ) -> Option<OwnerSegment> {
-    let is_named_type = ids.is("class_declaration", kind_id)
-        || ids.is("interface_declaration", kind_id)
-        || ids.is("enum_declaration", kind_id)
-        || ids.is("record_declaration", kind_id)
-        || ids.is("annotation_type_declaration", kind_id);
-    if is_named_type {
-        let name = ids
-            .field("name")
-            .and_then(|field_id| node.child_by_field_id(field_id))
-            .map(|name_node| node_text(name_node, source));
-        return Some(OwnerSegment {
-            kind: OwnerKind::NamedType,
-            name,
-        });
+    match kind {
+        "class_declaration"
+        | "interface_declaration"
+        | "enum_declaration"
+        | "record_declaration"
+        | "annotation_type_declaration" => {
+            let name = node
+                .child_by_field_name("name")
+                .map(|name_node| node_text(name_node, source));
+            Some(OwnerSegment {
+                kind: OwnerKind::NamedType,
+                name,
+            })
+        }
+        "class_body"
+            if parent_kind == Some("object_creation_expression")
+                || parent_kind == Some("enum_constant") =>
+        {
+            Some(OwnerSegment {
+                kind: OwnerKind::AnonymousClassBody,
+                name: None,
+            })
+        }
+        _ => None,
     }
-    if ids.is("class_body", kind_id)
-        && parent_kind_id.is_some_and(|parent_kind_id| {
-            ids.is("object_creation_expression", parent_kind_id)
-                || ids.is("enum_constant", parent_kind_id)
-        })
-    {
-        return Some(OwnerSegment {
-            kind: OwnerKind::AnonymousClassBody,
-            name: None,
-        });
-    }
-    None
 }
 
 fn callable_info(
     node: Node,
-    kind_id: u16,
+    kind: &str,
     parent: Option<Node>,
     source: &str,
-    ids: &KindIds,
 ) -> Option<CallableInfo> {
-    let callable_kind = callable_kind_for(ids, kind_id)?;
-    let body = callable_body(node, ids)?;
+    let callable_kind = callable_kind_for(kind)?;
+    let body = callable_body(node)?;
     Some(CallableInfo {
         body_span: Span::from_node(body),
-        name: resolve_name(node, parent, source, ids),
+        name: resolve_name(node, parent, source),
         kind: callable_kind,
-        is_anonymous: declared_name(node, parent, source, ids).is_none(),
-        signature: callable_signature(node, source, ids),
+        is_anonymous: declared_name(node, parent, source).is_none(),
+        signature: callable_signature(node, source),
     })
 }
 
@@ -238,109 +201,82 @@ fn callable_info(
 /// lifetime rather than promising `'static`, but `IrBlock::kind` is
 /// `&'static str` (`model::SyntaxBlock::kind` must not move), so the caller
 /// needs the match arm's `'static` literal, not `node.kind()` itself.
-fn is_block_kind(ids: &KindIds, kind_id: u16) -> Option<&'static str> {
-    if ids.is("block", kind_id) {
-        Some("block")
-    } else if ids.is("constructor_body", kind_id) {
-        Some("constructor_body")
-    } else {
-        None
+fn is_block_kind(kind: &str) -> Option<&'static str> {
+    match kind {
+        "block" => Some("block"),
+        "constructor_body" => Some("constructor_body"),
+        _ => None,
     }
 }
 
 /// True for Java's `default` `switch_label`: its first child's kind is
 /// literally `"default"`. `decision_kind` (below) counts every other
 /// `switch_label` as a `Case`.
-fn is_default_label(node: Node, ids: &KindIds) -> bool {
-    node.child(0)
-        .is_some_and(|child| ids.is("default", child.kind_id()))
+fn is_default_label(node: Node) -> bool {
+    node.child(0).is_some_and(|child| child.kind() == "default")
 }
 
-fn decision_kind(node: Node, ids: &KindIds, kind_id: u16) -> Option<DecisionKind> {
-    if ids.is("if_statement", kind_id) {
-        return Some(DecisionKind::Branch);
-    }
-    if ids.is("for_statement", kind_id)
-        || ids.is("enhanced_for_statement", kind_id)
-        || ids.is("while_statement", kind_id)
-        || ids.is("do_statement", kind_id)
-    {
-        return Some(DecisionKind::Loop);
-    }
-    if ids.is("switch_label", kind_id) {
-        return if is_default_label(node, ids) {
-            None
-        } else {
-            Some(DecisionKind::Case)
-        };
-    }
-    if ids.is("catch_clause", kind_id) {
-        return Some(DecisionKind::Catch);
-    }
-    if ids.is("ternary_expression", kind_id) {
-        return Some(DecisionKind::Ternary);
-    }
-    if ids.is("binary_expression", kind_id) {
-        return match operator_kind(node, ids) {
-            Some(operator_id) if ids.is("&&", operator_id) => Some(DecisionKind::And),
-            Some(operator_id) if ids.is("||", operator_id) => Some(DecisionKind::Or),
+fn decision_kind(node: Node, kind: &str) -> Option<DecisionKind> {
+    match kind {
+        "if_statement" => Some(DecisionKind::Branch),
+        "for_statement" | "enhanced_for_statement" | "while_statement" | "do_statement" => {
+            Some(DecisionKind::Loop)
+        }
+        "switch_label" if !is_default_label(node) => Some(DecisionKind::Case),
+        "catch_clause" => Some(DecisionKind::Catch),
+        "ternary_expression" => Some(DecisionKind::Ternary),
+        "binary_expression" => match operator_text(node) {
+            Some("&&") => Some(DecisionKind::And),
+            Some("||") => Some(DecisionKind::Or),
             _ => None,
-        };
+        },
+        _ => None,
     }
-    None
 }
 
-/// A `binary_expression`'s own operator token, via the `operator` field both
-/// grammars expose it under -- its numeric kind id, not its text.
-fn operator_kind(node: Node, ids: &KindIds) -> Option<u16> {
-    ids.field("operator")
-        .and_then(|field_id| node.child_by_field_id(field_id))
-        .map(|operator| operator.kind_id())
+/// A `binary_expression`'s own operator token text, via the `operator`
+/// field both grammars expose it under.
+fn operator_text<'tree>(node: Node<'tree>) -> Option<&'tree str> {
+    node.child_by_field_name("operator")
+        .map(|child| child.kind())
 }
 
 /// Whether `node` itself is the block directly forming a `catch` clause's
 /// body -- an O(1) check; `src/lower/mod.rs`'s `build_ir` combines this with
 /// the parent's own already-computed flag to answer "or sits inside it"
-/// without walking back up the tree per node. `parent_kind_id` is the
-/// caller's already-threaded parent (`build_ir` passes it down the
-/// traversal instead of calling `node.parent()`, which in tree-sitter
-/// 0.25.10 restarts at the tree root and descends, turning one linear tree
-/// build into `Θ(depth)` work per node).
-fn is_catch_body_root(ids: &KindIds, kind_id: u16, parent_kind_id: Option<u16>) -> bool {
-    is_block_kind(ids, kind_id).is_some()
-        && parent_kind_id.is_some_and(|parent_kind_id| ids.is("catch_clause", parent_kind_id))
+/// without walking back up the tree per node. `parent_kind` is the caller's
+/// already-threaded parent (`build_ir` passes it down the traversal instead
+/// of calling `node.parent()`, which in tree-sitter 0.25.10 restarts at the
+/// tree root and descends, turning one linear tree build into `Θ(depth)`
+/// work per node).
+fn is_catch_body_root(kind: &str, parent_kind: Option<&str>) -> bool {
+    is_block_kind(kind).is_some() && parent_kind == Some("catch_clause")
 }
 
 /// D15's Java clone-candidate containers (`clones::statement_children`'s
 /// Java arms, re-derived here since that function is private): a direct
 /// named, non-comment child of a `block`/`constructor_body`, or a
 /// `switch_block_statement_group`'s direct child other than its own
-/// `switch_label`. Takes the already-threaded `parent_kind_id` rather than
+/// `switch_label`. Takes the already-threaded `parent_kind` rather than
 /// calling `node.parent()` -- see `is_catch_body_root`'s doc comment -- and
 /// the caller's own already-computed `is_named`/`is_comment` (see
 /// `classify`'s own doc comment: each is computed exactly once per node and
 /// threaded into every helper, rather than re-derived here). Production: its
 /// result is `IrNode::is_clone_statement`.
 pub(super) fn is_clone_statement(
-    ids: &KindIds,
-    kind_id: u16,
-    parent_kind_id: Option<u16>,
+    kind: &str,
+    parent_kind: Option<&str>,
     is_named: bool,
     is_comment: bool,
 ) -> bool {
     if !is_named || is_comment {
         return false;
     }
-    let Some(parent_kind_id) = parent_kind_id else {
-        return false;
-    };
-    if ids.is("block", parent_kind_id) || ids.is("constructor_body", parent_kind_id) {
-        return true;
+    match parent_kind {
+        Some("block") | Some("constructor_body") => true,
+        Some("switch_block_statement_group") => kind != "switch_label",
+        _ => false,
     }
-    if ids.is("switch_block_statement_group", parent_kind_id) {
-        return !ids.is("switch_label", kind_id);
-    }
-    false
 }
 
 /// M0c-9: under orchard's grammar, a varargs parameter's annotation (e.g.
@@ -359,23 +295,16 @@ fn classify_damage(node: Node) -> Option<DamageKind> {
 /// `parent` is the tree-sitter `Node` `src/lower/mod.rs`'s `build_ir` already
 /// holds for this node's parent (threaded down the traversal in a stack
 /// mirroring its own node stack), so nothing below this point calls
-/// `node.parent()`. `ids` is that same `build_ir`'s per-file `KindIds` table
-/// (C2), built once from `file.tree.language()`; `kind_id`/`parent_kind_id`/
-/// `is_named`/`is_comment` are each computed exactly once here (`kind_id()`,
-/// not `node.kind()` -- an FFI call plus a UTF-8 validation) and threaded
-/// into every helper, rather than every helper re-deriving them
-/// independently.
-pub(super) fn classify(
-    node: Node,
-    source: &str,
-    parent: Option<Node>,
-    ids: &KindIds,
-) -> Classification {
-    let kind_id = node.kind_id();
-    let parent_kind_id = parent.map(|parent| parent.kind_id());
+/// `node.parent()`. `kind`/`parent_kind`/`is_named`/`is_comment` are each
+/// computed exactly once here and threaded into every helper, rather than
+/// every helper re-deriving `node.kind()` (a strlen + full-UTF8-validate
+/// call), `node.is_named()` or `is_comment_kind` independently.
+pub(super) fn classify(node: Node, source: &str, parent: Option<Node>) -> Classification {
+    let kind = node.kind();
+    let parent_kind = parent.map(|parent| parent.kind());
     let is_named = node.is_named();
-    let is_comment = is_comment_id(kind_id, ids);
-    let callable = callable_info(node, kind_id, parent, source, ids);
+    let is_comment = is_comment_kind(kind, LanguageFamily::Java);
+    let callable = callable_info(node, kind, parent, source);
     // M1-7: a callable node's own owner-chain segment reuses the `Callable`
     // facts `callable_info` just computed (its kind and declared-name-ness),
     // rather than re-deriving them; every other owner-kind node (named type,
@@ -389,18 +318,17 @@ pub(super) fn classify(
                 Some(info.name.clone())
             },
         }),
-        None => owner_segment_for_type(ids, kind_id, parent_kind_id, node, source),
+        None => owner_segment_for_type(kind, parent_kind, node, source),
     };
     Classification {
-        decision: decision_kind(node, ids, kind_id),
-        terminator: terminator_kind(ids, kind_id),
-        in_block: parent_kind_id
-            .is_some_and(|parent_kind_id| is_block_kind(ids, parent_kind_id).is_some()),
-        is_catch_body_root: is_catch_body_root(ids, kind_id, parent_kind_id),
+        decision: decision_kind(node, kind),
+        terminator: terminator_kind(kind),
+        in_block: parent_kind.is_some_and(|kind| is_block_kind(kind).is_some()),
+        is_catch_body_root: is_catch_body_root(kind, parent_kind),
         damage: classify_damage(node),
-        is_clone_statement: is_clone_statement(ids, kind_id, parent_kind_id, is_named, is_comment),
+        is_clone_statement: is_clone_statement(kind, parent_kind, is_named, is_comment),
         is_hoisted_or_type_only: false,
-        block_kind: is_block_kind(ids, kind_id),
+        block_kind: is_block_kind(kind),
         callable,
         owner_segment,
         is_comment,

@@ -7,19 +7,10 @@
 
 use tree_sitter::Node;
 
-use crate::lower::kind_ids::KindIds;
-#[cfg(test)]
 use crate::model::LanguageFamily;
 
 /// D11: a leaf token's line counts toward SLOC when the leaf is named and
 /// is not a comment.
-///
-/// Test-only: production now goes through `is_comment_id` below (C2, task.md)
-/// -- a per-call `node.kind()` string comparison, kept only so the tests in
-/// this module and `src/lower/mod.rs`'s D11 oracle test
-/// (`test_executable_flag_matches_the_d11_predicate`) still have an
-/// independent, string-based reference to compare the numeric path against.
-#[cfg(test)]
 pub(crate) fn is_comment_kind(kind: &str, language: LanguageFamily) -> bool {
     match language {
         LanguageFamily::Java => matches!(kind, "line_comment" | "block_comment"),
@@ -27,63 +18,23 @@ pub(crate) fn is_comment_kind(kind: &str, language: LanguageFamily) -> bool {
     }
 }
 
-/// C2 (task.md): the numeric replacement for `is_comment_kind` above --
-/// `kind_id` against `ids`'s own `line_comment`/`block_comment`/`comment`
-/// buckets rather than `node.kind()` against a language-gated string match.
-/// No `language` parameter: `ids` is already built from this file's own
-/// `Language` (`KindIds::build`'s own doc comment), and a name absent from
-/// that grammar simply resolves to an empty bucket, so e.g. `line_comment`
-/// never matches a JS/TS `kind_id` without needing a language branch here.
-pub(crate) fn is_comment_id(kind_id: u16, ids: &KindIds) -> bool {
-    ids.is("line_comment", kind_id)
-        || ids.is("block_comment", kind_id)
-        || ids.is("comment", kind_id)
-}
-
 /// Node kinds whose *bare* form (no label, no returned expression) has only
 /// anonymous keyword/`;` children, so the generic `child_count() == 0` leaf
 /// check misses them entirely — undercounting a line holding only `break;`,
 /// `continue;` or `return;`. A `return expr;` still isn't matched here since
 /// its own line is already covered by `expr`'s leaf tokens.
-///
-/// Test-only -- see `is_comment_kind`'s own doc comment; the numeric
-/// replacement is `is_bare_control_flow_id` below.
-#[cfg(test)]
 const BARE_CONTROL_FLOW_KINDS: &[&str] =
     &["break_statement", "continue_statement", "return_statement"];
 
-#[cfg(test)]
 fn is_bare_control_flow(node: Node) -> bool {
     BARE_CONTROL_FLOW_KINDS.contains(&node.kind()) && node.named_child_count() == 0
 }
 
-/// C2: the numeric replacement for `is_bare_control_flow` above.
-fn is_bare_control_flow_id(node: Node, ids: &KindIds) -> bool {
-    let kind_id = node.kind_id();
-    (ids.is("break_statement", kind_id)
-        || ids.is("continue_statement", kind_id)
-        || ids.is("return_statement", kind_id))
-        && node.named_child_count() == 0
-}
-
-/// Test-only -- see `is_comment_kind`'s own doc comment; the numeric
-/// replacement (now the sole production caller, from `src/lower/mod.rs`'s
-/// `build_ir`) is `is_executable_leaf_id` below.
-#[cfg(test)]
 pub(crate) fn is_executable_leaf(node: Node, language: LanguageFamily) -> bool {
     if !node.is_named() || is_comment_kind(node.kind(), language) {
         return false;
     }
     node.child_count() == 0 || is_bare_control_flow(node)
-}
-
-/// C2 (task.md): the numeric replacement for `is_executable_leaf` above --
-/// `node.kind_id()`/`ids.is(...)` throughout, never `node.kind()`.
-pub(crate) fn is_executable_leaf_id(node: Node, ids: &KindIds) -> bool {
-    if !node.is_named() || is_comment_id(node.kind_id(), ids) {
-        return false;
-    }
-    node.child_count() == 0 || is_bare_control_flow_id(node, ids)
 }
 
 /// Iterative pre-order traversal via a single reused `TreeCursor` (no

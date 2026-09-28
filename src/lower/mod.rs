@@ -13,7 +13,6 @@
 
 mod java;
 mod jsts;
-pub(crate) mod kind_ids;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -22,12 +21,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tree_sitter::Node;
 
 #[cfg(test)]
-use crate::exec_lines::is_comment_id;
-#[cfg(test)]
 use crate::exec_lines::is_comment_kind;
-#[cfg(test)]
 use crate::exec_lines::is_executable_leaf;
-use crate::exec_lines::is_executable_leaf_id;
 #[cfg(test)]
 use crate::ir::is_clear_of_damage;
 use crate::ir::{
@@ -36,7 +31,6 @@ use crate::ir::{
 };
 use crate::model::LanguageFamily;
 use crate::parse::ParsedFile;
-use kind_ids::KindIds;
 
 /// M0c's fingerprint keys on this alongside `ir::IR_VERSION`; bump it
 /// whenever the Java lowering's classification changes what an `IrNode`
@@ -165,21 +159,10 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
         owners: &mut owners,
         owner_spans: &mut owner_spans,
     };
-    // C2 (task.md): built once per `lower_file` call from this file's own
-    // `file.tree.language()` -- see `kind_ids::KindIds`'s own doc comment for
-    // why a fresh table per call, rather than one cached per
-    // `LanguageFamily`, is required (JS/TS alone spans three distinct
-    // grammars/id-spaces).
-    let ids = KindIds::build(
-        &file.tree.language(),
-        kind_ids::KIND_NAMES,
-        kind_ids::FIELD_NAMES,
-    );
     let root = build_ir(
         file.tree.root_node(),
         file.language,
         &file.source,
-        &ids,
         &mut tables,
     );
 
@@ -584,12 +567,11 @@ fn classify(
     language: LanguageFamily,
     source: &str,
     parent: Option<Node>,
-    field_id: Option<u16>,
-    ids: &KindIds,
+    field_name: Option<&str>,
 ) -> Classification {
     match language {
-        LanguageFamily::Java => java::classify(node, source, parent, ids),
-        LanguageFamily::JsTs => jsts::classify(node, source, parent, field_id, ids),
+        LanguageFamily::Java => java::classify(node, source, parent),
+        LanguageFamily::JsTs => jsts::classify(node, source, parent, field_name),
     }
 }
 
@@ -606,35 +588,22 @@ fn classify(
 /// here runs against the deep-nesting perf fixture.
 #[cfg(test)]
 fn is_clone_statement(node: Node, language: LanguageFamily) -> bool {
-    // Test-only: builds its own `KindIds` from `node.language()` rather than
-    // threading a caller-built one through every test call site below --
-    // this function's own callers never run against the deep-nesting perf
-    // fixture (see this function's own doc comment), so the extra build per
-    // call costs nothing the acceptance requires.
-    let ids = KindIds::build(
-        &node.language(),
-        kind_ids::KIND_NAMES,
-        kind_ids::FIELD_NAMES,
-    );
-    let kind_id = node.kind_id();
+    let kind = node.kind();
     let parent = node.parent();
-    let parent_kind_id = parent.map(|parent| parent.kind_id());
+    let parent_kind = parent.map(|parent| parent.kind());
     let is_named = node.is_named();
-    let is_comment = is_comment_id(kind_id, &ids);
+    let is_comment = is_comment_kind(kind, language);
     match language {
-        LanguageFamily::Java => {
-            java::is_clone_statement(&ids, kind_id, parent_kind_id, is_named, is_comment)
-        }
+        LanguageFamily::Java => java::is_clone_statement(kind, parent_kind, is_named, is_comment),
         LanguageFamily::JsTs => {
-            let field_id = parent.and_then(|parent| {
+            let field_name = parent.and_then(|parent| {
                 let mut cursor = parent.walk();
                 let index = parent
                     .children(&mut cursor)
                     .position(|child| child.id() == node.id())?;
-                let field_name = parent.field_name_for_child(index as u32)?;
-                ids.field(field_name)
+                parent.field_name_for_child(index as u32)
             });
-            jsts::is_clone_statement(&ids, parent_kind_id, field_id, is_named, is_comment)
+            jsts::is_clone_statement(parent_kind, field_name, is_named, is_comment)
         }
     }
 }
@@ -737,13 +706,7 @@ struct IrTables<'a> {
 /// later, separate pass over this already-built `IrNode` tree, using an
 /// explicit work-list rather than a `TreeCursor` -- a different shape from
 /// this one, not the same one reused.
-fn build_ir(
-    root: Node,
-    language: LanguageFamily,
-    source: &str,
-    ids: &KindIds,
-    tables: &mut IrTables,
-) -> IrNode {
+fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrTables) -> IrNode {
     // `parent_in_catch_body` is the already-computed `in_catch_body` flag of
     // this node's own parent (or `false` for `root`), inherited rather than
     // re-derived -- see `Classification::is_catch_body_root`'s doc comment.
@@ -779,12 +742,12 @@ fn build_ir(
     let open = |node: Node,
                 parent: Option<Node>,
                 parent_in_catch_body: bool,
-                field_id: Option<u16>,
+                field_name: Option<&str>,
                 tables: &mut IrTables,
                 owner_stack: &mut Vec<u32>|
      -> (IrNode, bool, bool, Option<EntitySlot>, bool) {
         let span = Span::from_node(node);
-        let classification = classify(node, language, source, parent, field_id, ids);
+        let classification = classify(node, language, source, parent, field_name);
         let self_damage = classification.damage.is_some();
         if let Some(kind) = classification.damage {
             tables.damage.push(DamageSpan { kind, span });
@@ -823,7 +786,7 @@ fn build_ir(
         let in_catch_body = classification.is_catch_body_root || parent_in_catch_body;
         let ir_node = IrNode {
             span,
-            executable: is_executable_leaf_id(node, ids),
+            executable: is_executable_leaf(node, language),
             decision: classification.decision,
             terminator: classification.terminator,
             in_block: classification.in_block,
@@ -870,12 +833,12 @@ fn build_ir(
         if cursor.goto_first_child() {
             let parent_in_catch_body = *catch_flags.last().unwrap_or(&false);
             let parent = *parents.last().unwrap_or(&root);
-            let field_id = cursor.field_id().map(|field_id| field_id.get());
+            let field_name = cursor.field_name();
             let (node, in_catch_body, self_damage, entity_slot, owner_pushed) = open(
                 cursor.node(),
                 Some(parent),
                 parent_in_catch_body,
-                field_id,
+                field_name,
                 tables,
                 &mut owner_stack,
             );
@@ -913,12 +876,12 @@ fn build_ir(
             if cursor.goto_next_sibling() {
                 let parent_in_catch_body = *catch_flags.last().unwrap_or(&false);
                 let parent_node = *parents.last().unwrap_or(&root);
-                let field_id = cursor.field_id().map(|field_id| field_id.get());
+                let field_name = cursor.field_name();
                 let (node, in_catch_body, self_damage, entity_slot, owner_pushed) = open(
                     cursor.node(),
                     Some(parent_node),
                     parent_in_catch_body,
-                    field_id,
+                    field_name,
                     tables,
                     &mut owner_stack,
                 );
@@ -1062,12 +1025,7 @@ mod tests {
                 owners: &mut owners,
                 owner_spans: &mut owner_spans,
             };
-            let ids = KindIds::build(
-                &tree.language(),
-                kind_ids::KIND_NAMES,
-                kind_ids::FIELD_NAMES,
-            );
-            build_ir(tree.root_node(), language, &source, &ids, &mut tables);
+            build_ir(tree.root_node(), language, &source, &mut tables);
 
             let mut statements = Vec::new();
             for_each_descendant(tree.root_node(), |node| {
@@ -1155,12 +1113,7 @@ mod tests {
                 owners: &mut owners,
                 owner_spans: &mut owner_spans,
             };
-            let ids = KindIds::build(
-                &tree.language(),
-                kind_ids::KIND_NAMES,
-                kind_ids::FIELD_NAMES,
-            );
-            let root = build_ir(tree.root_node(), language, &source, &ids, &mut tables);
+            let root = build_ir(tree.root_node(), language, &source, &mut tables);
 
             let mut ir_nodes = Vec::new();
             collect_ir_nodes(&root, &mut ir_nodes);
@@ -1337,44 +1290,6 @@ mod tests {
                     is_clear_of_damage(node.span, &ir_file.damage),
                     "expected every executable/clone-candidate node to be damage-clear: {:?}",
                     node.span
-                );
-            }
-        }
-    }
-
-    /// C2 (task.md): `KindIds::build` must be alias-aware -- for every
-    /// grammar, every numeric id whose own `node_kind_for_id` resolves to one
-    /// of `kind_ids::KIND_NAMES`' literals must be present in that name's own
-    /// `KindIds::ids` set, not just the single id
-    /// `Language::id_for_node_kind` would have returned. Sweeps
-    /// `0..node_kind_count()` directly (the same sweep `KindIds::build` does
-    /// internally) rather than asserting a fixed id count or a single sample
-    /// id per name, so a regression to `id_for_node_kind` -- which silently
-    /// drops every alias but the first for a shared name -- is caught for
-    /// whichever name(s) happen to have more than one id in a given grammar,
-    /// without this test needing to know in advance which those are.
-    #[test]
-    fn kind_id_tables_cover_every_alias_of_each_kind() {
-        for grammar in [
-            Grammar::Java,
-            Grammar::JavaScript,
-            Grammar::TypeScript,
-            Grammar::Tsx,
-        ] {
-            let language = tree_sitter_language(grammar);
-            let ids = KindIds::build(&language, kind_ids::KIND_NAMES, kind_ids::FIELD_NAMES);
-            let count = language.node_kind_count() as u16;
-            for id in 0..count {
-                let Some(name) = language.node_kind_for_id(id) else {
-                    continue;
-                };
-                if !kind_ids::KIND_NAMES.contains(&name) {
-                    continue;
-                }
-                assert!(
-                    ids.ids(name).contains(&id),
-                    "{grammar:?}: id {id} (alias of {name:?}) missing from KindIds::ids({name:?}) = {:?}",
-                    ids.ids(name)
                 );
             }
         }
