@@ -101,29 +101,25 @@ pub(crate) struct KindIds {
 }
 
 impl KindIds {
-    /// Builds the table via `Language::id_for_node_kind` -- one id per name.
-    ///
-    /// NOTE (WS-10 red commit): this is deliberately the wrong
-    /// implementation the spec's own "do not reuse" line warns about --
-    /// `id_for_node_kind` returns exactly one id per name and cannot see an
-    /// aliased symbol id sharing that name, so `kind_id_tables_cover_every_alias_of_each_kind`
-    /// fails against it. The green commit immediately following replaces
-    /// this with the alias-aware sweep over `0..node_kind_count()`.
+    /// Builds the table by sweeping every id in `0..node_kind_count()` and
+    /// grouping by `node_kind_for_id`, rather than `Language::id_for_node_kind`
+    /// (do-not-reuse: it returns exactly one id per name and cannot see an
+    /// aliased symbol id that shares that name), so every alias is captured.
     pub(crate) fn build(
         language: &Language,
         kind_names: &[&'static str],
         field_names: &[&'static str],
     ) -> KindIds {
-        let kinds = kind_names
-            .iter()
-            .map(|name| {
-                let ids = match language.id_for_node_kind(name, true) {
-                    0 => Vec::new(),
-                    id => vec![id],
-                };
-                (*name, ids)
-            })
-            .collect();
+        let mut kinds: HashMap<&'static str, Vec<u16>> =
+            kind_names.iter().map(|name| (*name, Vec::new())).collect();
+        let count = language.node_kind_count() as u16;
+        for id in 0..count {
+            if let Some(name) = language.node_kind_for_id(id) {
+                if let Some(bucket) = kinds.get_mut(name) {
+                    bucket.push(id);
+                }
+            }
+        }
         let fields = field_names
             .iter()
             .map(|name| {
