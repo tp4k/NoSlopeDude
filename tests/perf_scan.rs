@@ -179,7 +179,11 @@ fn test_row_marks_a_dirty_src_tree() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let repo = dir.path();
     let run_git = |args: &[&str]| -> anyhow::Result<Output> {
-        Ok(Command::new("git").arg("-C").arg(repo).args(args).output()?)
+        Ok(Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()?)
     };
     run_git(&["init"])?;
     run_git(&[
