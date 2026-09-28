@@ -278,13 +278,16 @@ code that was previously invisible.
 
 ## Rows
 
-Each row: date (UTC) · machine · the two fixture repos and their scanned
-shas · the scanner's own reported scanned-source-line count (`overall`
-`verbosity.scanned_lines`) · wall-clock seconds (`/usr/bin/time -l`'s
-`real`) · peak RSS in MB (`/usr/bin/time -l`'s `maximum resident set
-size`, converted from bytes) · the scanner's own `incomplete` flag ·
-the scanner's own `skipped_files` count (parse failures and discovery-time
-exclusions combined).
+Each row: date (UTC); script-appended rows add `(nsd@<full HEAD sha>)`,
+suffixed `+dirty` when `git status --porcelain -- src Cargo.toml
+Cargo.lock` is non-empty · machine · the two fixture repos and their
+scanned shas · the scanner's own reported scanned-source-line count
+(`overall` `verbosity.scanned_lines`) · wall-clock seconds
+(`/usr/bin/time -l`'s `real`) · peak RSS in MB (`/usr/bin/time -l`'s
+`maximum resident set size`, converted from bytes) · the scanner's own
+`incomplete` flag · the scanner's own `skipped_files` count
+(discovery-time exclusions plus non-`SyntaxError` parse failures;
+`SyntaxError` files are salvaged and not listed).
 
 | date | machine | spring-framework | angular | scanned source lines | wall clock | peak RSS | incomplete | skipped files |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
