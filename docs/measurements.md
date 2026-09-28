@@ -323,6 +323,7 @@ scanned shas · the scanner's own reported scanned-source-line count
 | 2026-09-28 (nsd@8c020e0657f2907ba8f4db4c1ccd369d666da374 — WS-9 C1 after, run 3/5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.88s | 1785.08 MB | true | 7662 |
 | 2026-09-28 (nsd@8c020e0657f2907ba8f4db4c1ccd369d666da374 — WS-9 C1 after, run 4/5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.31s | 1788.80 MB | true | 7662 |
 | 2026-09-28 (nsd@8c020e0657f2907ba8f4db4c1ccd369d666da374 — WS-9 C1 after, run 5/5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.71s | 1787.23 MB | true | 7662 |
+| 2026-09-28 (nsd@337d49bbfbf8aff8500dafdc17996b64b643c46f — WS-9 post-revert verification sanity run, not part of the Decision 11 before/after sets) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 6.58s | 1836.23 MB | true | 7662 |
 
 ## Part C (run 2026-09-25-1744-m1m2-followup)
 
