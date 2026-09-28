@@ -44,13 +44,13 @@ under this repository.
 
 ## Known caveats of the recorded rows (round 2)
 
-This section originally described every row above as coming from one
+This section originally described every row below as coming from one
 uniform incomplete scan: 58 whole files (55 Java, 3 JS/TS) dropped
-entirely from every score. That was accurate only through the two
-`2026-09-23` rows. It is stale for every row from the `M0c-10` orchard
-row onward (2026-09-24 and later, WS-8, re-measured against the pinned
-fixture): those rows still carry `incomplete: true`, but for a narrower
-and no-longer-whole-file reason.
+entirely from every score. That was accurate only through the
+`2026-09-23` rows, including the three `a370e3d` controls. It is stale
+for every row from the `M0c-10` orchard row onward (2026-09-24 and later,
+WS-8, re-measured against the pinned fixture): those rows still carry
+`incomplete: true`, but for a narrower and no-longer-whole-file reason.
 
 **55 of the 58 parse failures are gone.** The `tree-sitter-java` 0.23.5
 → `tree-sitter-java-orchard` 0.5.18 swap (`## M0c-10` below) clears every
@@ -61,21 +61,28 @@ unrelated to and unchanged by the swap.
 
 **None of the remaining 3 are whole-file drops any more.** A separate,
 already-landed change (WS-6's salvage) means a `SyntaxError` file keeps
-its `ParsedFile`: only the callable(s) whose `formal_parameters` actually
-touch the parse error are fail-closed excluded
-(`src/lower/mod.rs`'s `cascade_exclusions`), not the file's every other
-callable. `report.json`'s `incomplete: true` still holds on every row here
-regardless of this change — `parse_failures` is deliberately kept
-non-empty for exactly that flag's sake — so `incomplete` is no longer
-evidence of a whole-file drop by itself. The row's `skipped files` cell
-is `report.json`'s full `skipped_files` length; the same salvage change
-filters every `SyntaxError` entry out of that list too, so for every row
-from `M0c-10` onward it is discovery-time exclusions only (test
-directories, generated code, dependency/build output under D16's default
-rules) — the 55 Java + 3 JS/TS parse failures contribute to it not at
-all, cleared or not. The two oldest rows above (`2026-09-18`,
-`2026-09-23`) still read 7720 (`7662 + 58`) because they predate this
-change.
+its `ParsedFile`: only the callable(s) or block(s) whose own subtree
+touches damage anywhere, and anything nested inside one of them, are
+fail-closed excluded (`src/lower/mod.rs`'s `cascade_exclusions`: an
+entity is excluded if it is itself dirty or its nearest enclosing entity
+is excluded), not the file's every other callable. `report.json`'s
+`incomplete: true` still holds on every row here regardless of this
+change — `parse_failures` is deliberately kept non-empty for exactly
+that flag's sake — so `incomplete` is no longer evidence of a whole-file
+drop by itself. The row's `skipped files` cell is `report.json`'s full
+`skipped_files` length; the same salvage change filters every
+`SyntaxError` entry out of that list too, so for every row from `M0c-10`
+onward it is discovery-time exclusions only (test directories, generated
+code, dependency/build output under D16's default rules) — the 55 Java +
+3 JS/TS parse failures contribute to it not at all, cleared or not. The
+seven `2026-09-18`/`2026-09-23` rows still read 7720 (`7662 + 58`)
+because they predate this change. The `3dd9ae2` control row (`## M0c-10`
+below) already reads 7662, not 7720, despite predating the grammar swap
+in its own binary: it was built one commit before the swap but after
+WS-6's salvage had already landed on this branch, so its 55 Java + 3 TS
+`SyntaxError`s are already excluded from `skipped_files` — none of them
+whole-file — and only the swap's own Java-parse-failure clearance
+(0 vs 55) was still pending in that binary.
 
 Re-measured directly against the pinned fixture with today's
 `scripts/perf_scan.sh` (the `nsd@403aa7f7…` row) reproduces the `M0c-10`
