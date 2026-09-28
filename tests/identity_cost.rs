@@ -122,3 +122,37 @@ fn test_identities_allocation_is_linear_in_owners_on_a_deep_chain() {
         "identities() allocated {allocated} bytes building {DEPTH} identities, expected under {ALLOCATION_BOUND_BYTES} (16 MiB)"
     );
 }
+
+/// Round 2 triage row 3: a single `callable_identity` call on the fixture's
+/// own outermost callable (document order, no lexical owner -- see
+/// `tests/identity.rs`'s own `owner_chain` doc comment for why a top-level
+/// callable's `owner` is `None`) must allocate far less than `DEPTH *
+/// size_of::<OwnerDigest>()` bytes. This is the mutant this bound actually
+/// discriminates: a `callable_identity` that (re)builds the whole file's
+/// `owner_digests` table before looking at `callable.owner` at all would
+/// allocate O(owners) regardless of that callable's own owner, even though
+/// this one owner is `None` and its own O(depth) walk should touch nothing.
+#[test]
+fn test_single_callable_identity_call_does_not_build_the_whole_table() {
+    let source = format!("const f = {}0;", "()=>".repeat(DEPTH));
+    let parsed = parse_inline(&source, Grammar::TypeScript, LanguageFamily::JsTs);
+    let ir_file = lower::lower_file(&parsed);
+    let outermost = &ir_file.callables[0];
+    assert_eq!(
+        outermost.owner, None,
+        "fixture's own document-order first callable must be the top-level, owner-less one"
+    );
+
+    let single_call_bound_bytes = DEPTH * std::mem::size_of::<identity::OwnerDigest>();
+
+    let before = ALLOCATED_BYTES.load(Ordering::SeqCst);
+    let single_identity = identity::callable_identity(&ir_file, outermost);
+    let after = ALLOCATED_BYTES.load(Ordering::SeqCst);
+
+    assert_eq!(single_identity.owner_digest, identity::OwnerDigest::default());
+    let allocated = after - before;
+    assert!(
+        allocated < single_call_bound_bytes,
+        "a single callable_identity() call allocated {allocated} bytes, expected under {single_call_bound_bytes} (DEPTH * size_of::<OwnerDigest>())"
+    );
+}

@@ -1130,3 +1130,51 @@ class B {
         "a differently-named enclosing class must not collide"
     );
 }
+
+/// Round 2 triage row 3: `callable_identity`'s own O(depth) owner-digest
+/// walk must agree, callable-by-callable, with `identities()`'s own
+/// once-per-file table -- on a nested Java fixture (class -> inner class ->
+/// method -> lambda) and a nested TS fixture (namespace -> function ->
+/// function -> arrow), covering both owner kinds (`NamedType`, `Callable`,
+/// `Namespace`) this stream's other tests exercise.
+#[test]
+fn test_callable_identity_agrees_with_identities_table() {
+    let java_source = "\
+class Outer {
+    class Inner {
+        void method() {
+            System.out.println(\"inner\");
+        }
+    }
+
+    void method() {
+        java.util.List<Runnable> list = new java.util.ArrayList<>();
+        list.add(() -> {
+            System.out.println(\"lambda\");
+        });
+    }
+}
+";
+    let ir_file = lower_java(java_source);
+    let table = identity::identities(&ir_file);
+    assert_eq!(table.len(), ir_file.callables.len());
+    for (callable, expected) in ir_file.callables.iter().zip(table.iter()) {
+        assert_eq!(&identity::callable_identity(&ir_file, callable), expected);
+    }
+
+    let ts_source = "\
+namespace N {
+    function outer() {
+        function inner() {
+            () => 1;
+        }
+    }
+}
+";
+    let ir_file = lower_ts(ts_source);
+    let table = identity::identities(&ir_file);
+    assert_eq!(table.len(), ir_file.callables.len());
+    for (callable, expected) in ir_file.callables.iter().zip(table.iter()) {
+        assert_eq!(&identity::callable_identity(&ir_file, callable), expected);
+    }
+}
