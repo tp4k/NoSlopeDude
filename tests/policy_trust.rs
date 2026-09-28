@@ -13,6 +13,9 @@ use nsd::policy::{self, Candidate, ConfigSource, Diagnostic};
 /// This suite's own fixture constant (D22): a regular file's Git mode,
 /// used only here.
 const MODE_REGULAR: i32 = 0o100644;
+/// This suite's own fixture constant (D22, copied from `tests/git_diff.rs`
+/// and siblings): a symlink's Git mode, used only here.
+const MODE_SYMLINK: i32 = 0o120000;
 
 /// Overwrites the Git index to exactly mirror `commit_oid`'s tree (D22,
 /// copied from `tests/git_snapshots.rs`'s own helper of the same name):
@@ -625,5 +628,43 @@ fn test_trusted_mode_unreadable_base_with_worktree_candidate_reports_the_change(
             code: CODE_CONFIG_CHANGED
         }],
         "the worktree candidate's hash_object oid must differ from the base's tree-entry oid"
+    );
+}
+
+/// A4, triage-ws1-r1.md row 3: the oid-equality "unchanged" shortcut must
+/// not apply across a kind change. A base `nsd.yml` symlink whose target
+/// is byte-identical to a candidate regular file's content shares the same
+/// blob oid, but the shape did change (symlink to regular file), so it
+/// must still be reported.
+#[test]
+fn test_trusted_mode_symlink_base_replaced_by_identical_content_reports_c101() {
+    let (_dir, repo) = common::init_repo();
+    let target = b"version: 1\n";
+    common::commit_entries(&repo, &[(b"nsd.yml".to_vec(), MODE_SYMLINK, target.to_vec())]);
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+
+    common::commit_entries(&repo, &[(b"nsd.yml".to_vec(), MODE_REGULAR, target.to_vec())]);
+    let candidate = CommitSnapshot::head_or_empty(&repo).expect("snapshot candidate commit");
+
+    let trusted_dir = tempfile::TempDir::new().expect("create a temp dir for the trusted config");
+    let trusted_path = trusted_dir.path().join("trusted.yml");
+    std::fs::write(&trusted_path, b"version: 1\n").expect("write trusted config");
+
+    let resolution = policy::resolve(
+        &repo,
+        Some(trusted_path.as_path()),
+        &base,
+        Candidate::Commit(&candidate),
+    )
+    .expect("a trusted config resolves even when the base is a symlink");
+
+    assert_eq!(resolution.source, ConfigSource::Trusted);
+    assert_eq!(
+        resolution.diagnostics,
+        vec![Diagnostic {
+            code: CODE_CONFIG_CHANGED
+        }],
+        "a symlink base replaced by a byte-identical regular file must still be reported as \
+         changed, even though both entries share the same blob oid"
     );
 }
