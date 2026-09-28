@@ -4,7 +4,7 @@
 
 mod common;
 
-use git2::{IndexEntry, IndexTime, Oid, Repository};
+use git2::{IndexEntry, IndexTime, ObjectType, Oid, Repository};
 
 use nsd::config::{Config, Severity, CODE_CONFIG_CHANGED, CODE_INVALID_CONFIG};
 use nsd::git::snapshot::{CommitSnapshot, IndexSnapshot, WorktreeSnapshot, SOURCE_CEILING_BYTES};
@@ -666,5 +666,98 @@ fn test_trusted_mode_symlink_base_replaced_by_identical_content_reports_c101() {
         }],
         "a symlink base replaced by a byte-identical regular file must still be reported as \
          changed, even though both entries share the same blob oid"
+    );
+}
+
+/// triage-ws1-r1.md row 1: no test previously reached the `Candidate::Index`
+/// arm of `BaseIdentity::Oid`, so the mutant `.and(None)` (dropping the
+/// index candidate's own oid to `None`) survived: an unchanged oversized
+/// index candidate would then read as a spurious change.
+#[test]
+fn test_trusted_mode_unreadable_base_with_unchanged_index_candidate_reports_nothing() {
+    let (_dir, repo) = common::init_repo();
+    let base_oid = common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_REGULAR, oversized_valid_config())],
+    );
+    sync_index_to_commit(&repo, base_oid);
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+
+    let index_snapshot = IndexSnapshot::open(&repo).expect("open index snapshot");
+
+    let trusted_dir = tempfile::TempDir::new().expect("create a temp dir for the trusted config");
+    let trusted_path = trusted_dir.path().join("trusted.yml");
+    std::fs::write(&trusted_path, b"version: 1\n").expect("write trusted config");
+
+    let resolution = policy::resolve(
+        &repo,
+        Some(trusted_path.as_path()),
+        &base,
+        Candidate::Index(&index_snapshot),
+    )
+    .expect(
+        "a trusted config resolves even when the base is unreadable and the index candidate is \
+         unchanged",
+    );
+
+    assert_eq!(resolution.source, ConfigSource::Trusted);
+    assert!(
+        resolution.diagnostics.is_empty(),
+        "an unchanged index candidate, compared by oid against an unreadable base, must not \
+         report a change"
+    );
+}
+
+/// triage-ws1-r1.md row 2: the only worktree oid-comparison test previously
+/// asserted a *difference*, so the mutant `Blob` -> `Tree` in the
+/// `Oid::hash_object` call survived: an unchanged worktree candidate,
+/// compared against a base whose blob is missing from the ODB (a
+/// Git-domain read failure, not a shape one), would then read as a
+/// spurious change.
+#[test]
+fn test_trusted_mode_missing_base_blob_with_identical_worktree_candidate_reports_nothing() {
+    let (dir, repo) = common::init_repo();
+    let content = b"version: 1\n";
+    let base_oid = common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_REGULAR, content.to_vec())],
+    );
+    sync_index_to_commit(&repo, base_oid);
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+
+    std::fs::write(dir.path().join("nsd.yml"), content)
+        .expect("write an identical worktree nsd.yml");
+    let worktree_snapshot = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+
+    let blob_oid = Oid::hash_object(ObjectType::Blob, content)
+        .expect("hash the fixture content the same way the base blob was written");
+    let blob_hex = blob_oid.to_string();
+    let object_path = repo
+        .path()
+        .join("objects")
+        .join(&blob_hex[..2])
+        .join(&blob_hex[2..]);
+    std::fs::remove_file(&object_path).expect("delete the loose nsd.yml blob from the ODB");
+
+    let trusted_dir = tempfile::TempDir::new().expect("create a temp dir for the trusted config");
+    let trusted_path = trusted_dir.path().join("trusted.yml");
+    std::fs::write(&trusted_path, b"version: 1\n").expect("write trusted config");
+
+    let resolution = policy::resolve(
+        &repo,
+        Some(trusted_path.as_path()),
+        &base,
+        Candidate::Worktree(&worktree_snapshot),
+    )
+    .expect(
+        "a trusted config resolves even when the base blob is missing from the ODB and the \
+         worktree candidate is unchanged",
+    );
+
+    assert_eq!(resolution.source, ConfigSource::Trusted);
+    assert!(
+        resolution.diagnostics.is_empty(),
+        "an identical worktree candidate, hashed to the same oid as the base's tree entry, must \
+         not report a change"
     );
 }
