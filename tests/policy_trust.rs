@@ -640,10 +640,16 @@ fn test_trusted_mode_unreadable_base_with_worktree_candidate_reports_the_change(
 fn test_trusted_mode_symlink_base_replaced_by_identical_content_reports_c101() {
     let (_dir, repo) = common::init_repo();
     let target = b"version: 1\n";
-    common::commit_entries(&repo, &[(b"nsd.yml".to_vec(), MODE_SYMLINK, target.to_vec())]);
+    common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_SYMLINK, target.to_vec())],
+    );
     let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
 
-    common::commit_entries(&repo, &[(b"nsd.yml".to_vec(), MODE_REGULAR, target.to_vec())]);
+    common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_REGULAR, target.to_vec())],
+    );
     let candidate = CommitSnapshot::head_or_empty(&repo).expect("snapshot candidate commit");
 
     let trusted_dir = tempfile::TempDir::new().expect("create a temp dir for the trusted config");
