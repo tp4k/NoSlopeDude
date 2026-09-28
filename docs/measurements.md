@@ -324,6 +324,20 @@ scanned shas · the scanner's own reported scanned-source-line count
 | 2026-09-28 (nsd@8c020e0657f2907ba8f4db4c1ccd369d666da374 — WS-9 C1 after, run 4/5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.31s | 1788.80 MB | true | 7662 |
 | 2026-09-28 (nsd@8c020e0657f2907ba8f4db4c1ccd369d666da374 — WS-9 C1 after, run 5/5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.71s | 1787.23 MB | true | 7662 |
 | 2026-09-28 (nsd@337d49bbfbf8aff8500dafdc17996b64b643c46f — WS-9 post-revert verification sanity run, not part of the Decision 11 before/after sets) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 6.58s | 1836.23 MB | true | 7662 |
+| 2026-09-28 (nsd@d61fefe58a0ede6166fe9a2febaaa35cf16d0877 — WS-9 r2 alternating, A-side discarded warm-up) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.61s | 1836.75 MB | true | 7662 |
+| 2026-09-28 (nsd@24ecf8acd6b95375cd713114a7d3e56def40b8a5 — WS-9 r2 alternating, B-side discarded warm-up) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 3.84s | 1786.52 MB | true | 7662 |
+| 2026-09-28 (nsd@d61fefe58a0ede6166fe9a2febaaa35cf16d0877 — WS-9 r2 alternating, A1) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.14s | 1840.88 MB | true | 7662 |
+| 2026-09-28 (nsd@24ecf8acd6b95375cd713114a7d3e56def40b8a5 — WS-9 r2 alternating, B1) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 3.78s | 1786.67 MB | true | 7662 |
+| 2026-09-28 (nsd@d61fefe58a0ede6166fe9a2febaaa35cf16d0877 — WS-9 r2 alternating, A2) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.20s | 1838.78 MB | true | 7662 |
+| 2026-09-28 (nsd@24ecf8acd6b95375cd713114a7d3e56def40b8a5 — WS-9 r2 alternating, B2) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 3.99s | 1785.91 MB | true | 7662 |
+| 2026-09-28 (nsd@d61fefe58a0ede6166fe9a2febaaa35cf16d0877 — WS-9 r2 alternating, A3) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.30s | 1843.20 MB | true | 7662 |
+| 2026-09-28 (nsd@24ecf8acd6b95375cd713114a7d3e56def40b8a5 — WS-9 r2 alternating, B3) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 3.87s | 1787.66 MB | true | 7662 |
+| 2026-09-28 (nsd@d61fefe58a0ede6166fe9a2febaaa35cf16d0877 — WS-9 r2 alternating, A4) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.10s | 1838.31 MB | true | 7662 |
+| 2026-09-28 (nsd@24ecf8acd6b95375cd713114a7d3e56def40b8a5 — WS-9 r2 alternating, B4) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 3.72s | 1794.06 MB | true | 7662 |
+| 2026-09-28 (nsd@d61fefe58a0ede6166fe9a2febaaa35cf16d0877 — WS-9 r2 alternating, A5, pair discarded: its paired B5 run below showed contention, whole pair re-run per protocol) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.17s | 1838.28 MB | true | 7662 |
+| 2026-09-28 (nsd@24ecf8acd6b95375cd713114a7d3e56def40b8a5 — WS-9 r2 alternating, B5, contended: OrbStack Helper CPU rose to ~34% during/after this run and cargo's own build check took 0.20s versus this session's usual 0.03-0.06s, discarded, whole pair re-run per protocol) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.71s | 1788.75 MB | true | 7662 |
+| 2026-09-28 (nsd@d61fefe58a0ede6166fe9a2febaaa35cf16d0877 — WS-9 r2 alternating, A5 re-run, contention cleared, used in the decision set) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.33s | 1838.11 MB | true | 7662 |
+| 2026-09-28 (nsd@24ecf8acd6b95375cd713114a7d3e56def40b8a5 — WS-9 r2 alternating, B5 re-run, contention cleared, used in the decision set) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 3.74s | 1785.11 MB | true | 7662 |
 
 ## Part C (run 2026-09-25-1744-m1m2-followup)
 
@@ -371,3 +385,35 @@ change, the seam and the test are reverted together"), the wiring
 together in the next commit rather than kept on this single overlapping
 measurement. `docs/deferred-work.md`'s C1 row (WS-14's to edit, not this
 stream's) stays open, annotated by WS-14 from this record.
+
+**WS-9 (C1) round 2 — re-measured alternating, per the user's decision
+(`questions.md`, `ws9-c1:` line) after round 1's before/after ranges
+overlapped by only 0.07s on a noisy machine.** Round 1's reverted commit
+(`337d49b`) was reverted forward (`24ecf8a`), restoring the wiring, the
+`lowering_count()` seam and the mandatory test byte-identical to `8c020e0`
+(`git diff 8c020e0 HEAD -- src tests` empty; `cargo test --locked --test
+ir_isolation` green). Two detached worktrees were built in release mode:
+`ws9-A` at `d61fefe` (src/tests byte-identical to parent `079ca52`,
+without C1) and `ws9-B` at `24ecf8a` (with C1). Each worktree measures its
+own binary and writes to its own copy of this file; both read the same
+`$TMPDIR/nsd-perf-fixture`. After one discarded warm-up per side, 5 pairs
+were run alternately (A1 B1 A2 B2 A3 B3 A4 B4 A5 B5), checking `ps -Ao
+%cpu,comm -r` for contention before each run. The A5/B5 pair was visibly
+contended: B5 read 4.71s against B's other four runs of 3.72-3.99s, its
+own `cargo build` check took 0.20s against this session's usual
+0.03-0.06s, and OrbStack Helper's CPU share climbed to ~34% immediately
+after. Per this round's protocol the whole pair was re-run rather than
+dropped; both the contended A5/B5 and the clean re-run are recorded above
+under `## Rows`, labelled accordingly. The decision set is A1-A4 plus the
+A5 re-run, and B1-B4 plus the B5 re-run: A = {4.14s, 4.20s, 4.30s, 4.10s,
+4.33s} (min 4.10s, max 4.33s, mean 4.214s); B = {3.78s, 3.99s, 3.87s,
+3.72s, 3.74s} (min 3.72s, max 3.99s, mean 3.82s). Decision 11's rule is
+`max(after) < min(before)`: here `max(B) = 3.99s` is less than `min(A) =
+4.10s`, a clean 0.11s gap with no overlap, unlike round 1's 0.07s
+overlap -- so C1 clears the noise floor. Round 1's before-set was
+measured on a noisier window (its own range spanned 5.86s-8.24s, 2.38s
+wide, against this round's A-range of only 0.23s and B-range of only
+0.27s), which is why round 1's sets are superseded by this round's
+alternating measurement rather than trusted as-is; the frozen Part C
+reference above is unchanged (Decision 11: it is not re-frozen). **Kept**:
+the restore commit (`24ecf8a`) stands; no further revert follows.
