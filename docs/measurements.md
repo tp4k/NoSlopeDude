@@ -78,10 +78,10 @@ all, cleared or not. The two oldest rows above (`2026-09-18`,
 change.
 
 Re-measured directly against the pinned fixture with today's
-`scripts/perf_scan.sh` (the last `nsd@<sha>`-carrying row above) reproduces
-the `M0c-10` row's own `scanned_lines` (584779) and `skipped files` (7662)
-exactly, corroborating that this is the scan's current, standing
-behaviour rather than a one-off measurement.
+`scripts/perf_scan.sh` (the `nsd@403aa7f7…` row) reproduces the `M0c-10`
+row's own `scanned_lines` (584779) and `skipped files` (7662) exactly,
+corroborating that this is the scan's current, standing behaviour rather
+than a one-off measurement.
 
 All rows were taken with a **warm page cache** (`/usr/bin/time -l`'s own
 `block input operations: 0`), so wall-clock seconds do not include
@@ -290,8 +290,8 @@ exclusions combined).
 | 2026-09-23 (a370e3d, fusion's parent commit — control rerun 2, warm, block input operations: 0) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 5.68s | 1777.41 MB | true | 7720 |
 | 2026-09-24 (M0c-10, `3dd9ae2` — control, `tree-sitter-java` 0.23.5, built in a separate scratch clone outside this tree so the swap's own Cargo.toml edit never touched this binary) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584349 | 4.52s | 1810.38 MB | true | 7662 |
 | 2026-09-24 (M0c-10, this branch — `tree-sitter-java-orchard` 0.5.18) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.24s | 1822.98 MB | true | 7662 |
-| 2026-09-28 (nsd@e21f629ccdd7f78d54bd9655147b4513ef6db4ed) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 23.08s | 1732.75 MB | true | 7662 |
-| 2026-09-28 (nsd@e21f629ccdd7f78d54bd9655147b4513ef6db4ed) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 17.73s | 1500.23 MB | true | 7662 |
-| 2026-09-28 (nsd@375b2c73e6eb34fb5f3792e5d40e1ed2dd9d9972) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 16.49s | 1596.62 MB | true | 7662 |
-| 2026-09-28 (nsd@9d4e7a6429c635a4ffa128ff0d1d36f0ff11dd03) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.81s | 1836.67 MB | true | 7662 |
-| 2026-09-28 (nsd@403aa7f74d545be0b567a212cfaebf8db8af2175) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.58s | 1840.81 MB | true | 7662 |
+| 2026-09-28 (nsd@e21f629ccdd7f78d54bd9655147b4513ef6db4ed — contended: concurrent WS-5/6/7 cargo builds in this tree, discarded; block input operations not recorded) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 23.08s | 1732.75 MB | true | 7662 |
+| 2026-09-28 (nsd@e21f629ccdd7f78d54bd9655147b4513ef6db4ed — contended: concurrent WS-5/6/7 cargo builds in this tree, discarded; block input operations not recorded) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 17.73s | 1500.23 MB | true | 7662 |
+| 2026-09-28 (nsd@375b2c73e6eb34fb5f3792e5d40e1ed2dd9d9972 — contended: concurrent WS-5/6/7 cargo builds in this tree, discarded; block input operations not recorded) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 16.49s | 1596.62 MB | true | 7662 |
+| 2026-09-28 (nsd@9d4e7a6429c635a4ffa128ff0d1d36f0ff11dd03 — block input operations not recorded) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.81s | 1836.67 MB | true | 7662 |
+| 2026-09-28 (nsd@403aa7f74d545be0b567a212cfaebf8db8af2175 — block input operations not recorded) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.58s | 1840.81 MB | true | 7662 |
