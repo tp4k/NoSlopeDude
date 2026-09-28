@@ -175,30 +175,44 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
         &owner_spans,
     );
 
-    let mut redact_targets: HashSet<Span> = damage.iter().map(|entry| entry.span).collect();
-    for (index, callable) in callables.iter().enumerate() {
-        if exclusions.callables[index] {
-            redact_targets.insert(callable.span);
+    // C6 (triage-ws6-r3/r4): with no damage span at all, `cascade_exclusions`
+    // has already returned all-`false` (its own fast path above), so
+    // `redact_targets` would end up empty and both rebuild loops below would
+    // keep every entry unconditionally -- skip the scans and the
+    // per-element rebuild passes and take the two tables whole.
+    let (redact_targets, mut kept_callables, kept_blocks): (
+        HashSet<Span>,
+        Vec<IrCallable>,
+        Vec<IrBlock>,
+    ) = if damage.is_empty() {
+        (HashSet::new(), callables, blocks)
+    } else {
+        let mut redact_targets: HashSet<Span> = damage.iter().map(|entry| entry.span).collect();
+        for (index, callable) in callables.iter().enumerate() {
+            if exclusions.callables[index] {
+                redact_targets.insert(callable.span);
+            }
         }
-    }
-    for (index, block) in blocks.iter().enumerate() {
-        if exclusions.blocks[index] {
-            redact_targets.insert(block.span);
+        for (index, block) in blocks.iter().enumerate() {
+            if exclusions.blocks[index] {
+                redact_targets.insert(block.span);
+            }
         }
-    }
 
-    let mut kept_callables = Vec::with_capacity(callables.len());
-    for (index, callable) in callables.into_iter().enumerate() {
-        if !exclusions.callables[index] {
-            kept_callables.push(callable);
+        let mut kept_callables = Vec::with_capacity(callables.len());
+        for (index, callable) in callables.into_iter().enumerate() {
+            if !exclusions.callables[index] {
+                kept_callables.push(callable);
+            }
         }
-    }
-    let mut kept_blocks = Vec::with_capacity(blocks.len());
-    for (index, block) in blocks.into_iter().enumerate() {
-        if !exclusions.blocks[index] {
-            kept_blocks.push(block);
+        let mut kept_blocks = Vec::with_capacity(blocks.len());
+        for (index, block) in blocks.into_iter().enumerate() {
+            if !exclusions.blocks[index] {
+                kept_blocks.push(block);
+            }
         }
-    }
+        (redact_targets, kept_callables, kept_blocks)
+    };
 
     // A7 (WS-4): compact `owners` the same way, dropping every entry whose
     // own contributing node was inside a redaction target (`exclusions.
@@ -318,6 +332,21 @@ fn cascade_exclusions(
     block_dirty: &[bool],
     owners: &[Span],
 ) -> Exclusions {
+    // C6 (triage-ws6-r3/r4): every `own_dirty` bit fed into the sweep below
+    // (`callable_dirty`/`block_dirty`, and a bare damage entry's own
+    // hardcoded `true`) traces back to `build_ir`'s `self_damage`, which is
+    // seeded only from `classification.damage.is_some()` -- the same
+    // condition that pushes onto `damage` itself. So when `damage` is
+    // empty, no entry anywhere in the tree can ever be dirty, no ancestor
+    // can ever be excluded, and the whole sort-and-sweep below is a no-op:
+    // skip straight to the all-`false` result it would otherwise compute.
+    if damage.is_empty() {
+        return Exclusions {
+            callables: vec![false; callables.len()],
+            blocks: vec![false; blocks.len()],
+            owners: vec![false; owners.len()],
+        };
+    }
     let mut entries: Vec<(Span, bool, Option<EntityRef>)> =
         Vec::with_capacity(damage.len() + callables.len() + blocks.len() + owners.len());
     for entry in damage {
