@@ -317,6 +317,12 @@ scanned shas · the scanner's own reported scanned-source-line count
 | 2026-09-28 (nsd@079ca5288bda6db24a26d0ecaca38e56c47639c8 — WS-9 Part C reference, run 3/5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 8.24s | 1841.38 MB | true | 7662 |
 | 2026-09-28 (nsd@079ca5288bda6db24a26d0ecaca38e56c47639c8 — WS-9 Part C reference, run 4/5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 7.59s | 1836.12 MB | true | 7662 |
 | 2026-09-28 (nsd@079ca5288bda6db24a26d0ecaca38e56c47639c8 — WS-9 Part C reference, run 5/5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 7.20s | 1838.20 MB | true | 7662 |
+| 2026-09-28 (nsd@8c020e0657f2907ba8f4db4c1ccd369d666da374 — discarded warm-up) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 6.38s | 1786.30 MB | true | 7662 |
+| 2026-09-28 (nsd@8c020e0657f2907ba8f4db4c1ccd369d666da374 — WS-9 C1 after, run 1/5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.50s | 1787.19 MB | true | 7662 |
+| 2026-09-28 (nsd@8c020e0657f2907ba8f4db4c1ccd369d666da374 — WS-9 C1 after, run 2/5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.93s | 1785.78 MB | true | 7662 |
+| 2026-09-28 (nsd@8c020e0657f2907ba8f4db4c1ccd369d666da374 — WS-9 C1 after, run 3/5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.88s | 1785.08 MB | true | 7662 |
+| 2026-09-28 (nsd@8c020e0657f2907ba8f4db4c1ccd369d666da374 — WS-9 C1 after, run 4/5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.31s | 1788.80 MB | true | 7662 |
+| 2026-09-28 (nsd@8c020e0657f2907ba8f4db4c1ccd369d666da374 — WS-9 C1 after, run 5/5) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.71s | 1787.23 MB | true | 7662 |
 
 ## Part C (run 2026-09-25-1744-m1m2-followup)
 
@@ -336,9 +342,31 @@ moving baseline.
 
 **WS-9 (C1) reference — parent `079ca52`, before wiring one lowering into
 all three readers.** The five `WS-9 Part C reference` rows in `## Rows`
-above: 5.86s, 6.48s, 8.24s, 7.59s, 7.20s (min 5.86s, max 8.24s). Three
+above: 5.86s, 6.48s, 8.24s, 7.59s, 7.20s (min 5.86s, max 8.24s). Four
 earlier runs on the same build and same commit — two "contended" (an
 unrelated `vitest` workload sharing the machine) and two "discarded
 warm-up" — are excluded from the reference per the same discipline; none
-of the eight is cherry-picked, all eight are recorded in `## Rows` above
+of the nine is cherry-picked, all nine are recorded in `## Rows` above
 with the reason each was or was not kept.
+
+**WS-9 (C1) after — `8c020e0`, one lowering per file wired into
+`pipeline::run`, `metrics::run_with_ir`, `clones::run_with_ir` and
+`rules::run_with_ir`.** The five `WS-9 C1 after` rows in `## Rows` above:
+5.50s, 5.93s, 5.88s, 5.31s, 5.71s (min 5.31s, max 5.93s), after one
+discarded warm-up on the same fresh release build. **Measured below the
+noise floor, reverted 2026-09-28** (WS-9, revert commit follows this one):
+Decision 11's accept rule is `max(after) < min(before)` on wall clock; here
+`max(after) = 5.93s` is not less than `min(before) = 5.86s` -- the two
+5-run ranges overlap by 0.07s, so this does not clear the noise floor by
+the letter of the rule, even though the after-set's mean (5.67s) sits
+visibly below the before-set's mean (7.07s) and four of its five runs sit
+below all but the single fastest before-run. Per task.md Part C ("don't
+keep it on faith") and this stream's own observable acceptance ("If the
+measurement is below the noise floor, the Part C rule still applies: the
+change, the seam and the test are reverted together"), the wiring
+(`src/pipeline.rs`, `src/metrics/mod.rs`, `src/clones/mod.rs`,
+`src/rules/mod.rs`), the `lower::lowering_count()` seam, and
+`tests/ir_isolation.rs::test_pipeline_lowers_each_file_once` are reverted
+together in the next commit rather than kept on this single overlapping
+measurement. `docs/deferred-work.md`'s C1 row (WS-14's to edit, not this
+stream's) stays open, annotated by WS-14 from this record.
