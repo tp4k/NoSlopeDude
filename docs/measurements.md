@@ -421,6 +421,21 @@ scanned shas · the scanner's own reported scanned-source-line count
 | 2026-09-28 (nsd@21a710f120df9192bcf49822a0b1d4da766f59a4 — WS-11 r2 (C7 re-measure) alternating, X5, first attempt; ps top-2 before this run: WindowServer 18.9%, zen 18.3% (clean; an earlier check had shown OrbStack Helper at 185.6% and this session waited 30s for it to clear before running); discarded because the paired Y5 attempt then read a contended ps — tsc at 229.3% CPU — before it could be run, so the whole pair was re-run per protocol before Y5's first attempt was ever measured) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.23s | 1788.44 MB | true | 7662 |
 | 2026-09-28 (nsd@21a710f120df9192bcf49822a0b1d4da766f59a4 — WS-11 r2 (C7 re-measure) alternating, X5 re-run, used in the decision set; ps top-2 before this run: zen 17.0%, WindowServer 15.7%) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.46s | 1778.44 MB | true | 7662 |
 | 2026-09-28 (nsd@66787a07c0a30285cf20ef477e615a573ac0dba7 — WS-11 r2 (C7 re-measure) alternating, Y5 re-run, used in the decision set — X5's first attempt was discarded before Y5's first attempt was ever run, so only one Y5 reading exists; ps top-2 before this run: WindowServer 26.5%, zen 18.3%) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.68s | 1782.66 MB | true | 7662 |
+| 2026-09-28 (nsd@62de9bb3458cc3e1fd95c3d70122e7da6a326aca — WS-12 (C3) alternating, X-side (without C3) discarded warm-up; ps top-2 before this run: WindowServer 25.9%, zen 25.6%) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.65s | 1785.20 MB | true | 7662 |
+| 2026-09-28 (nsd@cce8f918aa1d97dc19f3050d8d6fd40a6e5915ac — WS-12 (C3) alternating, Y-side (with C3) discarded warm-up; ps top-2 before this run: zen 17.7%, WindowServer 16.0%) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.08s | 1787.97 MB | true | 7662 |
+| 2026-09-28 (nsd@62de9bb3458cc3e1fd95c3d70122e7da6a326aca — WS-12 (C3) alternating, X1, used in the decision set; ps top-2 before this run: WindowServer 21.7%, zen 21.3%) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.27s | 1788.78 MB | true | 7662 |
+| 2026-09-28 (nsd@cce8f918aa1d97dc19f3050d8d6fd40a6e5915ac — WS-12 (C3) alternating, Y1, used in the decision set; ps top-2 before this run: OrbStack Helper 46.5%, cmux 20.8% (no vitest/tsc/cargo/nsd)) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.02s | 1788.95 MB | true | 7662 |
+| 2026-09-28 (nsd@62de9bb3458cc3e1fd95c3d70122e7da6a326aca — WS-12 (C3) alternating, X2, first attempt, discarded because the paired Y2 attempt read contended; ps top-2 before this run: WindowServer 20.9%, zen 19.6%) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.93s | 1788.45 MB | true | 7662 |
+| 2026-09-28 (nsd@cce8f918aa1d97dc19f3050d8d6fd40a6e5915ac — WS-12 (C3) alternating, Y2, first attempt, contended: this run's own `cargo build` check took 0.19s against this session's usual 0.06-0.16s, and a heavy unrelated `node` process (oxlint, an unrelated repo's linter) was observed at 132.9% CPU immediately afterward despite an unremarkable ps snapshot at the time (WindowServer 25.0%, plugin-container 17.1%), discarded, whole pair re-run per protocol) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 6.01s | 1786.36 MB | true | 7662 |
+| 2026-09-28 (nsd@62de9bb3458cc3e1fd95c3d70122e7da6a326aca — WS-12 (C3) alternating, X2, second attempt (re-run), contended: ps showed an unrelated repo's `tsgolint` process at 454.5% CPU immediately before this run, discarded, whole pair re-run again before Y2 was ever measured a second time) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 6.49s | 1777.94 MB | true | 7662 |
+| 2026-09-28 (nsd@62de9bb3458cc3e1fd95c3d70122e7da6a326aca — WS-12 (C3) alternating, X2, third attempt, used in the decision set; ps top-2 before this run: NotificationCenter 28.1%, zen 24.5%) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.09s | 1785.05 MB | true | 7662 |
+| 2026-09-28 (nsd@cce8f918aa1d97dc19f3050d8d6fd40a6e5915ac — WS-12 (C3) alternating, Y2, second attempt, used in the decision set — X2's contended second attempt was discarded before Y2 was re-run, so only two Y2 readings exist; ps top-2 before this run: zen 15.4%, gpu-helper 13.7%) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.38s | 1788.16 MB | true | 7662 |
+| 2026-09-28 (nsd@62de9bb3458cc3e1fd95c3d70122e7da6a326aca — WS-12 (C3) alternating, X3, used in the decision set; ps top-2 before this run: OrbStack Helper 61.5%, cmux 27.6% (no vitest/tsc/cargo/nsd)) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.49s | 1790.61 MB | true | 7662 |
+| 2026-09-28 (nsd@cce8f918aa1d97dc19f3050d8d6fd40a6e5915ac — WS-12 (C3) alternating, Y3, used in the decision set; ps top-2 before this run: git 50.1%, zen 15.7%) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.02s | 1607.20 MB | true | 7662 |
+| 2026-09-28 (nsd@62de9bb3458cc3e1fd95c3d70122e7da6a326aca — WS-12 (C3) alternating, X4, used in the decision set; ps top-2 before this run: Zen 15.1%, gpu-helper 13.0% (quiet, after this session waited roughly 4 minutes for a run of `node (vitest N)`/`tsc` workers on the shared machine to clear)) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.29s | 1783.73 MB | true | 7662 |
+| 2026-09-28 (nsd@cce8f918aa1d97dc19f3050d8d6fd40a6e5915ac — WS-12 (C3) alternating, Y4, used in the decision set; ps top-2 before this run: OrbStack Helper 19.1%, zen 15.5%) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.83s | 1788.55 MB | true | 7662 |
+| 2026-09-28 (nsd@62de9bb3458cc3e1fd95c3d70122e7da6a326aca — WS-12 (C3) alternating, X5, used in the decision set; ps top-2 before this run: zen 15.6%, gpu-helper 12.4% (quiet, after a 15s wait for OrbStack Helper to drop from 113.6%)) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.97s | 1788.98 MB | true | 7662 |
+| 2026-09-28 (nsd@cce8f918aa1d97dc19f3050d8d6fd40a6e5915ac — WS-12 (C3) alternating, Y5, used in the decision set; ps top-2 before this run: zen 15.1%, OrbStack Helper 13.4%) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 5.65s | 1788.75 MB | true | 7662 |
 
 ## Part C (run 2026-09-25-1744-m1m2-followup)
 
@@ -747,3 +762,69 @@ about 0.19s of CPU inside `enumerate_candidates`'s `par_iter`
 full threads the stage read 2.920/3.002/2.862s at the parent against
 2.977/3.002/2.879s with C4, so no change is visible there either. Neither
 C4 nor C6 can clear Decision 11 in any window; their reverts stand.
+
+**WS-12 (C3) — alternating, parent `62de9bb` (worktree X, without C3)
+versus `cce8f91` (worktree Y, with C3: a repo-wide `[profile.release]`
+table setting `lto = "thin"`, to restore cross-crate inlining for
+`blake3::Hasher::update`/`finalize` in the hot push loop, task.md Part
+C via triage-ws3-r1).** `Cargo.lock` is unaffected by this change (`git
+diff --quiet HEAD~1 -- Cargo.lock` on the C3 commit exits 0). Two
+detached worktrees were built in release mode under this session's
+scratch directory (`ws12-x` at `62de9bb`, `ws12-y` at `cce8f91`), each
+measuring its own binary and writing to its own copy of this file; both
+read the same `$TMPDIR/nsd-perf-fixture`. Release build time and binary
+size (context, not part of the verdict): X's `cargo build --release
+--locked` took 18.77s real and produced a 7,812,816-byte binary; Y's
+took 18.14s real and produced a 7,847,136-byte binary (34,320 bytes
+larger, consistent with LTO's cross-crate inlining pulling more code
+into the final binary) — the two builds were run back-to-back and are
+not a controlled comparison of link time itself. Before starting, `ps
+-Ao %cpu,comm -r` was checked and found quiet (no `node (vitest…)`,
+`tsc`, `cargo`/`target/*/deps/*` or other `nsd` process). After one
+discarded warm-up per side, 5 pairs were run alternately (X1 Y1 X2 Y2
+X3 Y3 X4 Y4 X5 Y5), checking `ps -Ao %cpu,comm -r` for contention before
+each run; its top-2 line is recorded with every row above. One pair
+needed two re-runs: Y2's first attempt (6.01s) coincided with its own
+`cargo build` check taking 0.19s (against this session's usual
+0.06-0.16s) and a heavy unrelated `node` process (another repo's
+`oxlint` linter) observed at 132.9% CPU immediately afterward, despite
+an unremarkable `ps` snapshot at the time — the same "slow build check,
+quiet-looking ps" signature WS-9 r2's own B5 used to flag contention —
+so the whole X2/Y2 pair was re-run; that re-run's X2 attempt (6.49s)
+itself coincided with an unrelated repo's `tsgolint` process at 454.5%
+CPU immediately before it ran, so the pair was re-run a second time
+before Y2 was measured again, leaving X2 with three readings and Y2
+with two, the same asymmetry WS-9/WS-11's own A4/B4-style pairs showed.
+Before X4, this session waited roughly 4 minutes for a prolonged run of
+`node (vitest N)` and `tsc` workers on the shared machine to clear,
+confirmed by a fresh quiet `ps` snapshot, before running that pair (no
+mid-run contention was observed once it started, so neither X4 nor Y4
+was itself re-run). All contended and clean attempts are recorded in
+`## Rows` above. The decision set is X (without C3) = {5.27s, 5.09s
+(third attempt), 5.49s, 5.29s, 4.97s} (min 4.97s, max 5.49s, mean
+5.222s); Y (with C3) = {5.02s, 5.38s (second attempt), 5.02s, 4.83s,
+5.65s} (min 4.83s, max 5.65s, mean 5.18s). Decision 11's rule is
+`max(after) < min(before)`: here `max(Y) = 5.65s` is not less than
+`min(X) = 4.97s` — a 0.68s overlap, far wider than any other Part C
+row's overlap or gap in this run (the next-widest, WS-11's round-1 C7,
+was 0.41s), and the two means (5.18s vs 5.222s, ~0.8% apart) sit well
+inside that overlap rather than on either side of it. **Measured below
+the noise floor, reverted**: per task.md Part C ("If a row's measured
+gain is below the noise floor, revert it and record that; don't keep it
+on faith") and this stream's own Decision 11 obligation, C3 does not
+clear the accept rule and is reverted (`git revert --no-edit cce8f91`,
+by way of `7a00d66`/`ccb948e`/`4aceb37` — the first revert and its own
+reapply carried no `Co-Authored-By` trailer because `git revert
+--no-edit`'s default message was used, and `git commit --amend` is
+forbidden, so the fix was a further forward revert/reapply/revert
+cycle rather than an edit to the two earlier commits; `4aceb37` is the
+one that stands, with the trailer, and its tree is byte-identical to
+`62de9bb`'s `Cargo.toml`) rather than kept on the strength of a mean
+difference this small. No stage-level probe was run to explain the
+overlap because there is no gain to explain: the `blake3` inlining
+mechanism named in task.md's C3 line is, on this measurement, **not
+confirmed** — the change may still inline correctly at the IR level,
+but its effect on end-to-end wall clock over a full-fixture scan is
+indistinguishable from noise here, and no claim beyond that is made.
+Both scratch worktrees (`ws12-x`, `ws12-y`) were removed via `git
+worktree remove --force` after the last pair.
