@@ -776,8 +776,11 @@ read the same `$TMPDIR/nsd-perf-fixture`. Release build time and binary
 size (context, not part of the verdict): X's `cargo build --release
 --locked` took 18.77s real and produced a 7,812,816-byte binary; Y's
 took 18.14s real and produced a 7,847,136-byte binary (34,320 bytes
-larger, consistent with LTO's cross-crate inlining pulling more code
-into the final binary) — the two builds were run back-to-back and are
+larger; measured, not inferred: `__text` grew from 2,024,148 to
+2,090,720 bytes per `size -m`, `<blake3::Hasher>::finalize` is a
+standalone symbol at `62de9bb` but not at `cce8f91`, and
+`<blake3::Hasher>::update` is still standalone in both, per `nm -C` —
+review-ws12-r1-code.md) — the two builds were run back-to-back and are
 not a controlled comparison of link time itself. Before starting, `ps
 -Ao %cpu,comm -r` was checked and found quiet (no `node (vitest…)`,
 `tsc`, `cargo`/`target/*/deps/*` or other `nsd` process). After one
@@ -794,7 +797,8 @@ so the whole X2/Y2 pair was re-run; that re-run's X2 attempt (6.49s)
 itself coincided with an unrelated repo's `tsgolint` process at 454.5%
 CPU immediately before it ran, so the pair was re-run a second time
 before Y2 was measured again, leaving X2 with three readings and Y2
-with two, the same asymmetry WS-9/WS-11's own A4/B4-style pairs showed.
+with two, the same asymmetry WS-11's C7 round-1 A4/B4 and round-2
+X5/Y5 pairs showed.
 Before X4, this session waited roughly 4 minutes for a prolonged run of
 `node (vitest N)` and `tsc` workers on the shared machine to clear,
 confirmed by a fresh quiet `ps` snapshot, before running that pair (no
@@ -806,25 +810,34 @@ was itself re-run). All contended and clean attempts are recorded in
 5.65s} (min 4.83s, max 5.65s, mean 5.18s). Decision 11's rule is
 `max(after) < min(before)`: here `max(Y) = 5.65s` is not less than
 `min(X) = 4.97s` — a 0.68s overlap, far wider than any other Part C
-row's overlap or gap in this run (the next-widest, WS-11's round-1 C7,
+row's overlap in this run (the next-widest, WS-11's round-1 C7,
 was 0.41s), and the two means (5.18s vs 5.222s, ~0.8% apart) sit well
 inside that overlap rather than on either side of it. **Measured below
 the noise floor, reverted**: per task.md Part C ("If a row's measured
 gain is below the noise floor, revert it and record that; don't keep it
 on faith") and this stream's own Decision 11 obligation, C3 does not
-clear the accept rule and is reverted (`git revert --no-edit cce8f91`,
-by way of `7a00d66`/`ccb948e`/`4aceb37` — the first revert and its own
-reapply carried no `Co-Authored-By` trailer because `git revert
---no-edit`'s default message was used, and `git commit --amend` is
-forbidden, so the fix was a further forward revert/reapply/revert
-cycle rather than an edit to the two earlier commits; `4aceb37` is the
-one that stands, with the trailer, and its tree is byte-identical to
-`62de9bb`'s `Cargo.toml`) rather than kept on the strength of a mean
-difference this small. No stage-level probe was run to explain the
-overlap because there is no gain to explain: the `blake3` inlining
-mechanism named in task.md's C3 line is, on this measurement, **not
-confirmed** — the change may still inline correctly at the IR level,
-but its effect on end-to-end wall clock over a full-fixture scan is
-indistinguishable from noise here, and no claim beyond that is made.
+clear the accept rule and is reverted by `4aceb37` (a revert of the
+reapply `ccb948e` — the first revert and its own reapply carried no
+`Co-Authored-By` trailer because `git revert --no-edit`'s default
+message was used, and `git commit --amend` is forbidden, so the fix
+was a further forward revert/reapply/revert cycle rather than an edit
+to the two earlier commits; `4aceb37` is the one that stands, with the
+trailer, and its tree is byte-identical to `62de9bb`'s `Cargo.toml`)
+rather than kept on the strength of a mean difference this small. A
+stage-level probe (review-ws12-r1-perf.md) does explain the overlap:
+the `blake3` inlining mechanism named in task.md's C3 line is refuted
+for `update` and holds only for `finalize`. `<blake3::Hasher>::update`
+stays an out-of-line symbol under thin LTO, with the same 5 `bl` call
+sites in `clones::run_with_ir::{closure#0}` on both sides; `finalize`
+is gone because it was inlined, but it was only a wrapper, so the
+closure now calls `final_output` and `compress_in_place` directly. The
+stage probe measured about 0.2s of CPU saved at 1 thread (`lower_all`
+1.36s → 1.25s; `clones::run_with_ir` ≤ 0.03s), which spreads across 15
+cores to about 0.02-0.05s of wall time — an order of magnitude below
+this run's 0.29-0.40s quiet-window noise band, so no measurement
+window can clear it. `lto = "thin"` plus `codegen-units = 1` was also
+probed, within the same `[profile.release]` table: `update` still has
+34 `bl` sites out-of-line, the saving is at most about 0.1s of
+parallel CPU, and the binary is 7.04 MB.
 Both scratch worktrees (`ws12-x`, `ws12-y`) were removed via `git
 worktree remove --force` after the last pair.
