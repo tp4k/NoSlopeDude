@@ -8,7 +8,7 @@
 //! equivalence — see `docs/wasteful-rules.md`.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
 
@@ -47,61 +47,59 @@ pub const ALL_RULE_IDS: [RuleId; 6] = [
 /// D11-filtered executable-line set (`executable_lines_from_ir`) from that
 /// single `IrFile` -- `metrics/mod.rs` and `clones/mod.rs` still each lower
 /// independently for their own stages, but this is the one place in the
-/// rules stage that used to lower every file twice. `summary_index` maps a
-/// file back to its position in `metrics.file_scan_summaries`, so the
-/// language-lines row lands in a `Vec<Option<_>>` slot sized and ordered
-/// exactly like that summary list before being flattened -- `files`'s order
-/// and every downstream index (`path_index` in `compute_verbosity`) stay
-/// what they were when this ran as two separate passes. `find_findings` and
-/// `file_language_lines` below still each lower independently; they are not
-/// on this path any more, kept only so `tests/rules.rs` and this file's own
-/// `#[cfg(test)] mod tests` can call one function or the other directly.
+/// rules stage that used to lower every file twice. Each rayon task's
+/// IR-derived fields land in `lines_by_path`, keyed by that file's own
+/// `relative_path`; `files` is then built by walking
+/// `metrics.file_scan_summaries` in its own order and `filter_map`-ing in
+/// only the summaries that have a match there, so `files`'s order is always
+/// `file_scan_summaries`'s order regardless of which rayon task happens to
+/// finish first -- not an index-sized `Vec<Option<_>>` slotted by position
+/// (`M0c-13` mutation-survivor row: an iteration-order mutant on that
+/// slotting had no test pinning it; this form removes the slotting itself
+/// rather than guarding it). `find_findings` and `file_language_lines` below
+/// still each lower independently; they are not on this path any more, kept
+/// only so `tests/rules.rs` and this file's own `#[cfg(test)] mod tests` can
+/// call one function or the other directly.
 pub fn run(
     parsed_files: &[ParsedFile],
     metrics: &MetricsResult,
     clones: &ClonesResult,
 ) -> RulesResult {
-    let summary_index: HashMap<&Path, usize> = metrics
-        .file_scan_summaries
-        .iter()
-        .enumerate()
-        .map(|(index, summary)| (summary.relative_path.as_path(), index))
-        .collect();
-
     let per_file: Vec<PerFileScan> = parsed_files
         .par_iter()
         .map(|file| {
             let ir_file = lower::lower_file(file);
             let findings = findings_from_ir(file, &ir_file);
-            let language_lines = summary_index
-                .get(file.relative_path.as_path())
-                .map(|&index| {
-                    let summary = &metrics.file_scan_summaries[index];
-                    let entry = FileLanguageLines {
-                        relative_path: summary.relative_path.clone(),
-                        language: file.language,
-                        scanned_lines: summary.scanned_lines,
-                        executable_lines: executable_lines_from_ir(&ir_file),
-                    };
-                    (index, entry)
-                });
-            (findings, language_lines)
+            let ir_lines = FileIrLines {
+                language: file.language,
+                executable_lines: executable_lines_from_ir(&ir_file),
+            };
+            (findings, file.relative_path.clone(), ir_lines)
         })
         .collect();
 
     let mut findings = Vec::new();
-    let mut files_by_summary: Vec<Option<FileLanguageLines>> =
-        (0..metrics.file_scan_summaries.len())
-            .map(|_| None)
-            .collect();
-    for (file_findings, language_lines) in per_file {
+    let mut lines_by_path: HashMap<PathBuf, FileIrLines> = HashMap::new();
+    for (file_findings, relative_path, ir_lines) in per_file {
         findings.extend(file_findings);
-        if let Some((index, entry)) = language_lines {
-            files_by_summary[index] = Some(entry);
-        }
+        lines_by_path.insert(relative_path, ir_lines);
     }
     sort_findings(&mut findings);
-    let files: Vec<FileLanguageLines> = files_by_summary.into_iter().flatten().collect();
+
+    let files: Vec<FileLanguageLines> = metrics
+        .file_scan_summaries
+        .iter()
+        .filter_map(|summary| {
+            lines_by_path
+                .get(summary.relative_path.as_path())
+                .map(|ir_lines| FileLanguageLines {
+                    relative_path: summary.relative_path.clone(),
+                    language: ir_lines.language,
+                    scanned_lines: summary.scanned_lines,
+                    executable_lines: ir_lines.executable_lines.clone(),
+                })
+        })
+        .collect();
 
     let verbosity = compute_verbosity(&files, &findings, &clones.groups);
     RulesResult {
@@ -111,11 +109,18 @@ pub fn run(
     }
 }
 
-/// One rayon task's output in `run`'s fused pass: a file's findings, plus
-/// (when that file has a `metrics.file_scan_summaries` entry) the index of
-/// that entry alongside the `FileLanguageLines` row derived from the same
-/// lowering.
-type PerFileScan = (Vec<RuleFinding>, Option<(usize, FileLanguageLines)>);
+/// One rayon task's IR-derived contribution to a file's eventual
+/// `FileLanguageLines` row, before it is matched against
+/// `metrics.file_scan_summaries` for that file's `scanned_lines` -- see
+/// `run`'s doc comment.
+struct FileIrLines {
+    language: LanguageFamily,
+    executable_lines: Vec<usize>,
+}
+
+/// One rayon task's output in `run`'s fused pass: a file's findings, its own
+/// `relative_path`, and the `FileIrLines` derived from lowering it once.
+type PerFileScan = (Vec<RuleFinding>, PathBuf, FileIrLines);
 
 /// `find_findings`'s and `run`'s shared sort: `relative_path` then
 /// `start_line` then `rule_id`, for a deterministic result regardless of
