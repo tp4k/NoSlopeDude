@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 
 use nsd::metrics;
-use nsd::model::{Callable, DiscoveredFile, LanguageFamily, ParseFailureReason, ScanSettings};
+use nsd::model::{
+    Callable, DiscoveredFile, LanguageFamily, ParseFailureReason, ScanSettings,
+    CC_EROSION_THRESHOLD,
+};
 use nsd::parse::{self, ParsedFile};
 use nsd::pipeline;
 
@@ -462,4 +465,40 @@ fn test_unparseable_file_is_skipped_and_marks_incomplete() {
 
     let result = metrics::run(&parsed, !failures.is_empty());
     assert!(result.incomplete);
+}
+
+/// B4 (task.md): the code reviewer's erosion-boundary mutation survivor —
+/// `cc > CC_EROSION_THRESHOLD` mutated to `cc >=` — passes 8/8 existing
+/// neutrality tests because no committed fixture sits at exactly
+/// `cc == CC_EROSION_THRESHOLD`. `Boundary.java` declares exactly one
+/// callable at that boundary (nine chained `if`/`else if` branches, D7's
+/// `Branch` decision each, `CC = 1 + 9 == 10`), so `cc > 10` and `cc >= 10`
+/// disagree on it: not eroded under `>`, eroded under `>=`. Lives in its own
+/// `tests/fixtures/erosion_boundary/` root, not `tests/fixtures/metrics/`,
+/// since that root's own erosion is separately pinned at `0.6`
+/// (`test_erosion_scan_matches_hand_computation`) by a fixed set of
+/// callables that must not gain a boundary case of its own.
+#[test]
+fn test_erosion_boundary_fixture_has_one_callable_at_cc_10() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/erosion_boundary");
+    let files = vec![DiscoveredFile {
+        relative_path: PathBuf::from("Boundary.java"),
+        language: LanguageFamily::Java,
+    }];
+    let (parsed, failures) = parse::parse_all(&root, &files);
+    assert!(
+        failures.is_empty(),
+        "unexpected parse failures for Boundary.java: {failures:?}"
+    );
+    let callables = metrics::run(&parsed, false).callables;
+    assert_eq!(callables.len(), 1, "{callables:?}");
+    assert_eq!(
+        callables[0].cc, CC_EROSION_THRESHOLD,
+        "fixture must sit exactly at the erosion boundary"
+    );
+    assert_eq!(
+        metrics::erosion(&callables),
+        0.0,
+        "cc == CC_EROSION_THRESHOLD is not > the threshold, so nothing is eroded"
+    );
 }
