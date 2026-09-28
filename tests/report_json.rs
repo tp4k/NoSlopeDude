@@ -479,6 +479,44 @@ fn test_terminal_summary_revision_line_carries_the_dirty_flag() {
         "stdout should carry the sha and the dirty flag on the same line: {dirty_stdout}"
     );
 
+    // Clean repo: `dirty` is `Some(false)`, the common case (every clean
+    // local repo, and every remote scan -- docs/report-format.md:92). This
+    // kills the mutant that prints the "(dirty: ...)" suffix only when
+    // `dirty == Some(true)`.
+    let clean_repo_dir = tempfile::tempdir().expect("tempdir");
+    init_git_worktree(clean_repo_dir.path());
+    fs::write(clean_repo_dir.path().join("A.java"), "public class A {}\n").expect("write A.java");
+    git_commit_all(clean_repo_dir.path(), "initial commit");
+
+    let clean_output_dir = tempfile::tempdir().expect("tempdir");
+    let clean_command_output = std::process::Command::new(env!("CARGO_BIN_EXE_nsd"))
+        .args(["scan", clean_repo_dir.path().to_str().unwrap(), "--output"])
+        .arg(clean_output_dir.path())
+        .output()
+        .expect("spawn nsd");
+    assert!(clean_command_output.status.success());
+    let clean_stdout =
+        String::from_utf8(clean_command_output.stdout).expect("stdout is valid UTF-8");
+
+    let clean_json_text = fs::read_to_string(clean_output_dir.path().join("report.json"))
+        .expect("report.json exists");
+    let clean_value: serde_json::Value =
+        serde_json::from_str(&clean_json_text).expect("valid JSON");
+    let clean_sha = clean_value["scan"]["revision"]["sha"]
+        .as_str()
+        .expect("a git worktree scan publishes a sha")
+        .to_string();
+    assert_eq!(
+        clean_value["scan"]["revision"]["dirty"].as_bool(),
+        Some(false),
+        "a fixture with no uncommitted edit should be observed as clean: {clean_value}"
+    );
+
+    assert!(
+        clean_stdout.contains(&format!("  revision: {clean_sha} (dirty: false)\n")),
+        "stdout should carry the sha and the clean dirty flag on the same line: {clean_stdout}"
+    );
+
     // Non-git target: the revision line must render exactly as before --
     // no "(dirty: ...)" suffix at all, since `dirty` is `None` there.
     let non_git_dir = tempfile::tempdir().expect("tempdir");
