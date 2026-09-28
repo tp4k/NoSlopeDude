@@ -675,6 +675,43 @@ fn test_trusted_mode_symlink_base_replaced_by_identical_content_reports_c101() {
     );
 }
 
+/// triage-ws1-r2.md row 1: an **unchanged** symlink `nsd.yml` (same kind,
+/// same oid) must still resolve to no diagnostics at all, the same as an
+/// unchanged regular file. The round-2 fix for row 3 above over-corrected
+/// by requiring both sides to be `Regular`/`Executable` before the
+/// oid-equality shortcut applies, so a base and candidate that are both
+/// (the same) symlink fell through to `[C101, C102]` on every trusted-mode
+/// run — this is what "an unchanged candidate (equal oids) emits no C101"
+/// (A4) actually requires.
+#[test]
+fn test_trusted_mode_unchanged_symlink_base_reports_nothing() {
+    let (_dir, repo) = common::init_repo();
+    common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_SYMLINK, b"version: 1\n".to_vec())],
+    );
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+
+    let trusted_dir = tempfile::TempDir::new().expect("create a temp dir for the trusted config");
+    let trusted_path = trusted_dir.path().join("trusted.yml");
+    std::fs::write(&trusted_path, b"version: 1\n").expect("write trusted config");
+
+    let resolution = policy::resolve(
+        &repo,
+        Some(trusted_path.as_path()),
+        &base,
+        Candidate::Commit(&base),
+    )
+    .expect("a trusted config resolves even when the base is a symlink");
+
+    assert_eq!(resolution.source, ConfigSource::Trusted);
+    assert!(
+        resolution.diagnostics.is_empty(),
+        "an unchanged symlink base compared against itself must not report a change, even \
+         though a symlink's oid identifies its target bytes rather than its own"
+    );
+}
+
 /// triage-ws1-r1.md row 1: no test previously reached the `Candidate::Index`
 /// arm of `BaseIdentity::Oid`, so the mutant `.and(None)` (dropping the
 /// index candidate's own oid to `None`) survived: an unchanged oversized
