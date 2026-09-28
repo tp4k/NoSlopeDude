@@ -162,28 +162,6 @@ ceiling" gap that could be ordinary run-to-run noise on the control side,
 not evidence the ceiling model itself is wrong. This file records what was
 measured, not a settled attribution of the fusion's own effect.
 
-## Rows
-
-Each row: date (UTC) · machine · the two fixture repos and their scanned
-shas · the scanner's own reported scanned-source-line count (`overall`
-`verbosity.scanned_lines`) · wall-clock seconds (`/usr/bin/time -l`'s
-`real`) · peak RSS in MB (`/usr/bin/time -l`'s `maximum resident set
-size`, converted from bytes) · the scanner's own `incomplete` flag ·
-the scanner's own `skipped_files` count (parse failures and discovery-time
-exclusions combined).
-
-| date | machine | spring-framework | angular | scanned source lines | wall clock | peak RSS | incomplete | skipped files |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 2026-09-18 | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 17.54s | 1247.98 MB | true | 7720 |
-| 2026-09-18 | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 17.67s | 1248.16 MB | true | 7720 |
-| 2026-09-23 | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 4.28s | 1774.33 MB | true | 7720 |
-| 2026-09-23 | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 4.14s | 1775.42 MB | true | 7720 |
-| 2026-09-23 (a370e3d, fusion's parent commit — control, cold-build warm-up run, discarded from the ceiling comparison above; block input operations not recorded) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 6.90s | 1779.59 MB | true | 7720 |
-| 2026-09-23 (a370e3d, fusion's parent commit — control rerun 1, warm, block input operations: 0) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 6.77s | 1778.98 MB | true | 7720 |
-| 2026-09-23 (a370e3d, fusion's parent commit — control rerun 2, warm, block input operations: 0) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 5.68s | 1777.41 MB | true | 7720 |
-| 2026-09-24 (M0c-10, `3dd9ae2` — control, `tree-sitter-java` 0.23.5, built in a separate scratch clone outside this tree so the swap's own Cargo.toml edit never touched this binary) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584349 | 4.52s | 1810.38 MB | true | 7662 |
-| 2026-09-24 (M0c-10, this branch — `tree-sitter-java-orchard` 0.5.18) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.24s | 1822.98 MB | true | 7662 |
-
 ## M0c-10: the Java grammar swap's own measured effect
 
 Both rows immediately above scan the same already-fetched fixture root, at
@@ -290,6 +268,28 @@ modifier keyword, and its `cc`/`sloc`/`mass` are bit-for-bit identical
 before and after — no callable that was already measured before the swap
 changed its `sloc`/`cc`/`mass` value; the entire delta is newly-measured
 code that was previously invisible.
+
+## Rows
+
+Each row: date (UTC) · machine · the two fixture repos and their scanned
+shas · the scanner's own reported scanned-source-line count (`overall`
+`verbosity.scanned_lines`) · wall-clock seconds (`/usr/bin/time -l`'s
+`real`) · peak RSS in MB (`/usr/bin/time -l`'s `maximum resident set
+size`, converted from bytes) · the scanner's own `incomplete` flag ·
+the scanner's own `skipped_files` count (parse failures and discovery-time
+exclusions combined).
+
+| date | machine | spring-framework | angular | scanned source lines | wall clock | peak RSS | incomplete | skipped files |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-09-18 | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 17.54s | 1247.98 MB | true | 7720 |
+| 2026-09-18 | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 17.67s | 1248.16 MB | true | 7720 |
+| 2026-09-23 | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 4.28s | 1774.33 MB | true | 7720 |
+| 2026-09-23 | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 4.14s | 1775.42 MB | true | 7720 |
+| 2026-09-23 (a370e3d, fusion's parent commit — control, cold-build warm-up run, discarded from the ceiling comparison above; block input operations not recorded) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 6.90s | 1779.59 MB | true | 7720 |
+| 2026-09-23 (a370e3d, fusion's parent commit — control rerun 1, warm, block input operations: 0) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 6.77s | 1778.98 MB | true | 7720 |
+| 2026-09-23 (a370e3d, fusion's parent commit — control rerun 2, warm, block input operations: 0) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 570647 | 5.68s | 1777.41 MB | true | 7720 |
+| 2026-09-24 (M0c-10, `3dd9ae2` — control, `tree-sitter-java` 0.23.5, built in a separate scratch clone outside this tree so the swap's own Cargo.toml edit never touched this binary) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584349 | 4.52s | 1810.38 MB | true | 7662 |
+| 2026-09-24 (M0c-10, this branch — `tree-sitter-java-orchard` 0.5.18) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.24s | 1822.98 MB | true | 7662 |
 | 2026-09-28 (nsd@e21f629ccdd7f78d54bd9655147b4513ef6db4ed) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 23.08s | 1732.75 MB | true | 7662 |
 | 2026-09-28 (nsd@e21f629ccdd7f78d54bd9655147b4513ef6db4ed) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 17.73s | 1500.23 MB | true | 7662 |
 | 2026-09-28 (nsd@375b2c73e6eb34fb5f3792e5d40e1ed2dd9d9972) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 16.49s | 1596.62 MB | true | 7662 |
