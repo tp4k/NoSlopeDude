@@ -61,7 +61,10 @@ pub struct Resolution {
 /// apart from a `Symlink` or `Submodule` entry that happens to point at
 /// the same blob (triage-ws1-r1.md row 3 — a base symlink replaced by a
 /// regular file with byte-identical target/content must still be seen as
-/// a shape change).
+/// a shape change). An equal oid where both sides keep the *same* kind
+/// (e.g. an unchanged symlink compared against itself) is unchanged
+/// regardless of that kind (triage-ws1-r2.md row 1) — the kind check only
+/// matters when the two sides' kinds actually differ.
 enum BaseIdentity<'a> {
     Bytes(Option<&'a Vec<u8>>),
     Oid {
@@ -71,10 +74,13 @@ enum BaseIdentity<'a> {
 }
 
 /// Whether `kind` is eligible for the oid-equality "unchanged" shortcut
-/// (A4, triage-ws1-r1.md row 3): only a `Regular`/`Executable` entry's oid
-/// identifies its own `nsd.yml` bytes. A `Symlink`'s oid identifies its
-/// *target* bytes instead, so two entries sharing an oid across that kind
-/// boundary have not actually kept the same content shape.
+/// *across a kind change* (A4, triage-ws1-r1.md row 3): only a
+/// `Regular`/`Executable` entry's oid identifies its own `nsd.yml` bytes. A
+/// `Symlink`'s oid identifies its *target* bytes instead, so two entries of
+/// *different* kinds sharing an oid have not actually kept the same content
+/// shape. An equal oid where both sides keep the *same* kind (including two
+/// symlinks) is unchanged regardless of this eligibility check (triage-
+/// ws1-r2.md row 1) — this function only gates the cross-kind case.
 fn is_shortcut_eligible(kind: EntryKind) -> bool {
     matches!(kind, EntryKind::Regular | EntryKind::Executable)
 }
@@ -209,17 +215,23 @@ fn diagnostics_for_candidate(
             let mut candidate_bytes = candidate_bytes;
 
             // Both sides missing an `nsd.yml` entry entirely is unchanged
-            // regardless of kind; otherwise the oid-equality shortcut only
-            // applies when both entries are `Regular`/`Executable` (row 3):
-            // a kind change (e.g. a symlink replaced by a regular file with
-            // byte-identical target/content) must still fall through to the
-            // "changed" path below.
+            // regardless of kind. Otherwise, an equal oid is "unchanged"
+            // either when both sides keep the exact same kind (triage-
+            // ws1-r2.md row 1: a symlink base compared against itself is
+            // unchanged, the same as any other kind compared against
+            // itself) or when both sides are `Regular`/`Executable` (row
+            // 3): a *kind change* between two blob-identifying kinds (e.g.
+            // a symlink replaced by a regular file with byte-identical
+            // target/content) must still fall through to the "changed"
+            // path below, because only a `Regular`/`Executable` entry's oid
+            // identifies its own `nsd.yml` bytes.
             let unchanged = match (base_oid, candidate_oid) {
                 (None, None) => true,
                 (Some(base_oid), Some(candidate_oid)) => {
                     base_oid == candidate_oid
-                        && base_kind.is_some_and(is_shortcut_eligible)
-                        && candidate_kind.is_some_and(is_shortcut_eligible)
+                        && (base_kind == candidate_kind
+                            || (base_kind.is_some_and(is_shortcut_eligible)
+                                && candidate_kind.is_some_and(is_shortcut_eligible)))
                 }
                 _ => false,
             };
