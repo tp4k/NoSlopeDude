@@ -471,9 +471,12 @@ fn test_unparseable_file_is_skipped_and_marks_incomplete() {
 /// `cc > CC_EROSION_THRESHOLD` mutated to `cc >=` — passes 8/8 existing
 /// neutrality tests because no committed fixture sits at exactly
 /// `cc == CC_EROSION_THRESHOLD`. `Boundary.java` declares exactly one
-/// callable at that boundary (nine chained `if`/`else if` branches, D7's
-/// `Branch` decision each, `CC = 1 + 9 == 10`), so `cc > 10` and `cc >= 10`
-/// disagree on it: not eroded under `>`, eroded under `>=`. Lives in its own
+/// callable at that boundary (nine independent `if` branches, no `else`,
+/// D7's `Branch` decision each, `CC = 1 + 9 == 10`), so `cc > 10` and
+/// `cc >= 10` disagree on it: not eroded under `>`, eroded under `>=`.
+/// No `else` so `JAVA-REDUNDANT-ELSE-AFTER-RETURN` never fires — a rule
+/// finding on this fixture would widen the neutrality-recapture diff past
+/// the `/scores/*` bound `docs/ir-neutrality.md` requires. Lives in its own
 /// `tests/fixtures/erosion_boundary/` root, not `tests/fixtures/metrics/`,
 /// since that root's own erosion is separately pinned at `0.6`
 /// (`test_erosion_scan_matches_hand_computation`) by a fixed set of
