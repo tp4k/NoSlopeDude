@@ -830,12 +830,15 @@ for `update` and holds only for `finalize`. `<blake3::Hasher>::update`
 stays an out-of-line symbol under thin LTO, with the same 5 `bl` call
 sites in `clones::run_with_ir::{closure#0}` on both sides; `finalize`
 is gone because it was inlined, but it was only a wrapper, so the
-closure now calls `final_output` and `compress_in_place` directly. The
-stage probe measured about 0.2s of CPU saved at 1 thread (`lower_all`
-1.36s → 1.25s; `clones::run_with_ir` ≤ 0.03s), which spreads across 15
-cores to about 0.02-0.05s of wall time — an order of magnitude below
-this run's 0.29-0.40s quiet-window noise band, so no measurement
-window can clear it. `lto = "thin"` plus `codegen-units = 1` was also
+closure now calls `final_output` and `compress_in_place` directly.
+At 1 thread, the stage probe measured `lower_all` at 1.37s → 1.25s
+(a 0.11s saving) and `clones::run_with_ir` at ≤ 0.03s saved. At full
+threads, whole-scan `user` CPU in the upper group read 9.34-9.45s at
+the parent and 9.12-9.23s with C3, about 0.2s of CPU (about 2%),
+nearly all inside `par_iter` stages; spread across 15 cores that is
+about 0.02-0.05s of wall time — an order of magnitude below this
+run's 0.29-0.40s quiet-window noise band, so no measurement window
+can clear it. `lto = "thin"` plus `codegen-units = 1` was also
 probed, within the same `[profile.release]` table: `update` still has
 34 `bl` sites out-of-line, the saving is at most about 0.1s of
 parallel CPU, and the binary is 7.04 MB.
