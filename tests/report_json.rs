@@ -438,6 +438,78 @@ fn test_terminal_summary_carries_the_scores() {
 }
 
 #[test]
+fn test_terminal_summary_revision_line_carries_the_dirty_flag() {
+    // B9: report.json/report.html already carry the D6 dirty flag; the
+    // terminal summary's `revision:` line did not. Spawn the real binary
+    // (same pattern as test_terminal_summary_carries_the_scores above)
+    // against a real dirty git worktree, then against a non-git directory,
+    // so both the `Some` (dirty) and `None` (unavailable_reason) arms of
+    // the revision's `dirty: Option<bool>` are exercised through stdout.
+    let repo_dir = tempfile::tempdir().expect("tempdir");
+    init_git_worktree(repo_dir.path());
+    fs::write(repo_dir.path().join("A.java"), "public class A {}\n").expect("write A.java");
+    git_commit_all(repo_dir.path(), "initial commit");
+    fs::write(
+        repo_dir.path().join("A.java"),
+        "public class A { void x() {} }\n",
+    )
+    .expect("edit A.java (uncommitted, so the worktree is dirty)");
+
+    let dirty_output_dir = tempfile::tempdir().expect("tempdir");
+    let dirty_command_output = std::process::Command::new(env!("CARGO_BIN_EXE_nsd"))
+        .args(["scan", repo_dir.path().to_str().unwrap(), "--output"])
+        .arg(dirty_output_dir.path())
+        .output()
+        .expect("spawn nsd");
+    assert!(dirty_command_output.status.success());
+    let dirty_stdout =
+        String::from_utf8(dirty_command_output.stdout).expect("stdout is valid UTF-8");
+
+    let json_text = fs::read_to_string(dirty_output_dir.path().join("report.json"))
+        .expect("report.json exists");
+    let value: serde_json::Value = serde_json::from_str(&json_text).expect("valid JSON");
+    let sha = value["scan"]["revision"]["sha"]
+        .as_str()
+        .expect("a git worktree scan publishes a sha")
+        .to_string();
+    assert_eq!(
+        value["scan"]["revision"]["dirty"].as_bool(),
+        Some(true),
+        "the fixture's uncommitted edit should be observed as dirty: {value}"
+    );
+
+    assert!(
+        dirty_stdout.contains(&format!("  revision: {sha} (dirty: true)\n")),
+        "stdout should carry the sha and the dirty flag on the same line: {dirty_stdout}"
+    );
+
+    // Non-git target: the revision line must render exactly as before --
+    // no "(dirty: ...)" suffix at all, since `dirty` is `None` there.
+    let non_git_dir = tempfile::tempdir().expect("tempdir");
+    fs::write(non_git_dir.path().join("A.java"), "public class A {}\n")
+        .expect("write A.java in a non-git directory");
+
+    let non_git_output_dir = tempfile::tempdir().expect("tempdir");
+    let non_git_command_output = std::process::Command::new(env!("CARGO_BIN_EXE_nsd"))
+        .args(["scan", non_git_dir.path().to_str().unwrap(), "--output"])
+        .arg(non_git_output_dir.path())
+        .output()
+        .expect("spawn nsd");
+    assert!(non_git_command_output.status.success());
+    let non_git_stdout =
+        String::from_utf8(non_git_command_output.stdout).expect("stdout is valid UTF-8");
+
+    assert!(
+        non_git_stdout.contains("  revision: not_a_git_repository\n"),
+        "a non-git target's revision line must render unchanged: {non_git_stdout}"
+    );
+    assert!(
+        !non_git_stdout.contains("(dirty:"),
+        "a non-git target must not print a dirty suffix: {non_git_stdout}"
+    );
+}
+
+#[test]
 fn test_a_parse_failure_is_not_fatal() {
     // Exit code 0 despite the incomplete marker (D18): a parse failure
     // degrades the scan, it does not fail it.
