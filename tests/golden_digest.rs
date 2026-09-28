@@ -542,7 +542,7 @@ fn test_nsd_v1_digest_shares_the_m0b_revision() -> Result<()> {
 
 /// B3 (task.md, ledger row triage-ws4-r1): pins `pending_notice()`'s
 /// emission at all four `println!("{}", pending_notice())` call sites
-/// above (the archived-digest, live-nsd-v1-scan and both bare-pending-gate
+/// in this file (the archived-digest, live-nsd-v1-scan and both bare-pending-gate
 /// tests) by observing each one's own stdout from a fresh, re-executed
 /// child process, rather than by capturing stdout in-process -- an
 /// in-process capture would need a `gag`-style stdout-redirect crate, a new
