@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# WS-6/D24: runs exactly one scan of the D25 perf fixture under
-# `/usr/bin/time -l` and appends a row (fixture shas, the scanner's own
-# scanned-source-line count, wall-clock seconds, peak RSS in MB, date and
-# machine) to docs/measurements.md. Refuses to run if the fixture (see
-# scripts/fetch_perf_fixture.sh) is not present, rather than measuring an
-# empty tree.
+# WS-6/D24 (hardened by WS-8's B10-B12): runs exactly one scan of the D25
+# perf fixture under `/usr/bin/time -l` and appends a row (fixture shas,
+# the scanner's own scanned-source-line count, wall-clock seconds, peak RSS
+# in MB, date+HEAD sha, machine) to docs/measurements.md. Refuses to run if
+# the fixture (see scripts/fetch_perf_fixture.sh) is not present, rather
+# than measuring an empty tree.
 #
 # `report.json` parsing lives in plain functions below, not inlined into
 # `main`, so `tests/perf_scan.rs` can `source` this file and call them
@@ -105,6 +105,29 @@ extract_skipped_count() {
   extract_skipped_block "$file" | grep -c '"relative_path"' || true
 }
 
+# head_sha_annotation
+# Prints `(nsd@<40-hex HEAD sha>)`, with a `+dirty` suffix appended to the
+# sha when `git status --porcelain` (confirmed via `git status --help`)
+# reports any change under the paths that actually produce the scanned
+# binary. B12: this is how the HEAD sha reaches the appended row.
+head_sha_annotation() {
+  local sha dirty
+  sha="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+  dirty=""
+  if [ -n "$(git -C "$REPO_ROOT" status --porcelain -- src Cargo.toml Cargo.lock)" ]; then
+    dirty="+dirty"
+  fi
+  printf '(nsd@%s%s)' "$sha" "$dirty"
+}
+
+# date_cell
+# Prints the row's date cell: the UTC date plus the HEAD sha annotation
+# above, following the same *placement* as the hand-annotated rows in
+# docs/measurements.md (a parenthetical in the date cell).
+date_cell() {
+  printf '%s %s' "$(date -u +%Y-%m-%d)" "$(head_sha_annotation)"
+}
+
 main() {
   local fixture_root="${1:-${TMPDIR:-/tmp}/nsd-perf-fixture}"
   local spring_dir="$fixture_root/spring-framework"
@@ -140,12 +163,8 @@ main() {
   incomplete="$(extract_incomplete "$report_json")"
   skipped_count="$(extract_skipped_count "$report_json")"
 
-  local date machine
-  date="$(date -u +%Y-%m-%d)"
-  machine="$(uname -srm)"
-
   local row
-  row="| $date | $machine | spring-framework@$spring_sha | angular@$angular_sha | $scanned_lines | ${wall_seconds}s | ${peak_rss_mb} MB | $incomplete | $skipped_count |"
+  row="| $(date_cell) | $(uname -srm) | spring-framework@$spring_sha | angular@$angular_sha | $scanned_lines | ${wall_seconds}s | ${peak_rss_mb} MB | $incomplete | $skipped_count |"
 
   echo "$row" >>"$MEASUREMENTS_FILE"
   echo "$row"
