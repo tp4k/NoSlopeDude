@@ -702,4 +702,51 @@ mod tests {
         expected.extend_from_slice(b".ts");
         assert_eq!(joined.as_os_str().as_bytes(), expected.as_slice());
     }
+
+    /// A2: expected vs actual, Executable — tracked `Executable`, exec bit
+    /// unobservable (`None`, e.g. non-Unix): expected `Executable` (git's
+    /// own `core.fileMode=false` behaviour); actual before this fix
+    /// (`is_executable` on a non-Unix platform, always `false`) would be
+    /// `Regular`.
+    #[test]
+    fn test_unobservable_exec_bit_keeps_the_tracked_kind() {
+        assert_eq!(
+            worktree_file_kind(None, Some(EntryKind::Executable)),
+            EntryKind::Executable,
+            "a tracked Executable entry keeps its kind when the exec bit is unobservable"
+        );
+        // A2: expected vs actual, Regular — tracked `Regular`, unobservable:
+        // expected `Regular` both before and after (already correct; kept
+        // to prove the fix does not flip it the other way).
+        assert_eq!(
+            worktree_file_kind(None, Some(EntryKind::Regular)),
+            EntryKind::Regular,
+            "a tracked Regular entry stays Regular when the exec bit is unobservable"
+        );
+        // An untracked entry has no tracked kind to keep.
+        assert_eq!(
+            worktree_file_kind(None, None),
+            EntryKind::Regular,
+            "an untracked entry stays Regular when the exec bit is unobservable"
+        );
+    }
+
+    #[test]
+    fn test_observed_exec_bit_decides_the_kind() {
+        assert_eq!(
+            worktree_file_kind(Some(true), Some(EntryKind::Regular)),
+            EntryKind::Executable,
+            "an observed exec bit set makes the entry Executable, regardless of tracked kind"
+        );
+        assert_eq!(
+            worktree_file_kind(Some(false), Some(EntryKind::Executable)),
+            EntryKind::Regular,
+            "an observed exec bit unset makes the entry Regular, regardless of tracked kind"
+        );
+        assert_eq!(
+            worktree_file_kind(Some(true), None),
+            EntryKind::Executable,
+            "an observed exec bit set makes an untracked entry Executable too"
+        );
+    }
 }
