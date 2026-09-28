@@ -11,7 +11,7 @@ use std::path::Path;
 use git2::{ObjectType, Oid, Repository};
 
 use crate::config::{self, Config, ConfigError, CODE_CONFIG_CHANGED, CODE_INVALID_CONFIG};
-use crate::git::snapshot::{CommitSnapshot, IndexSnapshot, WorktreeSnapshot};
+use crate::git::snapshot::{CommitSnapshot, EntryKind, IndexSnapshot, WorktreeSnapshot};
 
 /// Where the effective `Config` in a `Resolution` came from (Settled
 /// decisions: "Config trust | Policy read from the base snapshot").
@@ -56,10 +56,27 @@ pub struct Resolution {
 /// `nsd.yml` changed (A4): by raw bytes, the base case, or — when the base
 /// itself could not be read (trusted mode's "an unreadable base must not
 /// fail this resolution") — by blob object id, using whatever snapshot
-/// metadata is still available.
+/// metadata is still available. The oid variant also carries each side's
+/// `Entry.kind`: an oid alone cannot tell a `Regular`/`Executable` blob
+/// apart from a `Symlink` or `Submodule` entry that happens to point at
+/// the same blob (triage-ws1-r1.md row 3 — a base symlink replaced by a
+/// regular file with byte-identical target/content must still be seen as
+/// a shape change).
 enum BaseIdentity<'a> {
     Bytes(Option<&'a Vec<u8>>),
-    Oid(Option<Oid>),
+    Oid {
+        oid: Option<Oid>,
+        kind: Option<EntryKind>,
+    },
+}
+
+/// Whether `kind` is eligible for the oid-equality "unchanged" shortcut
+/// (A4, triage-ws1-r1.md row 3): only a `Regular`/`Executable` entry's oid
+/// identifies its own `nsd.yml` bytes. A `Symlink`'s oid identifies its
+/// *target* bytes instead, so two entries sharing an oid across that kind
+/// boundary have not actually kept the same content shape.
+fn is_shortcut_eligible(kind: EntryKind) -> bool {
+    matches!(kind, EntryKind::Regular | EntryKind::Executable)
 }
 
 /// Fetches the candidate's raw repository-root `nsd.yml` bytes (M2-2's diff
@@ -127,22 +144,34 @@ fn diagnostics_for_candidate(
             }
             Ok(diagnostics)
         }
-        BaseIdentity::Oid(base_oid) => {
+        BaseIdentity::Oid {
+            oid: base_oid,
+            kind: base_kind,
+        } => {
             // A worktree entry never carries an oid (D2), so only that
             // case needs a read; a commit/index candidate's oid comes
             // straight from its own snapshot entry, and an unchanged one is
-            // never read at all (the precise gap `test_trusted_config_
-            // overrides_an_unreadable_base` pins: base and candidate are
-            // both the same oversized, otherwise-unreadable commit).
-            let (candidate_oid, candidate_bytes) = match &candidate {
-                Candidate::Commit(snapshot) => (
-                    config::find_root_entry(&snapshot.entries).and_then(|entry| entry.oid),
-                    None,
-                ),
-                Candidate::Index(snapshot) => (
-                    config::find_root_entry(&snapshot.entries).and_then(|entry| entry.oid),
-                    None,
-                ),
+            // never read at all (the precise gap
+            // `test_trusted_config_overrides_an_unreadable_base` pins: base
+            // and candidate are both the same oversized, otherwise-
+            // unreadable commit).
+            let (candidate_oid, candidate_kind, candidate_bytes) = match &candidate {
+                Candidate::Commit(snapshot) => {
+                    let entry = config::find_root_entry(&snapshot.entries);
+                    (
+                        entry.and_then(|entry| entry.oid),
+                        entry.map(|entry| entry.kind),
+                        None,
+                    )
+                }
+                Candidate::Index(snapshot) => {
+                    let entry = config::find_root_entry(&snapshot.entries);
+                    (
+                        entry.and_then(|entry| entry.oid),
+                        entry.map(|entry| entry.kind),
+                        None,
+                    )
+                }
                 Candidate::Worktree(_) => {
                     let bytes = match fetch_candidate_bytes(repo, &candidate) {
                         Ok(bytes) => bytes,
@@ -158,6 +187,11 @@ fn diagnostics_for_candidate(
                         }
                         Err(err) => return Err(err),
                     };
+                    // `fetch_candidate_bytes` only ever returns `Ok(Some(_))`
+                    // for a `Regular`/`Executable` entry (any other kind, or
+                    // an over-ceiling one, is the `CODE_INVALID_CONFIG` arm
+                    // above), so the eligible kind is exact here, not a
+                    // guess.
                     let oid = match &bytes {
                         Some(content) => {
                             Some(Oid::hash_object(ObjectType::Blob, content).map_err(|err| {
@@ -168,12 +202,28 @@ fn diagnostics_for_candidate(
                         }
                         None => None,
                     };
-                    (oid, bytes)
+                    let kind = bytes.as_ref().map(|_| EntryKind::Regular);
+                    (oid, kind, bytes)
                 }
             };
             let mut candidate_bytes = candidate_bytes;
 
-            if base_oid == candidate_oid {
+            // Both sides missing an `nsd.yml` entry entirely is unchanged
+            // regardless of kind; otherwise the oid-equality shortcut only
+            // applies when both entries are `Regular`/`Executable` (row 3):
+            // a kind change (e.g. a symlink replaced by a regular file with
+            // byte-identical target/content) must still fall through to the
+            // "changed" path below.
+            let unchanged = match (base_oid, candidate_oid) {
+                (None, None) => true,
+                (Some(base_oid), Some(candidate_oid)) => {
+                    base_oid == candidate_oid
+                        && base_kind.is_some_and(is_shortcut_eligible)
+                        && candidate_kind.is_some_and(is_shortcut_eligible)
+                }
+                _ => false,
+            };
+            if unchanged {
                 return Ok(Vec::new());
             }
 
@@ -211,8 +261,9 @@ fn diagnostics_for_candidate(
 ///   over-ceiling or invalid-shape trusted file is `NSD-C102`.
 /// - Otherwise the base snapshot's own `nsd.yml` governs (built-in
 ///   defaults when it has none); an invalid base is `NSD-C102`.
-/// - Independently of the source above, a candidate whose raw `nsd.yml`
-///   bytes differ from the base's carries `NSD-C101`; only a changed
+/// - Independently of the source above, a candidate that differs from the
+///   base — by raw `nsd.yml` bytes, or by blob object id when the base
+///   itself could not be read — carries `NSD-C101`; only a changed
 ///   candidate is then parsed, and an invalid one additionally carries
 ///   `NSD-C102` — but this never changes the effective `Config`.
 pub fn resolve(
@@ -236,8 +287,15 @@ pub fn resolve(
                 BaseIdentity::Bytes(base_bytes.as_ref()),
             )?,
             Err(_) => {
-                let base_oid = config::find_root_entry(&base.entries).and_then(|entry| entry.oid);
-                diagnostics_for_candidate(repo, candidate, BaseIdentity::Oid(base_oid))?
+                let base_entry = config::find_root_entry(&base.entries);
+                diagnostics_for_candidate(
+                    repo,
+                    candidate,
+                    BaseIdentity::Oid {
+                        oid: base_entry.and_then(|entry| entry.oid),
+                        kind: base_entry.map(|entry| entry.kind),
+                    },
+                )?
             }
         };
         let config = config::load_trusted(path)?;
