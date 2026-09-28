@@ -311,8 +311,9 @@ predicts.
 Predicted bound before capturing: the new callable is Java, so
 `scores.{overall,java}.verbosity.scanned_lines` should move by its own
 contribution, with `ratio` moving via that same `scanned_lines` rise and
-`erosion` moving via the callable's own mass entering Σmass (its `cc`
-exceeds the threshold, so it counts as eroded); `js_ts` untouched; no new
+`erosion` moving via the callable's own mass entering Σmass (its `cc == 10`
+does not exceed the threshold, so the eroded mass stays unchanged and only
+the denominator grows); `js_ts` untouched; no new
 `skipped_files` entry (the file parses clean);
 no new `findings` entry (the fixture trips none of the six wasteful-code
 rules); and, since `cc == 10` outranks the corpus's lowest existing
