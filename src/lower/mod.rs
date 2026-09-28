@@ -22,8 +22,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tree_sitter::Node;
 
 #[cfg(test)]
+use crate::exec_lines::is_comment_id;
+#[cfg(test)]
 use crate::exec_lines::is_comment_kind;
+#[cfg(test)]
 use crate::exec_lines::is_executable_leaf;
+use crate::exec_lines::is_executable_leaf_id;
 #[cfg(test)]
 use crate::ir::is_clear_of_damage;
 use crate::ir::{
@@ -32,7 +36,6 @@ use crate::ir::{
 };
 use crate::model::LanguageFamily;
 use crate::parse::ParsedFile;
-#[cfg(test)]
 use kind_ids::KindIds;
 
 /// M0c's fingerprint keys on this alongside `ir::IR_VERSION`; bump it
@@ -162,10 +165,21 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
         owners: &mut owners,
         owner_spans: &mut owner_spans,
     };
+    // C2 (task.md): built once per `lower_file` call from this file's own
+    // `file.tree.language()` -- see `kind_ids::KindIds`'s own doc comment for
+    // why a fresh table per call, rather than one cached per
+    // `LanguageFamily`, is required (JS/TS alone spans three distinct
+    // grammars/id-spaces).
+    let ids = KindIds::build(
+        &file.tree.language(),
+        kind_ids::KIND_NAMES,
+        kind_ids::FIELD_NAMES,
+    );
     let root = build_ir(
         file.tree.root_node(),
         file.language,
         &file.source,
+        &ids,
         &mut tables,
     );
 
@@ -570,11 +584,12 @@ fn classify(
     language: LanguageFamily,
     source: &str,
     parent: Option<Node>,
-    field_name: Option<&str>,
+    field_id: Option<u16>,
+    ids: &KindIds,
 ) -> Classification {
     match language {
-        LanguageFamily::Java => java::classify(node, source, parent),
-        LanguageFamily::JsTs => jsts::classify(node, source, parent, field_name),
+        LanguageFamily::Java => java::classify(node, source, parent, ids),
+        LanguageFamily::JsTs => jsts::classify(node, source, parent, field_id, ids),
     }
 }
 
@@ -591,22 +606,35 @@ fn classify(
 /// here runs against the deep-nesting perf fixture.
 #[cfg(test)]
 fn is_clone_statement(node: Node, language: LanguageFamily) -> bool {
-    let kind = node.kind();
+    // Test-only: builds its own `KindIds` from `node.language()` rather than
+    // threading a caller-built one through every test call site below --
+    // this function's own callers never run against the deep-nesting perf
+    // fixture (see this function's own doc comment), so the extra build per
+    // call costs nothing the acceptance requires.
+    let ids = KindIds::build(
+        &node.language(),
+        kind_ids::KIND_NAMES,
+        kind_ids::FIELD_NAMES,
+    );
+    let kind_id = node.kind_id();
     let parent = node.parent();
-    let parent_kind = parent.map(|parent| parent.kind());
+    let parent_kind_id = parent.map(|parent| parent.kind_id());
     let is_named = node.is_named();
-    let is_comment = is_comment_kind(kind, language);
+    let is_comment = is_comment_id(kind_id, &ids);
     match language {
-        LanguageFamily::Java => java::is_clone_statement(kind, parent_kind, is_named, is_comment),
+        LanguageFamily::Java => {
+            java::is_clone_statement(&ids, kind_id, parent_kind_id, is_named, is_comment)
+        }
         LanguageFamily::JsTs => {
-            let field_name = parent.and_then(|parent| {
+            let field_id = parent.and_then(|parent| {
                 let mut cursor = parent.walk();
                 let index = parent
                     .children(&mut cursor)
                     .position(|child| child.id() == node.id())?;
-                parent.field_name_for_child(index as u32)
+                let field_name = parent.field_name_for_child(index as u32)?;
+                ids.field(field_name)
             });
-            jsts::is_clone_statement(parent_kind, field_name, is_named, is_comment)
+            jsts::is_clone_statement(&ids, parent_kind_id, field_id, is_named, is_comment)
         }
     }
 }
@@ -709,7 +737,13 @@ struct IrTables<'a> {
 /// later, separate pass over this already-built `IrNode` tree, using an
 /// explicit work-list rather than a `TreeCursor` -- a different shape from
 /// this one, not the same one reused.
-fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrTables) -> IrNode {
+fn build_ir(
+    root: Node,
+    language: LanguageFamily,
+    source: &str,
+    ids: &KindIds,
+    tables: &mut IrTables,
+) -> IrNode {
     // `parent_in_catch_body` is the already-computed `in_catch_body` flag of
     // this node's own parent (or `false` for `root`), inherited rather than
     // re-derived -- see `Classification::is_catch_body_root`'s doc comment.
@@ -745,12 +779,12 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
     let open = |node: Node,
                 parent: Option<Node>,
                 parent_in_catch_body: bool,
-                field_name: Option<&str>,
+                field_id: Option<u16>,
                 tables: &mut IrTables,
                 owner_stack: &mut Vec<u32>|
      -> (IrNode, bool, bool, Option<EntitySlot>, bool) {
         let span = Span::from_node(node);
-        let classification = classify(node, language, source, parent, field_name);
+        let classification = classify(node, language, source, parent, field_id, ids);
         let self_damage = classification.damage.is_some();
         if let Some(kind) = classification.damage {
             tables.damage.push(DamageSpan { kind, span });
@@ -789,7 +823,7 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
         let in_catch_body = classification.is_catch_body_root || parent_in_catch_body;
         let ir_node = IrNode {
             span,
-            executable: is_executable_leaf(node, language),
+            executable: is_executable_leaf_id(node, ids),
             decision: classification.decision,
             terminator: classification.terminator,
             in_block: classification.in_block,
@@ -836,12 +870,12 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
         if cursor.goto_first_child() {
             let parent_in_catch_body = *catch_flags.last().unwrap_or(&false);
             let parent = *parents.last().unwrap_or(&root);
-            let field_name = cursor.field_name();
+            let field_id = cursor.field_id().map(|field_id| field_id.get());
             let (node, in_catch_body, self_damage, entity_slot, owner_pushed) = open(
                 cursor.node(),
                 Some(parent),
                 parent_in_catch_body,
-                field_name,
+                field_id,
                 tables,
                 &mut owner_stack,
             );
@@ -879,12 +913,12 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
             if cursor.goto_next_sibling() {
                 let parent_in_catch_body = *catch_flags.last().unwrap_or(&false);
                 let parent_node = *parents.last().unwrap_or(&root);
-                let field_name = cursor.field_name();
+                let field_id = cursor.field_id().map(|field_id| field_id.get());
                 let (node, in_catch_body, self_damage, entity_slot, owner_pushed) = open(
                     cursor.node(),
                     Some(parent_node),
                     parent_in_catch_body,
-                    field_name,
+                    field_id,
                     tables,
                     &mut owner_stack,
                 );
@@ -1028,7 +1062,12 @@ mod tests {
                 owners: &mut owners,
                 owner_spans: &mut owner_spans,
             };
-            build_ir(tree.root_node(), language, &source, &mut tables);
+            let ids = KindIds::build(
+                &tree.language(),
+                kind_ids::KIND_NAMES,
+                kind_ids::FIELD_NAMES,
+            );
+            build_ir(tree.root_node(), language, &source, &ids, &mut tables);
 
             let mut statements = Vec::new();
             for_each_descendant(tree.root_node(), |node| {
@@ -1116,7 +1155,12 @@ mod tests {
                 owners: &mut owners,
                 owner_spans: &mut owner_spans,
             };
-            let root = build_ir(tree.root_node(), language, &source, &mut tables);
+            let ids = KindIds::build(
+                &tree.language(),
+                kind_ids::KIND_NAMES,
+                kind_ids::FIELD_NAMES,
+            );
+            let root = build_ir(tree.root_node(), language, &source, &ids, &mut tables);
 
             let mut ir_nodes = Vec::new();
             collect_ir_nodes(&root, &mut ir_nodes);
