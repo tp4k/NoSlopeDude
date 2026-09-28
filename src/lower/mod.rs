@@ -72,6 +72,12 @@ pub struct IrFile {
     /// callable, however many callables sit underneath it. `IrCallable::owner`
     /// indexes into this; `identity::callable_identity` walks it via
     /// `OwnerEntry::parent` to materialize a callable's own owner chain.
+    ///
+    /// A7 (WS-4): for a salvaged file, an entry whose contributing node lies
+    /// inside a bare damage span, or inside an excluded callable's or
+    /// block's span, is omitted from this table -- `OwnerEntry::parent` and
+    /// `IrCallable::owner` are then remapped to index the compacted table,
+    /// not the pre-pruning one.
     pub owners: Vec<OwnerEntry>,
 }
 
