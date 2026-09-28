@@ -171,7 +171,7 @@ measured, not a settled attribution of the fusion's own effect.
 
 ## M0c-10: the Java grammar swap's own measured effect
 
-Both rows immediately above scan the same already-fetched fixture root, at
+The two `2026-09-24` (`M0c-10`) rows in `## Rows` below scan the same already-fetched fixture root, at
 the same pins, one after the other in the same session: the control row was
 built with `cargo build --release` in a `git clone` of this worktree
 checked out to `3dd9ae2` (this branch's own base, one commit before the
@@ -185,7 +185,7 @@ change: a syntax-error file is no longer a whole-file skip, only its
 touched callables are fail-closed excluded), so `report.json`'s
 `skipped_files` cannot answer "did the gate clear" either way — this is
 exactly why `tests/grammar_gate.rs` reads `PipelineOutput::parse_failures`
-directly instead. (The two much older `2026-09-18`/`2026-09-23` rows above
+directly instead. (The two much older `2026-09-18`/`2026-09-23` rows in `## Rows` below
 read `7720`, i.e. `7662 + 58`, at this same pin because they predate the
 WS-6 change entirely: back then the 55 Java + 3 TS syntax-error files were
 still whole-file skips. That -58 is WS-6's own delta, already explained by
