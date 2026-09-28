@@ -712,3 +712,39 @@ fn test_operator_change_breaks_the_group() {
         result.groups
     );
 }
+
+/// C4 (triage-ws4-r3): guards `ir_statement_tokens`'s allocation-free
+/// rewrite of its anonymous-leaf branch. The fast path
+/// (`!text.bytes().any(|b| b.is_ascii_whitespace())`) must still fall
+/// through to the whitespace-collapsing `join(" ")` for a whitespace-
+/// bearing anonymous leaf rather than skip normalization for it -- same
+/// `"static get"` alias mechanism `test_static_get_whitespace_does_not_break_the_group`
+/// uses, a different whitespace width so this is not a byte-identical
+/// fixture. Passes both before and after C4's change; it is a behaviour-
+/// preservation guard, not a red/green pair.
+#[test]
+fn test_whitespace_bearing_anonymous_leaf_still_normalizes() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        dir.path().join("WhitespaceLeafA.js"),
+        "class Sample {\n  static get\n  value() {\n    return 1;\n  }\n}\n\nfunction helper() {\n  return 2;\n}\n",
+    )
+    .expect("write WhitespaceLeafA.js");
+    fs::write(
+        dir.path().join("WhitespaceLeafB.js"),
+        "class Sample {\n  static     get\n  value() {\n    return 1;\n  }\n}\n\nfunction helper() {\n  return 2;\n}\n",
+    )
+    .expect("write WhitespaceLeafB.js");
+    let files = parsed_files_under(
+        dir.path(),
+        &[("WhitespaceLeafA.js", JS_TS), ("WhitespaceLeafB.js", JS_TS)],
+    );
+    let result = clones::run(&files, 3);
+    assert_eq!(
+        result.groups.len(),
+        1,
+        "the fast branch must still collapse a whitespace-bearing anonymous leaf's internal whitespace: {:?}",
+        result.groups
+    );
+    assert_eq!(result.groups[0].locations.len(), 2, "{:?}", result.groups);
+}
