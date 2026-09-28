@@ -522,7 +522,7 @@ pub fn terminal_summary(report: &Report) -> String {
 
     let _ = writeln!(out, "Scan settings:");
     let _ = writeln!(out, "  target: {}", report.scan.target);
-    let _ = writeln!(
+    let _ = write!(
         out,
         "  revision: {}",
         report.scan.revision.sha.as_deref().unwrap_or(
@@ -534,6 +534,14 @@ pub fn terminal_summary(report: &Report) -> String {
                 .unwrap_or("unknown")
         )
     );
+    // B9: mirrors the ` (dirty: {dirty})` suffix html.rs:70-72 already
+    // appends to the same line in report.html; `report.json` has always
+    // carried the flag as its own field. `None` (no git repository) prints
+    // nothing extra, same as there.
+    if let Some(dirty) = report.scan.revision.dirty {
+        let _ = write!(out, " (dirty: {dirty})");
+    }
+    let _ = writeln!(out);
     let _ = writeln!(out, "  include_tests: {}", report.scan.include_tests);
     let _ = writeln!(out, "  exclude: {:?}", report.scan.exclude);
     let _ = writeln!(out, "  min_clone_lines: {}", report.scan.min_clone_lines);
