@@ -196,6 +196,11 @@ impl WorktreeSnapshot {
             .iter()
             .map(|(path, _kind, _oid)| path.clone())
             .collect();
+        let tracked_submodules: BTreeSet<RepoPath> = bare_entries
+            .iter()
+            .filter(|(_path, kind, _oid)| *kind == EntryKind::Submodule)
+            .map(|(path, _kind, _oid)| path.clone())
+            .collect();
 
         let mut by_path: BTreeMap<RepoPath, Entry> = BTreeMap::new();
         for (path, kind, oid) in bare_entries {
@@ -218,7 +223,7 @@ impl WorktreeSnapshot {
             }
         }
 
-        walk_worktree(&workdir, &[], &tracked, &mut by_path)?;
+        walk_worktree(&workdir, &[], &tracked, &tracked_submodules, &mut by_path)?;
 
         let mut entries: Vec<Entry> = by_path.into_values().collect();
         entries.sort_by(|a, b| a.path.cmp(&b.path));
@@ -584,11 +589,14 @@ fn has_git_marker(dir: &Path) -> bool {
 /// Adds every untracked worktree entry under `prefix` to `by_path` (D6:
 /// ignoring the candidate's own `.gitignore`), skipping the `tracked` paths
 /// already handled by the index overlay and any path with a `.git`
-/// component (built-in exclusion, D7 defence in depth).
+/// component (built-in exclusion, D7 defence in depth). A directory is
+/// skipped only when it is a `tracked_submodules` path; a directory that
+/// replaced a tracked blob is descended like any untracked one.
 fn walk_worktree(
     workdir: &Path,
     prefix: &[u8],
     tracked: &BTreeSet<RepoPath>,
+    tracked_submodules: &BTreeSet<RepoPath>,
     by_path: &mut BTreeMap<RepoPath, Entry>,
 ) -> Result<(), GitError> {
     let dir_path = repo_path_to_fs(workdir, prefix);
@@ -632,7 +640,7 @@ fn walk_worktree(
         })?;
 
         if file_type.is_dir() {
-            if tracked.contains(&relative) {
+            if tracked_submodules.contains(&relative) {
                 continue; // A tracked submodule directory: already handled by the overlay step.
             }
             let child_fs_path = repo_path_to_fs(workdir, &child_bytes);
@@ -648,7 +656,7 @@ fn walk_worktree(
                 );
                 continue; // D7: surfaced, not descended.
             }
-            walk_worktree(workdir, &child_bytes, tracked, by_path)?;
+            walk_worktree(workdir, &child_bytes, tracked, tracked_submodules, by_path)?;
             continue;
         }
 

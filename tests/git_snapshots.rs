@@ -231,6 +231,32 @@ fn worktree_reports_nested_checkout_entry() {
 }
 
 #[test]
+fn worktree_descends_into_a_directory_that_replaced_a_tracked_file() {
+    let (dir, repo) = common::init_repo();
+    let commit_oid = common::commit_entries(
+        &repo,
+        &[(b"lib".to_vec(), MODE_REGULAR, b"was a file".to_vec())],
+    );
+    sync_index_to_commit(&repo, commit_oid);
+
+    let replacement = dir.path().join("lib");
+    std::fs::create_dir_all(&replacement).expect("create the replacing directory");
+    std::fs::write(replacement.join("added.ts"), b"added").expect("write the new source file");
+
+    let snapshot = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+    let paths: Vec<&[u8]> = snapshot
+        .entries
+        .iter()
+        .map(|entry| entry.path.as_bytes())
+        .collect();
+    assert_eq!(
+        paths,
+        vec![b"lib/added.ts".as_slice()],
+        "the tracked `lib` blob is gone and the file inside its replacement is listed"
+    );
+}
+
+#[test]
 #[cfg(unix)]
 fn worktree_symlink_and_submodule_keep_diff_inputs() {
     let (dir, repo) = common::init_repo();
