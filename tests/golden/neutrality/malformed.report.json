@@ -1,0 +1,65 @@
+{
+  "scan": {
+    "target": "<neutrality-corpus>",
+    "revision": {
+      "sha": null,
+      "dirty": null,
+      "unavailable_reason": "not_a_git_repository"
+    },
+    "include_tests": true,
+    "exclude": [],
+    "min_clone_lines": 10
+  },
+  "scores": {
+    "overall": {
+      "erosion": 0.0,
+      "verbosity": {
+        "flagged_lines": 0,
+        "scanned_lines": 0,
+        "ratio": 0.0
+      }
+    },
+    "java": {
+      "erosion": 0.0,
+      "verbosity": {
+        "flagged_lines": 0,
+        "scanned_lines": 0,
+        "ratio": 0.0
+      }
+    },
+    "js_ts": {
+      "erosion": 0.0,
+      "verbosity": {
+        "flagged_lines": 0,
+        "scanned_lines": 0,
+        "ratio": 0.0
+      }
+    }
+  },
+  "findings": [],
+  "duplicates": [],
+  "top25": [],
+  "skipped_files": [
+    {
+      "relative_path": "metrics/broken/Broken.ts",
+      "reason": "parse_syntax_error",
+      "detail": null
+    },
+    {
+      "relative_path": "report/src/Broken.java",
+      "reason": "parse_syntax_error",
+      "detail": null
+    },
+    {
+      "relative_path": "rules/broken/Broken.java",
+      "reason": "parse_syntax_error",
+      "detail": null
+    }
+  ],
+  "incomplete": true,
+  "adaptation": {
+    "summary": "CC, SLOC, mass, erosion and verbosity are computed from this scanner's own Java/JS-TS AST rules, adapted from scb-check's Python-only formulas. No numerical equivalence to scb-check's own scores is claimed.",
+    "cc_rules_doc": "docs/cc-rules.md",
+    "wasteful_rules_doc": "docs/wasteful-rules.md"
+  }
+}

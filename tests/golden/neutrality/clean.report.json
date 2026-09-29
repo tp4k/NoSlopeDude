@@ -1,0 +1,1054 @@
+{
+  "scan": {
+    "target": "<neutrality-corpus>",
+    "revision": {
+      "sha": null,
+      "dirty": null,
+      "unavailable_reason": "not_a_git_repository"
+    },
+    "include_tests": true,
+    "exclude": [],
+    "min_clone_lines": 10
+  },
+  "scores": {
+    "overall": {
+      "erosion": 0.3033434146761384,
+      "verbosity": {
+        "flagged_lines": 227,
+        "scanned_lines": 1032,
+        "ratio": 0.21996124031007752
+      }
+    },
+    "java": {
+      "erosion": 0.36341828999901393,
+      "verbosity": {
+        "flagged_lines": 154,
+        "scanned_lines": 650,
+        "ratio": 0.23692307692307693
+      }
+    },
+    "js_ts": {
+      "erosion": 0.21627892399648804,
+      "verbosity": {
+        "flagged_lines": 73,
+        "scanned_lines": 382,
+        "ratio": 0.19109947643979058
+      }
+    }
+  },
+  "findings": [
+    {
+      "rule_id": "JSTS-UNREACHABLE-AFTER-RETURN",
+      "language": "js_ts",
+      "location": {
+        "relative_path": "report/src/\"><img onerror=1>.js",
+        "start_line": 3,
+        "end_line": 4,
+        "excerpt": "  console.log(\"<script>alert(1)</script>\");\n  console.log(\"\\\"><img onerror=1>\");",
+        "link": "report/src/\"><img onerror=1>.js#L3-L4",
+        "is_remote_link": false
+      },
+      "flagged_lines": [
+        3,
+        4
+      ]
+    },
+    {
+      "rule_id": "JAVA-REDUNDANT-ELSE-AFTER-RETURN",
+      "language": "java",
+      "location": {
+        "relative_path": "report/src/Sample.java",
+        "start_line": 5,
+        "end_line": 7,
+        "excerpt": "        } else {\n            return -1;\n        }",
+        "link": "report/src/Sample.java#L5-L7",
+        "is_remote_link": false
+      },
+      "flagged_lines": [
+        6
+      ]
+    },
+    {
+      "rule_id": "JAVA-EMPTY-CATCH",
+      "language": "java",
+      "location": {
+        "relative_path": "report/src/Sample.java",
+        "start_line": 13,
+        "end_line": 14,
+        "excerpt": "        } catch (Exception e) {\n        }",
+        "link": "report/src/Sample.java#L13-L14",
+        "is_remote_link": false
+      },
+      "flagged_lines": [
+        13
+      ]
+    },
+    {
+      "rule_id": "JAVA-UNREACHABLE-AFTER-RETURN",
+      "language": "java",
+      "location": {
+        "relative_path": "rules/__tests__/JavaRulesFixture.java",
+        "start_line": 8,
+        "end_line": 9,
+        "excerpt": "        System.out.println(\"b\");\n        System.out.println(\"c\");",
+        "link": "rules/__tests__/JavaRulesFixture.java#L8-L9",
+        "is_remote_link": false
+      },
+      "flagged_lines": [
+        8,
+        9
+      ]
+    },
+    {
+      "rule_id": "JAVA-EMPTY-CATCH",
+      "language": "java",
+      "location": {
+        "relative_path": "rules/__tests__/JavaRulesFixture.java",
+        "start_line": 15,
+        "end_line": 16,
+        "excerpt": "        } catch (Exception e) {\n        }",
+        "link": "rules/__tests__/JavaRulesFixture.java#L15-L16",
+        "is_remote_link": false
+      },
+      "flagged_lines": [
+        15
+      ]
+    },
+    {
+      "rule_id": "JAVA-REDUNDANT-ELSE-AFTER-RETURN",
+      "language": "java",
+      "location": {
+        "relative_path": "rules/__tests__/JavaRulesFixture.java",
+        "start_line": 22,
+        "end_line": 24,
+        "excerpt": "        } else {\n            return 0;\n        }",
+        "link": "rules/__tests__/JavaRulesFixture.java#L22-L24",
+        "is_remote_link": false
+      },
+      "flagged_lines": [
+        23
+      ]
+    },
+    {
+      "rule_id": "JSTS-UNREACHABLE-AFTER-RETURN",
+      "language": "js_ts",
+      "location": {
+        "relative_path": "rules/__tests__/JsRulesFixture.js",
+        "start_line": 4,
+        "end_line": 5,
+        "excerpt": "    console.log(\"b\");\n    console.log(\"c\");",
+        "link": "rules/__tests__/JsRulesFixture.js#L4-L5",
+        "is_remote_link": false
+      },
+      "flagged_lines": [
+        4,
+        5
+      ]
+    },
+    {
+      "rule_id": "JSTS-EMPTY-CATCH",
+      "language": "js_ts",
+      "location": {
+        "relative_path": "rules/__tests__/JsRulesFixture.js",
+        "start_line": 11,
+        "end_line": 12,
+        "excerpt": "    } catch (e) {\n    }",
+        "link": "rules/__tests__/JsRulesFixture.js#L11-L12",
+        "is_remote_link": false
+      },
+      "flagged_lines": [
+        11
+      ]
+    },
+    {
+      "rule_id": "JSTS-REDUNDANT-ELSE-AFTER-RETURN",
+      "language": "js_ts",
+      "location": {
+        "relative_path": "rules/__tests__/JsRulesFixture.js",
+        "start_line": 18,
+        "end_line": 20,
+        "excerpt": "    } else {\n        return 0;\n    }",
+        "link": "rules/__tests__/JsRulesFixture.js#L18-L20",
+        "is_remote_link": false
+      },
+      "flagged_lines": [
+        19
+      ]
+    },
+    {
+      "rule_id": "JSTS-UNREACHABLE-AFTER-RETURN",
+      "language": "js_ts",
+      "location": {
+        "relative_path": "rules/__tests__/JsRulesFixture.js",
+        "start_line": 28,
+        "end_line": 29,
+        "excerpt": "    console.log(\"dead1\");\n    console.log(\"dead2\");",
+        "link": "rules/__tests__/JsRulesFixture.js#L28-L29",
+        "is_remote_link": false
+      },
+      "flagged_lines": [
+        28,
+        29
+      ]
+    },
+    {
+      "rule_id": "JAVA-UNREACHABLE-AFTER-RETURN",
+      "language": "java",
+      "location": {
+        "relative_path": "rules/src/RulesTrigger.java",
+        "start_line": 8,
+        "end_line": 9,
+        "excerpt": "        System.out.println(\"b\");\n        System.out.println(\"c\");",
+        "link": "rules/src/RulesTrigger.java#L8-L9",
+        "is_remote_link": false
+      },
+      "flagged_lines": [
+        8,
+        9
+      ]
+    },
+    {
+      "rule_id": "JAVA-EMPTY-CATCH",
+      "language": "java",
+      "location": {
+        "relative_path": "rules/src/RulesTrigger.java",
+        "start_line": 15,
+        "end_line": 16,
+        "excerpt": "        } catch (Exception e) {\n        }",
+        "link": "rules/src/RulesTrigger.java#L15-L16",
+        "is_remote_link": false
+      },
+      "flagged_lines": [
+        15
+      ]
+    },
+    {
+      "rule_id": "JAVA-REDUNDANT-ELSE-AFTER-RETURN",
+      "language": "java",
+      "location": {
+        "relative_path": "rules/src/RulesTrigger.java",
+        "start_line": 22,
+        "end_line": 24,
+        "excerpt": "        } else {\n            return 0;\n        }",
+        "link": "rules/src/RulesTrigger.java#L22-L24",
+        "is_remote_link": false
+      },
+      "flagged_lines": [
+        23
+      ]
+    },
+    {
+      "rule_id": "JSTS-UNREACHABLE-AFTER-RETURN",
+      "language": "js_ts",
+      "location": {
+        "relative_path": "rules/src/rulesTrigger.js",
+        "start_line": 4,
+        "end_line": 5,
+        "excerpt": "    console.log(\"b\");\n    console.log(\"c\");",
+        "link": "rules/src/rulesTrigger.js#L4-L5",
+        "is_remote_link": false
+      },
+      "flagged_lines": [
+        4,
+        5
+      ]
+    },
+    {
+      "rule_id": "JSTS-EMPTY-CATCH",
+      "language": "js_ts",
+      "location": {
+        "relative_path": "rules/src/rulesTrigger.js",
+        "start_line": 11,
+        "end_line": 12,
+        "excerpt": "    } catch (e) {\n    }",
+        "link": "rules/src/rulesTrigger.js#L11-L12",
+        "is_remote_link": false
+      },
+      "flagged_lines": [
+        11
+      ]
+    },
+    {
+      "rule_id": "JSTS-REDUNDANT-ELSE-AFTER-RETURN",
+      "language": "js_ts",
+      "location": {
+        "relative_path": "rules/src/rulesTrigger.js",
+        "start_line": 18,
+        "end_line": 20,
+        "excerpt": "    } else {\n        return 0;\n    }",
+        "link": "rules/src/rulesTrigger.js#L18-L20",
+        "is_remote_link": false
+      },
+      "flagged_lines": [
+        19
+      ]
+    }
+  ],
+  "duplicates": [
+    {
+      "language": "java",
+      "redundant_lines": 72,
+      "locations": [
+        {
+          "relative_path": "clones/__tests__/DupIdenticalA.java",
+          "start_line": 3,
+          "end_line": 14,
+          "excerpt": "        alpha(one,\n              two,\n              three);\n        beta(four,\n             five,\n             six);\n        gamma(seven,\n              eight,\n              nine);\n        delta(ten,\n              eleven,\n              twelve);",
+          "link": "clones/__tests__/DupIdenticalA.java#L3-L14",
+          "is_remote_link": false
+        },
+        {
+          "relative_path": "clones/__tests__/DupIdenticalB.java",
+          "start_line": 4,
+          "end_line": 18,
+          "excerpt": "        alpha(one,\n                two,\n              three);\n\n        // second call\n        beta(four,\n             five,\n             six);\n        gamma(seven,\n              eight,\n              nine);\n        // final call\n        delta(ten,\n              eleven,\n              twelve);",
+          "link": "clones/__tests__/DupIdenticalB.java#L4-L18",
+          "is_remote_link": false
+        },
+        {
+          "relative_path": "clones/__tests__/IdentifierA.java",
+          "start_line": 3,
+          "end_line": 14,
+          "excerpt": "        alpha(one,\n              two,\n              three);\n        beta(four,\n             five,\n             six);\n        gamma(seven,\n              eight,\n              nine);\n        delta(ten,\n              eleven,\n              twelve);",
+          "link": "clones/__tests__/IdentifierA.java#L3-L14",
+          "is_remote_link": false
+        },
+        {
+          "relative_path": "clones/__tests__/SubsumedA.java",
+          "start_line": 3,
+          "end_line": 14,
+          "excerpt": "        alpha(one,\n              two,\n              three);\n        beta(four,\n             five,\n             six);\n        gamma(seven,\n              eight,\n              nine);\n        delta(ten,\n              eleven,\n              twelve);",
+          "link": "clones/__tests__/SubsumedA.java#L3-L14",
+          "is_remote_link": false
+        },
+        {
+          "relative_path": "clones/__tests__/SubsumedB.java",
+          "start_line": 3,
+          "end_line": 14,
+          "excerpt": "        alpha(one,\n              two,\n              three);\n        beta(four,\n             five,\n             six);\n        gamma(seven,\n              eight,\n              nine);\n        delta(ten,\n              eleven,\n              twelve);",
+          "link": "clones/__tests__/SubsumedB.java#L3-L14",
+          "is_remote_link": false
+        },
+        {
+          "relative_path": "clones/src/main/java/DupA.java",
+          "start_line": 5,
+          "end_line": 16,
+          "excerpt": "        alpha(one,\n              two,\n              three);\n        beta(four,\n             five,\n             six);\n        gamma(seven,\n              eight,\n              nine);\n        delta(ten,\n              eleven,\n              twelve);",
+          "link": "clones/src/main/java/DupA.java#L5-L16",
+          "is_remote_link": false
+        },
+        {
+          "relative_path": "clones/src/main/java/DupB.java",
+          "start_line": 6,
+          "end_line": 17,
+          "excerpt": "        alpha(one,\n              two,\n              three);\n        beta(four,\n             five,\n             six);\n        gamma(seven,\n              eight,\n              nine);\n        delta(ten,\n              eleven,\n              twelve);",
+          "link": "clones/src/main/java/DupB.java#L6-L17",
+          "is_remote_link": false
+        }
+      ]
+    },
+    {
+      "language": "java",
+      "redundant_lines": 20,
+      "locations": [
+        {
+          "relative_path": "clones/__tests__/RankGX1.java",
+          "start_line": 3,
+          "end_line": 12,
+          "excerpt": "        int a1 = 1;\n        int a2 = 1;\n        int a3 = 1;\n        int a4 = 1;\n        int a5 = 1;\n        int a6 = 1;\n        int a7 = 1;\n        int a8 = 1;\n        int a9 = 1;\n        int a10 = 1;",
+          "link": "clones/__tests__/RankGX1.java#L3-L12",
+          "is_remote_link": false
+        },
+        {
+          "relative_path": "clones/__tests__/RankGX2.java",
+          "start_line": 3,
+          "end_line": 12,
+          "excerpt": "        int a1 = 1;\n        int a2 = 1;\n        int a3 = 1;\n        int a4 = 1;\n        int a5 = 1;\n        int a6 = 1;\n        int a7 = 1;\n        int a8 = 1;\n        int a9 = 1;\n        int a10 = 1;",
+          "link": "clones/__tests__/RankGX2.java#L3-L12",
+          "is_remote_link": false
+        },
+        {
+          "relative_path": "clones/__tests__/RankGX3.java",
+          "start_line": 3,
+          "end_line": 12,
+          "excerpt": "        int a1 = 1;\n        int a2 = 1;\n        int a3 = 1;\n        int a4 = 1;\n        int a5 = 1;\n        int a6 = 1;\n        int a7 = 1;\n        int a8 = 1;\n        int a9 = 1;\n        int a10 = 1;",
+          "link": "clones/__tests__/RankGX3.java#L3-L12",
+          "is_remote_link": false
+        }
+      ]
+    },
+    {
+      "language": "js_ts",
+      "redundant_lines": 20,
+      "locations": [
+        {
+          "relative_path": "clones/__tests__/SwitchDupJs.js",
+          "start_line": 4,
+          "end_line": 13,
+          "excerpt": "      alpha(one,\n            two,\n            three);\n      beta(four,\n           five,\n           six);\n      gamma(seven,\n            eight,\n            nine);\n      break;",
+          "link": "clones/__tests__/SwitchDupJs.js#L4-L13",
+          "is_remote_link": false
+        },
+        {
+          "relative_path": "clones/__tests__/SwitchDupJs.js",
+          "start_line": 15,
+          "end_line": 24,
+          "excerpt": "      alpha(one,\n            two,\n            three);\n      beta(four,\n           five,\n           six);\n      gamma(seven,\n            eight,\n            nine);\n      break;",
+          "link": "clones/__tests__/SwitchDupJs.js#L15-L24",
+          "is_remote_link": false
+        },
+        {
+          "relative_path": "clones/__tests__/SwitchDupJs.js",
+          "start_line": 26,
+          "end_line": 35,
+          "excerpt": "      alpha(one,\n            two,\n            three);\n      beta(four,\n           five,\n           six);\n      gamma(seven,\n            eight,\n            nine);\n      break;",
+          "link": "clones/__tests__/SwitchDupJs.js#L26-L35",
+          "is_remote_link": false
+        }
+      ]
+    },
+    {
+      "language": "java",
+      "redundant_lines": 15,
+      "locations": [
+        {
+          "relative_path": "clones/__tests__/RankGY1.java",
+          "start_line": 3,
+          "end_line": 17,
+          "excerpt": "        int b1 = 1;\n        int b2 = 1;\n        int b3 = 1;\n        int b4 = 1;\n        int b5 = 1;\n        int b6 = 1;\n        int b7 = 1;\n        int b8 = 1;\n        int b9 = 1;\n        int b10 = 1;\n        int b11 = 1;\n        int b12 = 1;\n        int b13 = 1;\n        int b14 = 1;\n        int b15 = 1;",
+          "link": "clones/__tests__/RankGY1.java#L3-L17",
+          "is_remote_link": false
+        },
+        {
+          "relative_path": "clones/__tests__/RankGY2.java",
+          "start_line": 3,
+          "end_line": 17,
+          "excerpt": "        int b1 = 1;\n        int b2 = 1;\n        int b3 = 1;\n        int b4 = 1;\n        int b5 = 1;\n        int b6 = 1;\n        int b7 = 1;\n        int b8 = 1;\n        int b9 = 1;\n        int b10 = 1;\n        int b11 = 1;\n        int b12 = 1;\n        int b13 = 1;\n        int b14 = 1;\n        int b15 = 1;",
+          "link": "clones/__tests__/RankGY2.java#L3-L17",
+          "is_remote_link": false
+        }
+      ]
+    },
+    {
+      "language": "java",
+      "redundant_lines": 15,
+      "locations": [
+        {
+          "relative_path": "clones/__tests__/SubsumedA.java",
+          "start_line": 3,
+          "end_line": 17,
+          "excerpt": "        alpha(one,\n              two,\n              three);\n        beta(four,\n             five,\n             six);\n        gamma(seven,\n              eight,\n              nine);\n        delta(ten,\n              eleven,\n              twelve);\n        epsilon(thirteen,\n                fourteen,\n                fifteen);",
+          "link": "clones/__tests__/SubsumedA.java#L3-L17",
+          "is_remote_link": false
+        },
+        {
+          "relative_path": "clones/__tests__/SubsumedB.java",
+          "start_line": 3,
+          "end_line": 17,
+          "excerpt": "        alpha(one,\n              two,\n              three);\n        beta(four,\n             five,\n             six);\n        gamma(seven,\n              eight,\n              nine);\n        delta(ten,\n              eleven,\n              twelve);\n        epsilon(thirteen,\n                fourteen,\n                fifteen);",
+          "link": "clones/__tests__/SubsumedB.java#L3-L17",
+          "is_remote_link": false
+        }
+      ]
+    },
+    {
+      "language": "js_ts",
+      "redundant_lines": 13,
+      "locations": [
+        {
+          "relative_path": "rules/__tests__/JsRulesFixture.js",
+          "start_line": 1,
+          "end_line": 23,
+          "excerpt": "function unreachableAfterReturn() {\n    console.log(\"a\");\n    return;\n    console.log(\"b\");\n    console.log(\"c\");\n}\n\nfunction emptyCatch() {\n    try {\n        risky();\n    } catch (e) {\n    }\n}\n\nfunction redundantElseAfterReturn(x) {\n    if (x > 0) {\n        return 1;\n    } else {\n        return 0;\n    }\n}\n\nfunction risky() {}",
+          "link": "rules/__tests__/JsRulesFixture.js#L1-L23",
+          "is_remote_link": false
+        },
+        {
+          "relative_path": "rules/src/rulesTrigger.js",
+          "start_line": 1,
+          "end_line": 23,
+          "excerpt": "function unreachableAfterReturn() {\n    console.log(\"a\");\n    return;\n    console.log(\"b\");\n    console.log(\"c\");\n}\n\nfunction emptyCatch() {\n    try {\n        risky();\n    } catch (e) {\n    }\n}\n\nfunction redundantElseAfterReturn(x) {\n    if (x > 0) {\n        return 1;\n    } else {\n        return 0;\n    }\n}\n\nfunction risky() {}",
+          "link": "rules/src/rulesTrigger.js#L1-L23",
+          "is_remote_link": false
+        }
+      ]
+    },
+    {
+      "language": "java",
+      "redundant_lines": 12,
+      "locations": [
+        {
+          "relative_path": "clones/__tests__/ConstructorBodyA.java",
+          "start_line": 3,
+          "end_line": 14,
+          "excerpt": "        ctorAlpha(one,\n                  two,\n                  three);\n        ctorBeta(four,\n                 five,\n                 six);\n        ctorGamma(seven,\n                  eight,\n                  nine);\n        ctorDelta(ten,\n                  eleven,\n                  twelve);",
+          "link": "clones/__tests__/ConstructorBodyA.java#L3-L14",
+          "is_remote_link": false
+        },
+        {
+          "relative_path": "clones/__tests__/ConstructorBodyB.java",
+          "start_line": 3,
+          "end_line": 14,
+          "excerpt": "        ctorAlpha(one,\n                  two,\n                  three);\n        ctorBeta(four,\n                 five,\n                 six);\n        ctorGamma(seven,\n                  eight,\n                  nine);\n        ctorDelta(ten,\n                  eleven,\n                  twelve);",
+          "link": "clones/__tests__/ConstructorBodyB.java#L3-L14",
+          "is_remote_link": false
+        }
+      ]
+    },
+    {
+      "language": "js_ts",
+      "redundant_lines": 12,
+      "locations": [
+        {
+          "relative_path": "clones/__tests__/ModuleLevelA.js",
+          "start_line": 1,
+          "end_line": 12,
+          "excerpt": "moduleAlpha(one,\n            two,\n            three);\nmoduleBeta(four,\n           five,\n           six);\nmoduleGamma(seven,\n            eight,\n            nine);\nmoduleDelta(ten,\n            eleven,\n            twelve);",
+          "link": "clones/__tests__/ModuleLevelA.js#L1-L12",
+          "is_remote_link": false
+        },
+        {
+          "relative_path": "clones/__tests__/ModuleLevelB.js",
+          "start_line": 1,
+          "end_line": 12,
+          "excerpt": "moduleAlpha(one,\n            two,\n            three);\nmoduleBeta(four,\n           five,\n           six);\nmoduleGamma(seven,\n            eight,\n            nine);\nmoduleDelta(ten,\n            eleven,\n            twelve);",
+          "link": "clones/__tests__/ModuleLevelB.js#L1-L12",
+          "is_remote_link": false
+        }
+      ]
+    },
+    {
+      "language": "java",
+      "redundant_lines": 12,
+      "locations": [
+        {
+          "relative_path": "clones/__tests__/PartialRun.java",
+          "start_line": 4,
+          "end_line": 15,
+          "excerpt": "        alpha(one,\n              two,\n              three,\n              threeB);\n        beta(four,\n             five,\n             six,\n             sixB);\n        gamma(seven,\n              eight,\n              nine,\n              nineB);",
+          "link": "clones/__tests__/PartialRun.java#L4-L15",
+          "is_remote_link": false
+        },
+        {
+          "relative_path": "clones/__tests__/PartialRun.java",
+          "start_line": 21,
+          "end_line": 32,
+          "excerpt": "        alpha(one,\n              two,\n              three,\n              threeB);\n        beta(four,\n             five,\n             six,\n             sixB);\n        gamma(seven,\n              eight,\n              nine,\n              nineB);",
+          "link": "clones/__tests__/PartialRun.java#L21-L32",
+          "is_remote_link": false
+        }
+      ]
+    },
+    {
+      "language": "java",
+      "redundant_lines": 10,
+      "locations": [
+        {
+          "relative_path": "clones/__tests__/SwitchDupJava.java",
+          "start_line": 5,
+          "end_line": 14,
+          "excerpt": "                alpha(one,\n                      two,\n                      three);\n                beta(four,\n                     five,\n                     six);\n                gamma(seven,\n                      eight,\n                      nine);\n                break;",
+          "link": "clones/__tests__/SwitchDupJava.java#L5-L14",
+          "is_remote_link": false
+        },
+        {
+          "relative_path": "clones/__tests__/SwitchDupJava.java",
+          "start_line": 16,
+          "end_line": 25,
+          "excerpt": "                alpha(one,\n                      two,\n                      three);\n                beta(four,\n                     five,\n                     six);\n                gamma(seven,\n                      eight,\n                      nine);\n                break;",
+          "link": "clones/__tests__/SwitchDupJava.java#L16-L25",
+          "is_remote_link": false
+        }
+      ]
+    },
+    {
+      "language": "js_ts",
+      "redundant_lines": 10,
+      "locations": [
+        {
+          "relative_path": "clones/src/widgetA.js",
+          "start_line": 2,
+          "end_line": 11,
+          "excerpt": "  widget(alpha,\n         beta);\n  widget(gamma,\n         delta);\n  widget(epsilon,\n         zeta);\n  widget(eta,\n         theta);\n  widget(iota,\n         kappa);",
+          "link": "clones/src/widgetA.js#L2-L11",
+          "is_remote_link": false
+        },
+        {
+          "relative_path": "clones/src/widgetB.js",
+          "start_line": 2,
+          "end_line": 11,
+          "excerpt": "  widget(alpha,\n         beta);\n  widget(gamma,\n         delta);\n  widget(epsilon,\n         zeta);\n  widget(eta,\n         theta);\n  widget(iota,\n         kappa);",
+          "link": "clones/src/widgetB.js#L2-L11",
+          "is_remote_link": false
+        }
+      ]
+    },
+    {
+      "language": "js_ts",
+      "redundant_lines": 10,
+      "locations": [
+        {
+          "relative_path": "report/src/sample.js",
+          "start_line": 2,
+          "end_line": 11,
+          "excerpt": "  const total = order.price * order.quantity;\n  const tax = total * 0.08;\n  const shipping = total > 50 ? 0 : 5;\n  const grandTotal = total + tax + shipping;\n  console.log(\"order total\", grandTotal);\n  console.log(\"tax due\", tax);\n  console.log(\"shipping cost\", shipping);\n  console.log(\"summary complete\");\n  order.total = grandTotal;\n  return grandTotal;",
+          "link": "report/src/sample.js#L2-L11",
+          "is_remote_link": false
+        },
+        {
+          "relative_path": "report/src/sample2.js",
+          "start_line": 2,
+          "end_line": 11,
+          "excerpt": "  const total = order.price * order.quantity;\n  const tax = total * 0.08;\n  const shipping = total > 50 ? 0 : 5;\n  const grandTotal = total + tax + shipping;\n  console.log(\"order total\", grandTotal);\n  console.log(\"tax due\", tax);\n  console.log(\"shipping cost\", shipping);\n  console.log(\"summary complete\");\n  order.total = grandTotal;\n  return grandTotal;",
+          "link": "report/src/sample2.js#L2-L11",
+          "is_remote_link": false
+        }
+      ]
+    }
+  ],
+  "top25": [
+    {
+      "name": "decide",
+      "language": "java",
+      "cc": 15,
+      "sloc": 30,
+      "mass": 82.15838362577492,
+      "location": {
+        "relative_path": "metrics/__tests__/Decisions.java",
+        "start_line": 2,
+        "end_line": 44,
+        "excerpt": "    int decide(int a, int b) {\n        if (a > 0) {\n            a = 1;\n        } else if (b > 0) {\n            a = 2;\n        } else {\n            a = 3;\n        }\n        for (int i = 0; i < a; i++) {\n            a++;\n        }\n        for (int x : new int[] {1, 2, 3}) {\n            a += x;\n        }\n        while (a > 0) {\n            a--;\n        }\n        do {\n            a++;\n        } while (a < 10);\n        try {\n            a = 1;\n        } catch (RuntimeException e) {\n            a = 2;\n        } catch (Exception e) {\n            a = 3;\n        } finally {\n            a = 4;\n        }\n        int t = a > 0 ? 1 : 2;\n        switch (a) {\n            case 1:\n                break;\n            case 2:\n                break;\n            case 3:\n                break;\n            default:\n                break;\n        }\n        boolean c = a > 0 && b > 0 || a < 0;\n        return t;\n    }",
+        "link": "metrics/__tests__/Decisions.java#L2-L44",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "decide",
+      "language": "js_ts",
+      "cc": 13,
+      "sloc": 26,
+      "mass": 66.2872536767062,
+      "location": {
+        "relative_path": "metrics/__tests__/JsDecisions.js",
+        "start_line": 1,
+        "end_line": 39,
+        "excerpt": "function decide(a, b) {\n    if (a > 0) {\n        a = 1;\n    } else {\n        a = 2;\n    }\n    for (let i = 0; i < a; i++) {\n        a++;\n    }\n    for (const x in { a: 1 }) {\n        a += 1;\n    }\n    while (a > 0) {\n        a--;\n    }\n    do {\n        a++;\n    } while (a < 10);\n    try {\n        a = 1;\n    } catch (e) {\n        a = 2;\n    } finally {\n        a = 3;\n    }\n    let t = a > 0 ? 1 : 2;\n    switch (a) {\n        case 1:\n            break;\n        case 2:\n            break;\n        default:\n            break;\n    }\n    let c1 = a > 0 && b > 0;\n    let c2 = a > 0 || b > 0;\n    let c3 = a ?? b;\n    return t;\n}",
+        "link": "metrics/__tests__/JsDecisions.js#L1-L39",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "compute",
+      "language": "java",
+      "cc": 12,
+      "sloc": 9,
+      "mass": 36.0,
+      "location": {
+        "relative_path": "metrics/erosion/HighComplexity.java",
+        "start_line": 2,
+        "end_line": 12,
+        "excerpt": "    int compute(int a, int b) {\n        if (a > 0 && b > 0) { a = 1; }\n        for (int i = 0; i < a; i++) { a++; }\n        while (a > 0) { a--; }\n        do { a++; } while (a < 10);\n        try { a = 1; } catch (RuntimeException e) { a = 2; }\n        int t = a > 0 ? 1 : 2;\n        switch (a) { case 1: break; }\n        switch (a) { case 2: break; case 3: break; }\n        boolean c = a > 0 || b > 0;\n    }",
+        "link": "metrics/erosion/HighComplexity.java#L2-L12",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "classify",
+      "language": "java",
+      "cc": 12,
+      "sloc": 13,
+      "mass": 43.26661530556787,
+      "location": {
+        "relative_path": "report_erosion/src/HighComplexity.java",
+        "start_line": 2,
+        "end_line": 16,
+        "excerpt": "    public int classify(int value) {\n        int result = 0;\n        if (value == 1) { result = 1; }\n        if (value == 2) { result = 2; }\n        if (value == 3) { result = 3; }\n        if (value == 4) { result = 4; }\n        if (value == 5) { result = 5; }\n        if (value == 6) { result = 6; }\n        if (value == 7) { result = 7; }\n        if (value == 8) { result = 8; }\n        if (value == 9) { result = 9; }\n        if (value == 10) { result = 10; }\n        if (value == 11) { result = 11; }\n        return result;\n    }",
+        "link": "report_erosion/src/HighComplexity.java#L2-L16",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "classify",
+      "language": "java",
+      "cc": 10,
+      "sloc": 11,
+      "mass": 33.166247903553995,
+      "location": {
+        "relative_path": "erosion_boundary/Boundary.java",
+        "start_line": 7,
+        "end_line": 19,
+        "excerpt": "    int classify(int a) {\n        int result = 0;\n        if (a == 0) { result = 1; }\n        if (a == 1) { result = 2; }\n        if (a == 2) { result = 3; }\n        if (a == 3) { result = 4; }\n        if (a == 4) { result = 5; }\n        if (a == 5) { result = 6; }\n        if (a == 6) { result = 7; }\n        if (a == 7) { result = 8; }\n        if (a == 8) { result = 9; }\n        return result;\n    }",
+        "link": "erosion_boundary/Boundary.java#L7-L19",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "m",
+      "language": "java",
+      "cc": 9,
+      "sloc": 18,
+      "mass": 38.18376618407356,
+      "location": {
+        "relative_path": "ir/Decisions.java",
+        "start_line": 2,
+        "end_line": 28,
+        "excerpt": "    int m(int x, boolean b) {\n        if (x > 0) {\n            x = 1;\n        }\n        for (int i = 0; i < x; i++) {\n            x = x - 1;\n        }\n        while (x > 0) {\n            x = x - 1;\n        }\n        switch (x) {\n            case 1:\n                x = 2;\n                break;\n            default:\n                x = 3;\n        }\n        try {\n            x = 4;\n        } catch (Exception e) {\n            x = 5;\n        }\n        int y = b ? 1 : 2;\n        boolean c = b && b;\n        boolean d = b || b;\n        return y;\n    }",
+        "link": "ir/Decisions.java#L2-L28",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "m",
+      "language": "js_ts",
+      "cc": 9,
+      "sloc": 18,
+      "mass": 38.18376618407356,
+      "location": {
+        "relative_path": "ir/decisions.ts",
+        "start_line": 1,
+        "end_line": 27,
+        "excerpt": "function m(x: number, b: boolean): number {\n    if (x > 0) {\n        x = 1;\n    }\n    for (let i = 0; i < x; i++) {\n        x = x - 1;\n    }\n    while (x > 0) {\n        x = x - 1;\n    }\n    switch (x) {\n        case 1:\n            x = 2;\n            break;\n        default:\n            x = 3;\n    }\n    try {\n        x = 4;\n    } catch (e) {\n        x = 5;\n    }\n    let y = b ? 1 : 2;\n    let c = b && b;\n    let d = b || b;\n    return y;\n}",
+        "link": "ir/decisions.ts#L1-L27",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "lowComplexity",
+      "language": "js_ts",
+      "cc": 8,
+      "sloc": 9,
+      "mass": 24.0,
+      "location": {
+        "relative_path": "metrics/erosion/LowComplexity.js",
+        "start_line": 1,
+        "end_line": 11,
+        "excerpt": "function lowComplexity(a, b) {\n    if (a > 0) { a = 1; }\n    for (let i = 0; i < a; i++) { a++; }\n    while (a > 0) { a--; }\n    for (const x of [1, 2, 3]) { a += x; }\n    let t = a > 0 ? 1 : 2;\n    let c = a > 0 && b > 0;\n    switch (a) { case 1: break; }\n    let done = true;\n    return a;\n}",
+        "link": "metrics/erosion/LowComplexity.js#L1-L11",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "loopy",
+      "language": "js_ts",
+      "cc": 4,
+      "sloc": 6,
+      "mass": 9.797958971132712,
+      "location": {
+        "relative_path": "metrics/__tests__/BareControlFlow.js",
+        "start_line": 1,
+        "end_line": 11,
+        "excerpt": "function loopy() {\n  for (let i = 0; i < 3; i++) {\n    if (i === 1) {\n      continue;\n    }\n    if (i === 2) {\n      break;\n    }\n  }\n  return;\n}",
+        "link": "metrics/__tests__/BareControlFlow.js#L1-L11",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "run",
+      "language": "java",
+      "cc": 3,
+      "sloc": 24,
+      "mass": 14.696938456699067,
+      "location": {
+        "relative_path": "clones/__tests__/SwitchDupJava.java",
+        "start_line": 2,
+        "end_line": 29,
+        "excerpt": "    void run(int x) {\n        switch (x) {\n            case 1:\n                alpha(one,\n                      two,\n                      three);\n                beta(four,\n                     five,\n                     six);\n                gamma(seven,\n                      eight,\n                      nine);\n                break;\n            case 2:\n                alpha(one,\n                      two,\n                      three);\n                beta(four,\n                     five,\n                     six);\n                gamma(seven,\n                      eight,\n                      nine);\n                break;\n            default:\n                otherwise();\n        }\n    }",
+        "link": "clones/__tests__/SwitchDupJava.java#L2-L29",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "run",
+      "language": "js_ts",
+      "cc": 3,
+      "sloc": 33,
+      "mass": 17.233687939614086,
+      "location": {
+        "relative_path": "clones/__tests__/SwitchDupJs.js",
+        "start_line": 1,
+        "end_line": 37,
+        "excerpt": "function run(x) {\n  switch (x) {\n    case 1:\n      alpha(one,\n            two,\n            three);\n      beta(four,\n           five,\n           six);\n      gamma(seven,\n            eight,\n            nine);\n      break;\n    case 2:\n      alpha(one,\n            two,\n            three);\n      beta(four,\n           five,\n           six);\n      gamma(seven,\n            eight,\n            nine);\n      break;\n    default:\n      alpha(one,\n            two,\n            three);\n      beta(four,\n           five,\n           six);\n      gamma(seven,\n            eight,\n            nine);\n      break;\n  }\n}",
+        "link": "clones/__tests__/SwitchDupJs.js#L1-L37",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "forOfOptional",
+      "language": "js_ts",
+      "cc": 3,
+      "sloc": 6,
+      "mass": 7.348469228349534,
+      "location": {
+        "relative_path": "metrics/__tests__/ForOfOptional.js",
+        "start_line": 1,
+        "end_line": 9,
+        "excerpt": "function forOfOptional(items, maybe) {\n    let total = 0;\n    for (const item of items) {\n        total += item;\n    }\n    const value = maybe?.value;\n    const fallback = maybe ?? 0;\n    return total + fallback + value;\n}",
+        "link": "metrics/__tests__/ForOfOptional.js#L1-L9",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "<anonymous>@1",
+      "language": "js_ts",
+      "cc": 3,
+      "sloc": 1,
+      "mass": 3.0,
+      "location": {
+        "relative_path": "metrics/__tests__/NestedExpressionCallable.js",
+        "start_line": 1,
+        "end_line": 1,
+        "excerpt": "const curried = (a) => (b) => (a && b ? a : b);",
+        "link": "metrics/__tests__/NestedExpressionCallable.js#L1-L1",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "colonForm",
+      "language": "java",
+      "cc": 3,
+      "sloc": 7,
+      "mass": 7.937253933193772,
+      "location": {
+        "relative_path": "metrics/__tests__/SwitchForms.java",
+        "start_line": 2,
+        "end_line": 12,
+        "excerpt": "    int colonForm(int a) {\n        switch (a) {\n            case 1:\n                break;\n            case 2:\n                break;\n            default:\n                break;\n        }\n        return a;\n    }",
+        "link": "metrics/__tests__/SwitchForms.java#L2-L12",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "arrowForm",
+      "language": "java",
+      "cc": 3,
+      "sloc": 5,
+      "mass": 6.708203932499369,
+      "location": {
+        "relative_path": "metrics/__tests__/SwitchForms.java",
+        "start_line": 14,
+        "end_line": 21,
+        "excerpt": "    int arrowForm(int a) {\n        switch (a) {\n            case 1 -> a = 1;\n            case 2 -> a = 2;\n            default -> a = 3;\n        }\n        return a;\n    }",
+        "link": "metrics/__tests__/SwitchForms.java#L14-L21",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "m",
+      "language": "java",
+      "cc": 2,
+      "sloc": 4,
+      "mass": 4.0,
+      "location": {
+        "relative_path": "ir/ContainerSet.java",
+        "start_line": 7,
+        "end_line": 13,
+        "excerpt": "    void m(int x) {\n        switch (x) {\n            case 1:\n                int c = 3;\n                int d = 4;\n        }\n    }",
+        "link": "ir/ContainerSet.java#L7-L13",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "m",
+      "language": "java",
+      "cc": 2,
+      "sloc": 5,
+      "mass": 4.47213595499958,
+      "location": {
+        "relative_path": "ir/StructuralPredicates.java",
+        "start_line": 2,
+        "end_line": 10,
+        "excerpt": "    int m(boolean b) {\n        int x = 0;\n        try {\n            x = 1;\n        } catch (Exception e) {\n            return -1;\n        }\n        return x;\n    }",
+        "link": "ir/StructuralPredicates.java#L2-L10",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "m",
+      "language": "js_ts",
+      "cc": 2,
+      "sloc": 4,
+      "mass": 4.0,
+      "location": {
+        "relative_path": "ir/container_set.ts",
+        "start_line": 4,
+        "end_line": 10,
+        "excerpt": "function m(x: number): void {\n    switch (x) {\n        case 1:\n            let c = 3;\n            let d = 4;\n    }\n}",
+        "link": "ir/container_set.ts#L4-L10",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "m",
+      "language": "js_ts",
+      "cc": 2,
+      "sloc": 5,
+      "mass": 4.47213595499958,
+      "location": {
+        "relative_path": "ir/structural_predicates.ts",
+        "start_line": 1,
+        "end_line": 9,
+        "excerpt": "function m(b: boolean): number {\n    let x = 0;\n    try {\n        x = 1;\n    } catch (e) {\n        return -1;\n    }\n    return x;\n}",
+        "link": "ir/structural_predicates.ts#L1-L9",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "Point",
+      "language": "java",
+      "cc": 2,
+      "sloc": 2,
+      "mass": 2.8284271247461903,
+      "location": {
+        "relative_path": "metrics/__tests__/CallableKinds.java",
+        "start_line": 10,
+        "end_line": 14,
+        "excerpt": "    Point {\n        if (x < 0) {\n            x = 0;\n        }\n    }",
+        "link": "metrics/__tests__/CallableKinds.java#L10-L14",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "outer",
+      "language": "js_ts",
+      "cc": 2,
+      "sloc": 4,
+      "mass": 4.0,
+      "location": {
+        "relative_path": "metrics/__tests__/NestedCallable.js",
+        "start_line": 1,
+        "end_line": 7,
+        "excerpt": "function outer(a) {\n    const inner = (b) => (b > 0 ? b : -b);\n    if (a > 0) {\n        return inner(a);\n    }\n    return 0;\n}",
+        "link": "metrics/__tests__/NestedCallable.js#L1-L7",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "inner",
+      "language": "js_ts",
+      "cc": 2,
+      "sloc": 1,
+      "mass": 2.0,
+      "location": {
+        "relative_path": "metrics/__tests__/NestedCallable.js",
+        "start_line": 2,
+        "end_line": 2,
+        "excerpt": "    const inner = (b) => (b > 0 ? b : -b);",
+        "link": "metrics/__tests__/NestedCallable.js#L2-L2",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "<anonymous>@4",
+      "language": "js_ts",
+      "cc": 2,
+      "sloc": 1,
+      "mass": 2.0,
+      "location": {
+        "relative_path": "metrics/__tests__/NestedExpressionCallable.js",
+        "start_line": 4,
+        "end_line": 4,
+        "excerpt": "  (c) => c || 1;",
+        "link": "metrics/__tests__/NestedExpressionCallable.js#L4-L4",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "sloc",
+      "language": "js_ts",
+      "cc": 2,
+      "sloc": 6,
+      "mass": 4.898979485566356,
+      "location": {
+        "relative_path": "metrics/__tests__/SlocLines.js",
+        "start_line": 1,
+        "end_line": 12,
+        "excerpt": "function sloc(a) { let x = a;\n    // comment one\n    // comment two\n\n    if (x > 0) {\n        x = x + 1;\n    }\n    // comment three\n    let y = x + 1;\n    let z = y + 1;\n    return z;\n}",
+        "link": "metrics/__tests__/SlocLines.js#L1-L12",
+        "is_remote_link": false
+      }
+    },
+    {
+      "name": "ifConstruct",
+      "language": "java",
+      "cc": 2,
+      "sloc": 3,
+      "mass": 3.4641016151377544,
+      "location": {
+        "relative_path": "parity/Constructs.java",
+        "start_line": 2,
+        "end_line": 8,
+        "excerpt": "    void ifConstruct(int a) {\n        if (a > 0) {\n            a = 1;\n        } else {\n            a = 2;\n        }\n    }",
+        "link": "parity/Constructs.java#L2-L8",
+        "is_remote_link": false
+      }
+    }
+  ],
+  "skipped_files": [
+    {
+      "relative_path": "discover/sample/.gradle/Cache.java",
+      "reason": "dependency_or_build_output",
+      "detail": null
+    },
+    {
+      "relative_path": "discover/sample/build/generated/Api_pb.js",
+      "reason": "generated_code",
+      "detail": null
+    },
+    {
+      "relative_path": "discover/sample/dist/bundle.js",
+      "reason": "dependency_or_build_output",
+      "detail": null
+    },
+    {
+      "relative_path": "discover/sample/node_modules/left-pad/index.js",
+      "reason": "dependency_or_build_output",
+      "detail": null
+    },
+    {
+      "relative_path": "discover/sample/src/ignored.ts",
+      "reason": "gitignore",
+      "detail": null
+    },
+    {
+      "relative_path": "discover/sample/src/types.d.ts",
+      "reason": "generated_code",
+      "detail": null
+    },
+    {
+      "relative_path": "discover/sample/src/vendor.min.js",
+      "reason": "generated_code",
+      "detail": null
+    },
+    {
+      "relative_path": "discover/sample/target/classes/Cached.java",
+      "reason": "dependency_or_build_output",
+      "detail": null
+    },
+    {
+      "relative_path": "ir/JsxUnterminatedEntity.tsx",
+      "reason": "parse_syntax_error",
+      "detail": "salvaged; first error at line 1"
+    },
+    {
+      "relative_path": "ir/TsUsingParameter.ts",
+      "reason": "parse_syntax_error",
+      "detail": "salvaged; first error at line 1"
+    },
+    {
+      "relative_path": "salvage/Mixed.java",
+      "reason": "parse_syntax_error",
+      "detail": "salvaged; first error at line 12"
+    },
+    {
+      "relative_path": "salvage/Mixed.ts",
+      "reason": "parse_syntax_error",
+      "detail": "salvaged; first error at line 8"
+    }
+  ],
+  "incomplete": true,
+  "adaptation": {
+    "summary": "CC, SLOC, mass, erosion and verbosity are computed from this scanner's own Java/JS-TS AST rules, adapted from scb-check's Python-only formulas. No numerical equivalence to scb-check's own scores is claimed.",
+    "cc_rules_doc": "docs/cc-rules.md",
+    "wasteful_rules_doc": "docs/wasteful-rules.md"
+  }
+}

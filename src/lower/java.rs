@@ -1,0 +1,337 @@
+//! The Java lowering: every `node.kind()` match this stream produces for a
+//! Java file, isolated from `src/lower/jsts.rs`'s own table per the spec's
+//! "no per-grammar strings on the IR itself" requirement -- only this file
+//! and `src/lower/mod.rs` (via `Classification`) ever read a Java grammar
+//! string.
+
+use tree_sitter::Node;
+
+use crate::exec_lines::is_comment_kind;
+use crate::ir::{
+    CallableKind, DamageKind, DecisionKind, OwnerKind, OwnerSegment, Span, TerminatorKind,
+};
+use crate::model::LanguageFamily;
+
+use super::{CallableInfo, Classification};
+
+/// D22/D7's terminator kinds: identical node-kind literals to JS/TS's own
+/// table, kept as a separate copy since each lowering owns its table
+/// independently.
+fn terminator_kind(kind: &str) -> Option<TerminatorKind> {
+    match kind {
+        "return_statement" => Some(TerminatorKind::Return),
+        "break_statement" => Some(TerminatorKind::Break),
+        "continue_statement" => Some(TerminatorKind::Continue),
+        "throw_statement" => Some(TerminatorKind::Throw),
+        _ => None,
+    }
+}
+
+/// D8's Java callable kinds -- this lowering's own table, not shared with
+/// `src/metrics/mod.rs` (which no longer classifies callable kinds itself;
+/// it consumes `IrFile::callables` directly) -- and M1-7's grammar-free
+/// `CallableKind` each maps to. The sole membership gate for
+/// `callable_info` below: unlike the pre-M1-7 shape (a separate
+/// `CALLABLE_KINDS.contains()` check plus a would-be lookup), there is only
+/// one table here, so it cannot drift out of sync with itself.
+fn callable_kind_for(kind: &str) -> Option<CallableKind> {
+    match kind {
+        "method_declaration" => Some(CallableKind::JavaMethod),
+        "constructor_declaration" => Some(CallableKind::JavaConstructor),
+        "compact_constructor_declaration" => Some(CallableKind::JavaCompactConstructor),
+        "static_initializer" => Some(CallableKind::JavaStaticInitializer),
+        "lambda_expression" => Some(CallableKind::JavaLambda),
+        _ => None,
+    }
+}
+
+/// D8's body-node finder: every callable kind exposes it through the `body`
+/// field, except `static_initializer`, whose direct `block` child carries no
+/// field name.
+fn callable_body(node: Node) -> Option<Node> {
+    node.child_by_field_name("body")
+        .or_else(|| first_child_of_kind(node, "block"))
+}
+
+fn first_child_of_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
+    let mut cursor = node.walk();
+    let found = node
+        .children(&mut cursor)
+        .find(|child| child.kind() == kind);
+    found
+}
+
+/// D10's name resolution, minus the anonymous fallback: the node's own
+/// `name` field; else the name from an enclosing `variable_declarator`,
+/// `pair` or `assignment_expression`; else `None`. `resolve_name` (below)
+/// and M1-7's `is_anonymous` fact both key on this exact same resolution --
+/// one table, not two that could drift apart.
+fn declared_name(node: Node, parent: Option<Node>, source: &str) -> Option<String> {
+    if let Some(name_node) = node.child_by_field_name("name") {
+        return Some(node_text(name_node, source));
+    }
+    let parent = parent?;
+    let field = match parent.kind() {
+        "variable_declarator" => Some("name"),
+        "pair" => Some("key"),
+        "assignment_expression" => Some("left"),
+        _ => None,
+    };
+    let name_node = field.and_then(|field| parent.child_by_field_name(field))?;
+    Some(node_text(name_node, source))
+}
+
+/// D10: `declared_name`, else `<anonymous>@<line>`. The same table as JS/TS's
+/// own copy -- see `IrCallable`'s doc comment on why both lowerings carry it.
+fn resolve_name(node: Node, parent: Option<Node>, source: &str) -> String {
+    declared_name(node, parent, source)
+        .unwrap_or_else(|| format!("<anonymous>@{}", node.start_position().row + 1))
+}
+
+fn node_text(node: Node, source: &str) -> String {
+    node.utf8_text(source.as_bytes()).unwrap_or("").to_string()
+}
+
+/// M1-7: the Java parameter-type signature -- every `formal_parameters` child
+/// that exposes a `type` field (`formal_parameter`, `spread_parameter`), its
+/// text whitespace-normalized, in declaration order. `receiver_parameter`
+/// (an explicit `this` parameter) exposes no `type` field, so it is skipped
+/// without a dedicated arm; `compact_constructor_declaration` and
+/// `static_initializer` have no `parameters` field at all and so always
+/// resolve to an empty signature via the `?` below.
+///
+/// Round 2 (WS-1 triage row 4): two legal overload pairs used to collide on
+/// this signature alone -- `f(int)`/`f(int... xs)` (a `spread_parameter`'s
+/// own trailing `"..."` was dropped, since it lives outside its `type`
+/// field's span) and `g(int x)`/`g(int x[])` (a `formal_parameter`'s own
+/// C-style `dimensions` field, also outside `type`'s span, was dropped
+/// entirely). Both are appended onto the whitespace-normalized `type` text.
+fn callable_signature(node: Node, source: &str) -> Vec<String> {
+    let Some(parameters) = node.child_by_field_name("parameters") else {
+        return Vec::new();
+    };
+    if parameters.kind() != "formal_parameters" {
+        return Vec::new();
+    }
+    let mut cursor = parameters.walk();
+    parameters
+        .children(&mut cursor)
+        .filter_map(|parameter| {
+            let type_node = parameter.child_by_field_name("type")?;
+            let mut text = node_text(type_node, source)
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            if parameter.kind() == "spread_parameter" {
+                text.push_str("...");
+            } else if let Some(dimensions) = parameter.child_by_field_name("dimensions") {
+                text.extend(node_text(dimensions, source).split_whitespace());
+            }
+            Some(text)
+        })
+        .collect()
+}
+
+/// M1-7's Java owner-chain segment for a node that is itself a named type or
+/// an anonymous class body (never a callable -- `callable_info`'s own
+/// `CallableInfo` already carries that segment's facts, reused directly by
+/// `classify` below rather than recomputed here). Round 2 (WS-1 triage rows
+/// 3/4): `annotation_type_declaration` (an `@interface`) is a named type too;
+/// an `enum_constant`'s own `body` field is a `class_body` node, the same
+/// grammar kind an anonymous `object_creation_expression` body uses, and JLS
+/// §8.9.1 calls it exactly that -- an anonymous class body, not a member of
+/// the enum's own `NamedType` -- so both parent kinds map to
+/// `AnonymousClassBody`, distinguishing `PLUS { … }`'s own overriding methods
+/// from the enum's shared ones.
+fn owner_segment_for_type(
+    kind: &str,
+    parent_kind: Option<&str>,
+    node: Node,
+    source: &str,
+) -> Option<OwnerSegment> {
+    match kind {
+        "class_declaration"
+        | "interface_declaration"
+        | "enum_declaration"
+        | "record_declaration"
+        | "annotation_type_declaration" => {
+            let name = node
+                .child_by_field_name("name")
+                .map(|name_node| node_text(name_node, source));
+            Some(OwnerSegment {
+                kind: OwnerKind::NamedType,
+                name,
+            })
+        }
+        "class_body"
+            if parent_kind == Some("object_creation_expression")
+                || parent_kind == Some("enum_constant") =>
+        {
+            Some(OwnerSegment {
+                kind: OwnerKind::AnonymousClassBody,
+                name: None,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn callable_info(
+    node: Node,
+    kind: &str,
+    parent: Option<Node>,
+    source: &str,
+) -> Option<CallableInfo> {
+    let callable_kind = callable_kind_for(kind)?;
+    let body = callable_body(node)?;
+    Some(CallableInfo {
+        body_span: Span::from_node(body),
+        name: resolve_name(node, parent, source),
+        kind: callable_kind,
+        is_anonymous: declared_name(node, parent, source).is_none(),
+        signature: callable_signature(node, source),
+    })
+}
+
+/// The self-is-block predicate for Java: a `{ … }` scope is a `block` or a
+/// constructor's `constructor_body`. `src/metrics/mod.rs` no longer carries
+/// its own copy of this classification -- it consumes `IrFile::blocks`
+/// directly. Returns the matched arm's own literal rather than a
+/// bool: `Node::kind()` in tree-sitter 0.27 borrows from `node`'s own
+/// lifetime rather than promising `'static`, but `IrBlock::kind` is
+/// `&'static str` (`model::SyntaxBlock::kind` must not move), so the caller
+/// needs the match arm's `'static` literal, not `node.kind()` itself.
+fn is_block_kind(kind: &str) -> Option<&'static str> {
+    match kind {
+        "block" => Some("block"),
+        "constructor_body" => Some("constructor_body"),
+        _ => None,
+    }
+}
+
+/// True for Java's `default` `switch_label`: its first child's kind is
+/// literally `"default"`. `decision_kind` (below) counts every other
+/// `switch_label` as a `Case`.
+fn is_default_label(node: Node) -> bool {
+    node.child(0).is_some_and(|child| child.kind() == "default")
+}
+
+fn decision_kind(node: Node, kind: &str) -> Option<DecisionKind> {
+    match kind {
+        "if_statement" => Some(DecisionKind::Branch),
+        "for_statement" | "enhanced_for_statement" | "while_statement" | "do_statement" => {
+            Some(DecisionKind::Loop)
+        }
+        "switch_label" if !is_default_label(node) => Some(DecisionKind::Case),
+        "catch_clause" => Some(DecisionKind::Catch),
+        "ternary_expression" => Some(DecisionKind::Ternary),
+        "binary_expression" => match operator_text(node) {
+            Some("&&") => Some(DecisionKind::And),
+            Some("||") => Some(DecisionKind::Or),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A `binary_expression`'s own operator token text, via the `operator`
+/// field both grammars expose it under.
+fn operator_text<'tree>(node: Node<'tree>) -> Option<&'tree str> {
+    node.child_by_field_name("operator")
+        .map(|child| child.kind())
+}
+
+/// Whether `node` itself is the block directly forming a `catch` clause's
+/// body -- an O(1) check; `src/lower/mod.rs`'s `build_ir` combines this with
+/// the parent's own already-computed flag to answer "or sits inside it"
+/// without walking back up the tree per node. `parent_kind` is the caller's
+/// already-threaded parent (`build_ir` passes it down the traversal instead
+/// of calling `node.parent()`, which in tree-sitter 0.25.10 restarts at the
+/// tree root and descends, turning one linear tree build into `Θ(depth)`
+/// work per node).
+fn is_catch_body_root(kind: &str, parent_kind: Option<&str>) -> bool {
+    is_block_kind(kind).is_some() && parent_kind == Some("catch_clause")
+}
+
+/// D15's Java clone-candidate containers (`clones::statement_children`'s
+/// Java arms, re-derived here since that function is private): a direct
+/// named, non-comment child of a `block`/`constructor_body`, or a
+/// `switch_block_statement_group`'s direct child other than its own
+/// `switch_label`. Takes the already-threaded `parent_kind` rather than
+/// calling `node.parent()` -- see `is_catch_body_root`'s doc comment -- and
+/// the caller's own already-computed `is_named`/`is_comment` (see
+/// `classify`'s own doc comment: each is computed exactly once per node and
+/// threaded into every helper, rather than re-derived here). Production: its
+/// result is `IrNode::is_clone_statement`.
+pub(super) fn is_clone_statement(
+    kind: &str,
+    parent_kind: Option<&str>,
+    is_named: bool,
+    is_comment: bool,
+) -> bool {
+    if !is_named || is_comment {
+        return false;
+    }
+    match parent_kind {
+        Some("block") | Some("constructor_body") => true,
+        Some("switch_block_statement_group") => kind != "switch_label",
+        _ => false,
+    }
+}
+
+/// M0c-9: under orchard's grammar, a varargs parameter's annotation (e.g.
+/// `void m(Class<?> @Nullable ... cs)`) no longer produces an `ERROR` node
+/// directly inside `formal_parameters` -- `DamageKind::JavaVarargsAnnotation`
+/// is removed (the shape it named is gone), so every remaining Java
+/// `ERROR`/`MISSING` node falls back to `Unclassified` rather than a
+/// dedicated class.
+fn classify_damage(node: Node) -> Option<DamageKind> {
+    if node.is_error() || node.is_missing() {
+        return Some(DamageKind::Unclassified);
+    }
+    None
+}
+
+/// `parent` is the tree-sitter `Node` `src/lower/mod.rs`'s `build_ir` already
+/// holds for this node's parent (threaded down the traversal in a stack
+/// mirroring its own node stack), so nothing below this point calls
+/// `node.parent()`. `kind`/`parent_kind`/`is_named`/`is_comment` are each
+/// computed exactly once here and threaded into every helper, rather than
+/// every helper re-deriving `node.kind()` (a strlen + full-UTF8-validate
+/// call), `node.is_named()` or `is_comment_kind` independently.
+pub(super) fn classify(node: Node, source: &str, parent: Option<Node>) -> Classification {
+    let kind = node.kind();
+    let parent_kind = parent.map(|parent| parent.kind());
+    let is_named = node.is_named();
+    let is_comment = is_comment_kind(kind, LanguageFamily::Java);
+    let callable = callable_info(node, kind, parent, source);
+    // M1-7: a callable node's own owner-chain segment reuses the `Callable`
+    // facts `callable_info` just computed (its kind and declared-name-ness),
+    // rather than re-deriving them; every other owner-kind node (named type,
+    // anonymous class body) goes through `owner_segment_for_type`.
+    let owner_segment = match &callable {
+        Some(info) => Some(OwnerSegment {
+            kind: OwnerKind::Callable,
+            name: if info.is_anonymous {
+                None
+            } else {
+                Some(info.name.clone())
+            },
+        }),
+        None => owner_segment_for_type(kind, parent_kind, node, source),
+    };
+    Classification {
+        decision: decision_kind(node, kind),
+        terminator: terminator_kind(kind),
+        in_block: parent_kind.is_some_and(|kind| is_block_kind(kind).is_some()),
+        is_catch_body_root: is_catch_body_root(kind, parent_kind),
+        damage: classify_damage(node),
+        is_clone_statement: is_clone_statement(kind, parent_kind, is_named, is_comment),
+        is_hoisted_or_type_only: false,
+        block_kind: is_block_kind(kind),
+        callable,
+        owner_segment,
+        is_comment,
+        is_named,
+    }
+}
