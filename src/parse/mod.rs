@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
-use tree_sitter::{Language, Parser, Tree};
+use tree_sitter::{Language, Node, Parser, Tree};
 
 use crate::model::{DiscoveredFile, Grammar, LanguageFamily, ParseFailure, ParseFailureReason};
 
@@ -116,12 +116,36 @@ fn parse_one(root: &Path, file: &DiscoveredFile) -> (Option<ParsedFile>, Option<
         let failure = ParseFailure {
             relative_path: file.relative_path.clone(),
             reason: ParseFailureReason::SyntaxError,
-            detail: None,
+            detail: first_error_line(parsed_file.tree.root_node())
+                .map(|line| format!("first error at line {line}")),
         };
         return (Some(parsed_file), Some(failure));
     }
 
     (Some(parsed_file), None)
+}
+
+/// The 1-based line of the first `ERROR` or `MISSING` node in document
+/// order, descending only into subtrees that `has_error`.
+fn first_error_line(root: Node<'_>) -> Option<usize> {
+    let mut cursor = root.walk();
+    loop {
+        let node = cursor.node();
+        if node.is_error() || node.is_missing() {
+            return Some(node.start_position().row + 1);
+        }
+        if node.has_error() && cursor.goto_first_child() {
+            continue;
+        }
+        loop {
+            if cursor.goto_next_sibling() {
+                break;
+            }
+            if !cursor.goto_parent() {
+                return None;
+            }
+        }
+    }
 }
 
 fn language_for(grammar: Grammar) -> Language {

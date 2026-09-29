@@ -61,7 +61,7 @@ SLOC, mass, erosion), `docs/clone-detection.md` (clone groups), and
     }
   ],
   "skipped_files": [
-    { "relative_path": "src/Broken.java", "reason": "parse_syntax_error", "detail": "..." }
+    { "relative_path": "src/Broken.java", "reason": "parse_syntax_error", "detail": "salvaged; first error at line 2" }
   ],
   "incomplete": true,
   "adaptation": {
@@ -106,6 +106,13 @@ One of `SkipReason`'s labels (`gitignore`, `dependency_or_build_output`,
 skip, D16) or `"parse_<ParseFailureReason label>"` (a parse failure, D18,
 e.g. `parse_syntax_error`) — the `parse_` prefix is how the two kinds of
 skip are told apart in one merged list.
+
+A `parse_syntax_error` row is the one exception to "contributes nothing":
+the file salvage-parses (WS-6), so only its damaged entities are excluded
+and the rest is scored. It is listed so that the file behind
+`incomplete: true` is named, and its `detail` is always `salvaged`,
+followed by `; first error at line N` (the 1-based line of the first
+`ERROR`/`MISSING` node) when tree-sitter reports one.
 
 ### Top-25 span
 

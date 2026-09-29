@@ -185,6 +185,17 @@ which added `tests/golden/neutrality/` to WS-6's own file scope for exactly
 this re-capture, the same way it did for WS-3 round 1's
 `tests/fixtures/parity/` addition.
 
+Greptile P2 on PR #1 re-captured `clean.report.json` once more:
+`build_skipped_files` lists a salvaged `SyntaxError` file again, as a
+`parse_syntax_error` row whose `detail` reads `salvaged; first error at
+line N`, so `incomplete: true` names its file. The re-capture adds exactly
+the four rows for `ir/JsxUnterminatedEntity.tsx`, `ir/TsUsingParameter.ts`,
+`salvage/Mixed.java` and `salvage/Mixed.ts`, and no score, finding or
+top-25 byte moved. The malformed corpus needed no re-capture: its
+pre-salvage baseline already lists all three files, and
+`/skipped_files` stays a declared delta for the `detail` move, now pinned
+row by row in the test.
+
 **Proof A** (`bash scripts/neutrality_gate.sh`, no args) diffs the current
 `HEAD` binary against the pinned pre-IR commit directly, live, on the same
 copied corpus — it never reads `tests/golden/neutrality/`, so it is a

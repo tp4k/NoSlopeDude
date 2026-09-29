@@ -64,10 +64,10 @@ const NORMALIZED_TARGET_LABEL: &str = "<neutrality-corpus>";
 /// `MALFORMED_CORPUS_SOURCES`'s three fixtures:
 ///
 /// - `/skipped_files` -- a `SyntaxError` file is no longer a whole-file
-///   skip (`src/report/mod.rs::build_skipped_files`), so all three
-///   fixtures' entries disappear; the array shrinks from 3 to 0 (a length
-///   mismatch, reported once at the parent path by `walk_diff`, not
-///   per-index).
+///   skip, but `src/report/mod.rs::build_skipped_files` still lists it so
+///   the file behind `incomplete` is named: all three fixtures' entries
+///   stay, and only each `detail` moves from `null` to
+///   `salvaged; first error at line N`.
 /// - `/scores/overall/verbosity/scanned_lines` and
 ///   `/scores/java/verbosity/scanned_lines` -- `rules/broken/Broken.java`
 ///   and `report/src/Broken.java` each have one callable and it intersects
@@ -385,21 +385,31 @@ fn test_malformed_corpus_report_matches_its_baseline_with_declared_deltas_only()
         "malformed corpus report.json carries undeclared deltas: {diffs:?}"
     );
 
-    // `is_declared` suppresses an array-length mismatch at `/skipped_files`
-    // regardless of what the new length actually is -- the declared delta's
-    // intent is specifically the documented 3-to-0 shrink (every
-    // `MALFORMED_CORPUS_SOURCES` entry's whole-file skip disappearing under
-    // salvage), not "any change to this array is fine". Pin the actual
-    // length directly so a regression that leaves a stray skip entry behind
-    // (or introduces a new one) cannot hide behind the declared delta.
-    let skipped_files = actual["skipped_files"]
-        .as_array()
-        .expect("report has a skipped_files array");
+    // `is_declared` suppresses every change under `/skipped_files`, but the
+    // declared delta's intent is only the documented `detail` move on the
+    // three salvaged rows, not "any change to this array is fine". Pin the
+    // whole array so a stray, missing or re-reasoned row cannot hide behind
+    // the declared delta.
     assert_eq!(
-        skipped_files.len(),
-        0,
-        "expected every MALFORMED_CORPUS_SOURCES entry's skip to have disappeared under \
-         salvage, found: {skipped_files:?}"
+        actual["skipped_files"],
+        json!([
+            {
+                "relative_path": "metrics/broken/Broken.ts",
+                "reason": "parse_syntax_error",
+                "detail": "salvaged; first error at line 1"
+            },
+            {
+                "relative_path": "report/src/Broken.java",
+                "reason": "parse_syntax_error",
+                "detail": "salvaged; first error at line 2"
+            },
+            {
+                "relative_path": "rules/broken/Broken.java",
+                "reason": "parse_syntax_error",
+                "detail": "salvaged; first error at line 5"
+            }
+        ]),
+        "every MALFORMED_CORPUS_SOURCES entry is listed as a salvaged skip"
     );
 }
 

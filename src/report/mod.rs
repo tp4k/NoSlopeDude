@@ -129,9 +129,10 @@ pub struct ReportCallable {
     pub location: SourceLocation,
 }
 
-/// A file that contributes nothing to the scores: a discovery-time skip
-/// (D16) or a parse failure (D18), told apart by `reason`'s `parse_` prefix
-/// on the latter.
+/// A discovery-time skip (D16) or a parse failure (D18), told apart by
+/// `reason`'s `parse_` prefix on the latter. Every row contributes nothing
+/// to the scores except a salvaged `parse_syntax_error` one, whose `detail`
+/// starts with `salvaged`.
 #[derive(Debug, Clone, Serialize)]
 pub struct ReportSkippedFile {
     pub relative_path: PathBuf,
@@ -397,23 +398,28 @@ fn build_skipped_files(input: &ReportInput) -> Vec<ReportSkippedFile> {
         input
             .parse_failures
             .iter()
-            // WS-6 salvage: a `SyntaxError` parse failure no longer means
-            // the whole file was dropped -- `parse::parse_one` keeps it
-            // alongside a `ParsedFile` purely so `parse_failures` stays
-            // non-empty for `incomplete`'s sake (see that module's own doc
-            // comment). It is never itself a skipped file any more, so it
-            // does not render here; every other parse-failure reason
-            // (`Unreadable`, `UnsupportedExtension`, `GrammarSetup`) still
-            // means no `ParsedFile` at all and renders exactly as before.
-            .filter(|failure| failure.reason != ParseFailureReason::SyntaxError)
             .map(|failure| ReportSkippedFile {
                 relative_path: failure.relative_path.clone(),
                 reason: format!("parse_{}", failure.reason.label()),
-                detail: failure.detail.clone(),
+                detail: skipped_detail(failure),
             }),
     );
     skipped.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
     skipped
+}
+
+/// WS-6 salvage: a `SyntaxError` file still has a `ParsedFile` and is
+/// scored except for its damaged entities, so its row says `salvaged` --
+/// it is listed here only so the file that made the report `incomplete` is
+/// named. Every other parse-failure reason means no `ParsedFile` at all.
+fn skipped_detail(failure: &ParseFailure) -> Option<String> {
+    if failure.reason != ParseFailureReason::SyntaxError {
+        return failure.detail.clone();
+    }
+    Some(match &failure.detail {
+        Some(detail) => format!("salvaged; {detail}"),
+        None => "salvaged".to_string(),
+    })
 }
 
 fn build_location(

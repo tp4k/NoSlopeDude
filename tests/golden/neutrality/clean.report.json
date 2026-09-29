@@ -1023,6 +1023,26 @@
       "relative_path": "discover/sample/target/classes/Cached.java",
       "reason": "dependency_or_build_output",
       "detail": null
+    },
+    {
+      "relative_path": "ir/JsxUnterminatedEntity.tsx",
+      "reason": "parse_syntax_error",
+      "detail": "salvaged; first error at line 1"
+    },
+    {
+      "relative_path": "ir/TsUsingParameter.ts",
+      "reason": "parse_syntax_error",
+      "detail": "salvaged; first error at line 1"
+    },
+    {
+      "relative_path": "salvage/Mixed.java",
+      "reason": "parse_syntax_error",
+      "detail": "salvaged; first error at line 12"
+    },
+    {
+      "relative_path": "salvage/Mixed.ts",
+      "reason": "parse_syntax_error",
+      "detail": "salvaged; first error at line 8"
     }
   ],
   "incomplete": true,

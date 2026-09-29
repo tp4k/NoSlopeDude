@@ -152,27 +152,29 @@ fn test_salvage_is_identical_in_both_languages() {
     }
 }
 
-/// `broken/Broken.ts` used to be dropped wholesale and rendered in
-/// `skipped_files` with `reason: "parse_syntax_error"`. It now salvage-
-/// parses: it disappears from `skipped_files` entirely, while `incomplete`
-/// stays driven by its residual damage (it is *also* still present in
-/// `parse_failures`, so `pipeline.rs`'s own untouched
-/// `!parse_failures.is_empty()` plumbing keeps working) rather than by a
-/// whole-file drop -- proven by the file still reaching the metrics stage
-/// (its file scan summary exists).
+/// `broken/Broken.ts` salvage-parses instead of being dropped wholesale,
+/// but it is still listed in `skipped_files` as `parse_syntax_error` with a
+/// `salvaged; first error at line N` detail, so the file that made the
+/// report `incomplete` is named (Greptile P2 on PR #1). It is *also* still
+/// present in `parse_failures`, so `pipeline.rs`'s own untouched
+/// `!parse_failures.is_empty()` plumbing keeps working -- and it still
+/// reaches the metrics stage (its file scan summary exists).
 #[test]
-fn test_a_file_with_damage_is_no_longer_listed_as_a_whole_file_skip() {
+fn test_a_file_with_damage_is_listed_as_a_salvaged_skip() {
     let root = fixtures_root().join("metrics/broken");
     let (_dir, output) = run_scan(&root, |_| {});
 
-    assert!(
-        !output
-            .report
-            .skipped_files
-            .iter()
-            .any(|file| file.relative_path == Path::new("Broken.ts")),
-        "Broken.ts should no longer be listed as skipped: {:?}",
-        output.report.skipped_files
+    let listed = output
+        .report
+        .skipped_files
+        .iter()
+        .find(|file| file.relative_path == Path::new("Broken.ts"))
+        .unwrap_or_else(|| panic!("Broken.ts is listed: {:?}", output.report.skipped_files));
+    assert_eq!(listed.reason, "parse_syntax_error");
+    assert_eq!(
+        listed.detail.as_deref(),
+        Some("salvaged; first error at line 1"),
+        "line 1 opens `(a: number` and never closes it"
     );
     assert_eq!(
         output.parse_failures.len(),

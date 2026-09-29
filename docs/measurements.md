@@ -74,7 +74,10 @@ drop by itself. The row's `skipped files` cell is `report.json`'s full
 `SyntaxError` entry out of that list too, so for every row from `M0c-10`
 onward it is discovery-time exclusions only (test directories, generated
 code, dependency/build output under D16's default rules) — the 55 Java +
-3 JS/TS parse failures contribute to it not at all, cleared or not. The
+3 JS/TS parse failures contribute to it not at all, cleared or not.
+(Greptile P2 on PR #1 put salvaged `SyntaxError` files back into
+`skipped_files` as `salvaged` rows, so a row recorded after that change
+counts them again.) The
 seven `2026-09-18`/`2026-09-23` rows still read 7720 (`7662 + 58`)
 because they predate this change. The `3dd9ae2` control row (`## M0c-10`
 below) already reads 7662, not 7720, despite predating the grammar swap

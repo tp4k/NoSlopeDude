@@ -195,19 +195,17 @@ fn test_json_report_contains_every_required_section() {
         "a scan inside a git work tree publishes the D6 dirty flag"
     );
 
-    // Skipped files. WS-6 declared delta: `Broken.java` salvage-parses now
-    // (its damage is IR-level, entity-scoped) instead of being dropped
-    // wholesale, so it no longer appears in `skipped_files` at all --
-    // `incomplete` still tracks it via `parse_failures`, asserted in
-    // `test_incomplete_marker_set_on_parse_failure` below.
+    // Skipped files: `Broken.java` salvage-parses, and is listed with a
+    // `salvaged` detail naming its first error line.
     let skipped = value["skipped_files"]
         .as_array()
         .expect("skipped_files array");
     assert!(
-        !skipped
+        skipped
             .iter()
-            .any(|file| file["reason"] == "parse_syntax_error"),
-        "a syntax-error file salvage-parses now and must not be listed as skipped: {skipped:?}"
+            .any(|file| file["reason"] == "parse_syntax_error"
+                && file["detail"] == "salvaged; first error at line 2"),
+        "the syntax-error file is listed as a salvaged skip: {skipped:?}"
     );
 
     // Assumptions-mandated adaptation label (non-equivalence disclosure).
@@ -356,18 +354,19 @@ fn test_incomplete_marker_set_on_parse_failure() {
         "Broken.java's syntax error should mark the report incomplete"
     );
 
-    // WS-6 declared delta: salvage means `Broken.java` is no longer a
-    // whole-file skip -- it still marks the scan incomplete (asserted
-    // above) via `parse_failures`, but it must not also appear in
-    // `skipped_files` (that would double-report the same residual damage).
-    assert!(
-        !output
-            .report
-            .skipped_files
-            .iter()
-            .any(|file| file.relative_path == Path::new("src/Broken.java")),
-        "Broken.java salvage-parses now and must not be listed as skipped: {:?}",
-        output.report.skipped_files
+    // `Broken.java` salvage-parses, and `skipped_files` names it as the
+    // file that made the report incomplete (Greptile P2 on PR #1).
+    let listed = output
+        .report
+        .skipped_files
+        .iter()
+        .find(|file| file.relative_path == Path::new("src/Broken.java"))
+        .unwrap_or_else(|| panic!("Broken.java is listed: {:?}", output.report.skipped_files));
+    assert_eq!(listed.reason, "parse_syntax_error");
+    assert_eq!(
+        listed.detail.as_deref(),
+        Some("salvaged; first error at line 2"),
+        "line 2 opens `broken(` and never closes it"
     );
 }
 
