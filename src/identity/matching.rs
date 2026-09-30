@@ -101,7 +101,8 @@ pub struct Ambiguity {
 
 /// Deterministic matching output: `matches` sorted by (base path bytes, base
 /// callable index), and each `Ambiguity`'s own two lists sorted the same way,
-/// with `ambiguities` itself sorted by fingerprint.
+/// with `ambiguities` itself sorted by fingerprint and `positional_remainders`
+/// by their first base member.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MatchOutput {
     pub matches: Vec<CallableMatch>,

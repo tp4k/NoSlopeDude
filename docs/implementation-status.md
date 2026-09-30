@@ -13,7 +13,8 @@ round; see *How to update this file* at the bottom and the matching rule in
 
 Last updated: 2026-09-30, from `main@8088781` (M1–M2 merged) plus
 `feat/m3-policy` (M3 work in progress; WS-1 hygiene landed at `ce9a1ee`, WS-2
-per-file analysis primitive landed at `5d09448`).
+per-file analysis primitive landed at `5d09448`, WS-3 M3-1 E101/E102 + G102
+landed at `03ff948`).
 
 ## Legend
 
@@ -117,18 +118,18 @@ Plan: `nsd-plan-final.md` *M1–M2*, plus `nsd-plan-implementation.md`
 
 ## M3–M5 — Policy, suppressions, clones, cache
 
-Plan: `nsd-plan-final.md` *M3–M5*. **Not started** — no branch holds any of it.
+Plan: `nsd-plan-final.md` *M3–M5*. M3-1 is in progress on `feat/m3-policy`; every other row is not started.
 
-| ID | Deliverable | Status |
-|---|---|---|
-| M3-1 | E101/E102 after callable matching; deletions and improvements never fail | `[ ]` |
-| M3-2 | V101 after diff-aware finding matching, so line-only movement is not a regression | `[ ]` |
-| M3-3 | S101/S102: new suppressions via diff mapping and underlying finding matches; moving a finding with its unchanged directive is not new, transferring it to an unmatched finding raises `S101` (A9); invalid/unused raise `S102` | `[ ]` |
-| M4-1 | Required clone-index coverage for unchanged included files while `V102` is enabled: size, encoding, capability failures raise `A102` (A10); mapped legacy parse-damage tolerance preserved | `[ ]` |
-| M4-2 | V102 comparison: candidate changed occurrences vs unchanged base content and other candidate changes; exclude the replaced base version of a modified path; maximal-group reduction before emission; move mapping first (A3) | `[ ]` |
-| M5-1 | Per-blob cache under `$GIT_COMMON_DIR/nsd/cache/v1`, keyed blob OID + language/grammar + measurement fingerprint; atomic writes; corruption or version mismatch is a recomputable miss | `[ ]` |
-| M5-2 | Best-effort LRU eviction, 1 GiB / 30-day default | `[ ]` |
-| M5-3 | Exit aggregation over all twelve diagnostics | `[ ]` |
+| ID | Deliverable | Status | Branch | Evidence |
+|---|---|---|---|---|
+| M3-1 | E101/E102 after callable matching; deletions and improvements never fail | `[~]` | `feat/m3-policy` | Library-level and not yet reachable from a `check` CLI path. NEW `src/policy/complexity.rs::classify` (E101/E102 over matched callables, G102 when the possible pairings of a tier-3 bucket or a same-key positional remainder give different verdicts, the common verdict when they agree) and `src/policy/diagnostics.rs`; `CallableMatch::pairing` and `MatchOutput::positional_remainders` added to `src/identity/matching.rs` (scaffold `0a04b9e`, red `5ff4af1`, green `cbc63ca`, probe-found tests `03ff948`); `tests/policy_complexity.rs`, `tests/identity_matching.rs` (19). Deferred rows 48–50 resolved. Open escape: a damaged changed callable that salvage drops from `IrFile::callables` reads as a deletion and escapes E101 until A101 lands (tracked in `docs/deferred-work.md`); `[~]` until then |
+| M3-2 | V101 after diff-aware finding matching, so line-only movement is not a regression | `[ ]` | — | — |
+| M3-3 | S101/S102: new suppressions via diff mapping and underlying finding matches; moving a finding with its unchanged directive is not new, transferring it to an unmatched finding raises `S101` (A9); invalid/unused raise `S102` | `[ ]` | — | — |
+| M4-1 | Required clone-index coverage for unchanged included files while `V102` is enabled: size, encoding, capability failures raise `A102` (A10); mapped legacy parse-damage tolerance preserved | `[ ]` | — | — |
+| M4-2 | V102 comparison: candidate changed occurrences vs unchanged base content and other candidate changes; exclude the replaced base version of a modified path; maximal-group reduction before emission; move mapping first (A3) | `[ ]` | — | — |
+| M5-1 | Per-blob cache under `$GIT_COMMON_DIR/nsd/cache/v1`, keyed blob OID + language/grammar + measurement fingerprint; atomic writes; corruption or version mismatch is a recomputable miss | `[ ]` | — | — |
+| M5-2 | Best-effort LRU eviction, 1 GiB / 30-day default | `[ ]` | — | — |
+| M5-3 | Exit aggregation over all twelve diagnostics | `[ ]` | — | — |
 
 ## M6–M7 — Output, CI hardening
 
