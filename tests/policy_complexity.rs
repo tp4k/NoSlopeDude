@@ -328,6 +328,86 @@ fn test_g102_requires_an_enabled_verdict() {
     assert_eq!(bucket_with(1, 2, 20, &e102_off).len(), 2);
 }
 
+#[test]
+fn test_exact_fingerprint_pair_uses_the_same_thresholds() {
+    let exact = |base_cc: u32, base_sloc: usize, cc: u32, sloc: usize| {
+        run(
+            &[("A.java", vec![spec("m", "same", base_cc, base_sloc)])],
+            &[("A.java", vec![spec("m", "same", cc, sloc)])],
+        )
+    };
+
+    assert_eq!(codes(&exact(10, 5, 11, 5)), vec![(CODE_E101, "m")]);
+    assert_eq!(codes(&exact(11, 50, 12, 40)), vec![(CODE_E102, "m")]);
+    assert_eq!(codes(&exact(11, 9, 11, 11)), vec![(CODE_E102, "m")]);
+    assert!(exact(11, 9, 11, 10).is_empty());
+}
+
+#[test]
+fn test_off_applies_to_an_unmatched_callable() {
+    let mut e101_off = default_policy();
+    e101_off.nsd_e101 = Severity::Off;
+
+    assert!(run_with(&[], &[("A.java", vec![spec("m", "f", 11, 5)])], &e101_off).is_empty());
+}
+
+#[test]
+fn test_positional_remainder_with_a_surplus_candidate_raises_g102() {
+    let diagnostics = run(
+        &[("A.java", vec![spec("cb", "x", 20, 10)])],
+        &[(
+            "A.java",
+            vec![spec("cb", "a", 20, 10), spec("cb", "b", 20, 10)],
+        )],
+    );
+
+    assert_eq!(codes(&diagnostics)[0], (CODE_G102, "cb"));
+    assert_eq!(diagnostics[0].candidate_start_line, 1);
+}
+
+#[test]
+fn test_g102_when_only_a_higher_cc_base_passes() {
+    let diagnostics = run(
+        &[(
+            "A.java",
+            vec![spec("cb", "low", 15, 10), spec("cb", "high", 20, 100)],
+        )],
+        &[("A.java", vec![spec("cb", "new", 15, 100)])],
+    );
+
+    assert_eq!(codes(&diagnostics), vec![(CODE_G102, "cb")]);
+}
+
+#[test]
+fn test_tier3_bucket_agreeing_verdict_pairs_members_in_order() {
+    let diagnostics = run(
+        &[(
+            "A.java",
+            vec![
+                spec("old0", "same-body", 11, 10),
+                spec("old1", "same-body", 11, 12),
+            ],
+        )],
+        &[(
+            "B.java",
+            vec![
+                spec("new0", "same-body", 12, 10),
+                spec("new1", "same-body", 12, 12),
+            ],
+        )],
+    );
+
+    assert_eq!(
+        codes(&diagnostics),
+        vec![(CODE_E102, "new0"), (CODE_E102, "new1")]
+    );
+    let base_lines: Vec<usize> = diagnostics
+        .iter()
+        .map(|d| d.base.as_ref().expect("paired").start_line)
+        .collect();
+    assert_eq!(base_lines, vec![1, 2]);
+}
+
 // ---------------------------------------------------------------------
 // Scale and determinism.
 // ---------------------------------------------------------------------
