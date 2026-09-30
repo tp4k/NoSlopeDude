@@ -783,3 +783,21 @@ fn test_an_unmatched_surplus_base_stays_a_remainder_option() {
 
     assert_eq!(codes(&diagnostics), vec![(CODE_MATCH_AMBIGUITY, "cb")]);
 }
+
+#[test]
+fn test_a_tier3_matched_candidate_leaves_the_unmatched_option() {
+    let base = [
+        ("A.java", vec![spec("cb", "x", 20, 10)]),
+        ("B.java", vec![spec("moved", "y", 12, 10)]),
+    ];
+    let x2 = spec("cb", "x2", 20, 10);
+    let y = spec("cb", "y", 12, 10);
+
+    let x_first = run(&base, &[("A.java", vec![x2, y])]);
+    let x2 = spec("cb", "x2", 20, 10);
+    let y = spec("cb", "y", 12, 10);
+    let y_first = run(&base, &[("A.java", vec![y, x2])]);
+
+    assert_eq!(codes(&x_first), vec![]);
+    assert_eq!(codes(&y_first), vec![]);
+}
