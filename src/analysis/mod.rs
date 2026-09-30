@@ -5,6 +5,7 @@
 //! a snapshot's bytes (a commit or the index) analyze the same as a worktree
 //! file.
 
+use std::cmp::Reverse;
 use std::path::{Path, PathBuf};
 
 use crate::clones;
@@ -96,13 +97,16 @@ pub fn analyze_file(
         })
         .collect();
 
+    let callable_index = CallableIndex::of(&ir);
     let mut flagged = rules::findings_with_nodes(&parsed, &ir);
     flagged.sort_by(|(a, _), (b, _)| rules::cmp_findings(a, b));
     let findings = flagged
         .into_iter()
         .map(|(finding, nodes)| AnalyzedFinding {
             syntax_digest: syntax_digest(&nodes, &parsed.source),
-            enclosing_callable: nodes.first().and_then(|node| innermost_callable(&ir, node)),
+            enclosing_callable: nodes
+                .first()
+                .and_then(|node| callable_index.innermost(node)),
             finding,
         })
         .collect();
@@ -127,18 +131,63 @@ fn syntax_digest(nodes: &[&IrNode], source: &str) -> String {
     format!("blake3:{:032x}", digest.finish())
 }
 
-/// The index of the smallest callable whose span contains `node`; among
-/// callables with equal spans, the later one in document order.
-fn innermost_callable(ir: &IrFile, node: &IrNode) -> Option<usize> {
-    let mut best: Option<(usize, u32)> = None;
-    for (index, callable) in ir.callables.iter().enumerate() {
-        let span = callable.span;
-        if span.start_byte <= node.span.start_byte && node.span.end_byte <= span.end_byte {
-            let length = span.end_byte - span.start_byte;
-            if best.is_none_or(|(_, best_length)| length <= best_length) {
-                best = Some((index, length));
+/// Callables ordered by start (then longest first, then document order), each
+/// with its enclosing entry. Callable spans nest or are disjoint, so the
+/// innermost callable containing a node is an ancestor-or-self of the last
+/// entry starting at or before it.
+struct CallableIndex {
+    entries: Vec<IndexEntry>,
+}
+
+struct IndexEntry {
+    end: u32,
+    start: u32,
+    callable: usize,
+    parent: Option<usize>,
+}
+
+impl CallableIndex {
+    fn of(ir: &IrFile) -> CallableIndex {
+        let mut order: Vec<usize> = (0..ir.callables.len()).collect();
+        order.sort_by_key(|&index| {
+            let span = ir.callables[index].span;
+            (span.start_byte, Reverse(span.end_byte), index)
+        });
+        let mut entries: Vec<IndexEntry> = Vec::with_capacity(order.len());
+        let mut open: Vec<usize> = Vec::new();
+        for callable in order {
+            let span = ir.callables[callable].span;
+            while open
+                .last()
+                .is_some_and(|&top| entries[top].end < span.end_byte)
+            {
+                open.pop();
             }
+            entries.push(IndexEntry {
+                end: span.end_byte,
+                start: span.start_byte,
+                callable,
+                parent: open.last().copied(),
+            });
+            open.push(entries.len() - 1);
         }
+        CallableIndex { entries }
     }
-    best.map(|(index, _)| index)
+
+    /// The index of the smallest callable whose span contains `node`; among
+    /// callables with equal spans, the later one in document order.
+    fn innermost(&self, node: &IrNode) -> Option<usize> {
+        let preceding = self
+            .entries
+            .partition_point(|entry| entry.start <= node.span.start_byte);
+        let mut cursor = preceding.checked_sub(1);
+        while let Some(position) = cursor {
+            let entry = &self.entries[position];
+            if node.span.end_byte <= entry.end {
+                return Some(entry.callable);
+            }
+            cursor = entry.parent;
+        }
+        None
+    }
 }
