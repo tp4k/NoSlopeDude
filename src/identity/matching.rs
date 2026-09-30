@@ -62,12 +62,31 @@ pub enum MatchTier {
     BodyFingerprint,
 }
 
-/// One matched base/candidate callable pair and the tier that paired it.
+/// How a same-key or tier-3 pair was formed: by equal body fingerprint, or
+/// by the order-preserving positional fallback among a same-key group's
+/// leftovers (`nsd-plan-final.md` *Stable data model*).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchPairing {
+    FingerprintExact,
+    Positional,
+}
+
+/// One matched base/candidate callable pair, the tier that paired it, and
+/// whether it was fingerprint-exact or positional.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallableMatch {
     pub base: CallableRef,
     pub candidate: CallableRef,
     pub tier: MatchTier,
+    pub pairing: MatchPairing,
+}
+
+/// One same-key group's leftovers after fingerprint pairing, when both sides
+/// still have members: the pool the `Positional` pairs were drawn from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PositionalRemainder {
+    pub base: Vec<CallableRef>,
+    pub candidate: Vec<CallableRef>,
 }
 
 /// A tier-3 fingerprint bucket with more than one leftover callable on
@@ -87,6 +106,7 @@ pub struct Ambiguity {
 pub struct MatchOutput {
     pub matches: Vec<CallableMatch>,
     pub ambiguities: Vec<Ambiguity>,
+    pub positional_remainders: Vec<PositionalRemainder>,
 }
 
 /// Matches `base`'s callables against `candidate`'s, tiers 1-3 in order.
@@ -236,6 +256,7 @@ pub fn match_callables(
                 base: base_ref.clone(),
                 candidate: candidate_ref.clone(),
                 tier: MatchTier::BodyFingerprint,
+                pairing: MatchPairing::FingerprintExact,
             });
         } else if base_refs.len() > 1 || candidate_refs.len() > 1 {
             ambiguities.push(Ambiguity {
@@ -260,6 +281,7 @@ pub fn match_callables(
     MatchOutput {
         matches,
         ambiguities,
+        positional_remainders: Vec::new(),
     }
 }
 
@@ -405,6 +427,7 @@ fn record_matches(
                 index: candidate_index,
             },
             tier,
+            pairing: MatchPairing::FingerprintExact,
         });
     }
 }
