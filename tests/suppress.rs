@@ -606,3 +606,31 @@ fn test_partial_rule_or_missing_colon_is_invalid() {
         );
     }
 }
+
+#[test]
+fn test_doc_comment_directive_is_invalid() {
+    let directive = "/** nsd-ignore[JAVA-EMPTY-CATCH]: x */";
+    let (output, text) = pair(&["work();"], &[directive, CATCH]);
+
+    assert_eq!(
+        sites(&output),
+        vec![(CODE_INVALID_SUPPRESSION, None, line_of(&text, "nsd-ignore"))]
+    );
+    assert_eq!(v101_lines(&output), vec![line_of(&text, CATCH)]);
+}
+
+#[test]
+fn test_two_directives_on_one_unchanged_line_raise_no_s102() {
+    let (_dir, repo) = common::init_repo();
+    let twin = "/* nsd-ignore[JAVA-EMPTY-CATCH]: a */ /* nsd-ignore[JAVA-EMPTY-CATCH]: b */";
+    let body = [twin, CATCH];
+    let base = commit(&repo, &class(&[method("run", &body)]));
+    let candidate = commit(
+        &repo,
+        &class(&[method("added", &["work();"]), method("run", &body)]),
+    );
+
+    let output = evaluate(&repo, base, candidate);
+
+    assert_eq!(sites(&output), vec![]);
+}
