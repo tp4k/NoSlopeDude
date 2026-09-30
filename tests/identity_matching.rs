@@ -970,3 +970,46 @@ fn test_key_pairs_are_never_displaced_by_a_tier3_fingerprint() {
         )]
     );
 }
+
+/// Two candidates with the same body compete for one unmatched base: tier 3
+/// would see a 1:2 bucket, so neither is displaced out of the positional pairs.
+#[test]
+fn test_competing_positional_candidates_are_not_displaced() {
+    let callback = synth_identity("cb", &[]);
+    let moved = synth_identity("moved", &[]);
+    let base = vec![
+        synth_file(
+            "A.java",
+            &[
+                (callback.clone(), "blake3:p"),
+                (callback.clone(), "blake3:q"),
+            ],
+        ),
+        synth_file("B.java", &[(moved.clone(), "blake3:y")]),
+    ];
+    let candidate = vec![synth_file(
+        "A.java",
+        &[
+            (callback.clone(), "blake3:y"),
+            (callback.clone(), "blake3:y"),
+        ],
+    )];
+
+    let output = match_callables(&base, &candidate, &[]);
+
+    assert_eq!(
+        match_summary(&output, &candidate),
+        vec![
+            (
+                callable_ref("A.java", 0),
+                "blake3:y".to_string(),
+                MatchTier::Structural
+            ),
+            (
+                callable_ref("A.java", 1),
+                "blake3:y".to_string(),
+                MatchTier::Structural
+            ),
+        ]
+    );
+}
