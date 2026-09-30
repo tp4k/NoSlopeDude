@@ -863,3 +863,71 @@ fn test_positional_remainders_are_reported() {
         ]
     );
 }
+
+/// (base ref, candidate fingerprint) for every match, in output order.
+fn match_summary(
+    output: &nsd::identity::matching::MatchOutput,
+    candidate: &[FileCallables],
+) -> Vec<(CallableRef, String, MatchTier)> {
+    output
+        .matches
+        .iter()
+        .map(|m| {
+            let file = candidate
+                .iter()
+                .find(|file| file.path == m.candidate.path)
+                .expect("candidate file");
+            (
+                m.base.clone(),
+                file.callables[m.candidate.index].1.clone(),
+                m.tier,
+            )
+        })
+        .collect()
+}
+
+/// A candidate positionally paired in a non-1:1 same-key group, whose body
+/// equals a base left unmatched elsewhere, takes that tier-3 pair instead; the
+/// result does not depend on the candidate's source order.
+#[test]
+fn test_positional_candidate_takes_its_tier3_base_in_either_order() {
+    let callback = synth_identity("cb", &[]);
+    let moved = synth_identity("moved", &[]);
+    let base = vec![
+        synth_file("A.java", &[(callback.clone(), "blake3:x")]),
+        synth_file("B.java", &[(moved.clone(), "blake3:y")]),
+    ];
+    let x_first = vec![synth_file(
+        "A.java",
+        &[
+            (callback.clone(), "blake3:x2"),
+            (callback.clone(), "blake3:y"),
+        ],
+    )];
+    let y_first = vec![synth_file(
+        "A.java",
+        &[
+            (callback.clone(), "blake3:y"),
+            (callback.clone(), "blake3:x2"),
+        ],
+    )];
+
+    let from_x_first = match_callables(&base, &x_first, &[]);
+    let from_y_first = match_callables(&base, &y_first, &[]);
+
+    let expected = vec![
+        (
+            callable_ref("A.java", 0),
+            "blake3:x2".to_string(),
+            MatchTier::Structural,
+        ),
+        (
+            callable_ref("B.java", 0),
+            "blake3:y".to_string(),
+            MatchTier::BodyFingerprint,
+        ),
+    ];
+    assert_eq!(match_summary(&from_x_first, &x_first), expected);
+    assert_eq!(match_summary(&from_y_first, &y_first), expected);
+    assert!(from_y_first.ambiguities.is_empty(), "{from_y_first:#?}");
+}
