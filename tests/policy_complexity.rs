@@ -833,3 +833,56 @@ fn test_a_tier3_matched_candidate_after_its_sibling_leaves_the_unmatched_option(
 
     assert_eq!(codes(&diagnostics), vec![]);
 }
+
+fn both_orders(
+    base: &[(&str, Vec<Spec>)],
+    extra_candidate: &[(&str, Vec<Spec>)],
+) -> (Vec<PolicyDiagnostic>, Vec<PolicyDiagnostic>) {
+    let with_a = |first_y: bool| -> Vec<(&str, Vec<Spec>)> {
+        let x2 = spec("cb", "x2", 20, 10);
+        let y = spec("cb", "y", 12, 10);
+        let pair = if first_y { vec![y, x2] } else { vec![x2, y] };
+        let mut files = vec![("A.java", pair)];
+        for (file, specs) in extra_candidate {
+            files.push((
+                file,
+                specs
+                    .iter()
+                    .map(|s| spec(&s.name, &s.fingerprint, s.cc, s.sloc))
+                    .collect(),
+            ));
+        }
+        files
+    };
+    (run(base, &with_a(false)), run(base, &with_a(true)))
+}
+
+#[test]
+fn test_displacement_is_order_independent_for_non_one_to_one_buckets() {
+    let core = || -> Vec<(&'static str, Vec<Spec>)> {
+        vec![
+            ("A.java", vec![spec("cb", "x", 20, 10)]),
+            ("B.java", vec![spec("moved", "y", 12, 10)]),
+        ]
+    };
+
+    let surplus = both_orders(&core(), &[("C.java", vec![spec("z", "y", 12, 10)])]);
+    assert_eq!(codes(&surplus.0), codes(&surplus.1), "surplus candidate");
+
+    let mut keyed_base = core();
+    keyed_base.push(("D.java", vec![spec("k", "p", 5, 10)]));
+    let keyed = both_orders(&keyed_base, &[("D.java", vec![spec("k", "y", 12, 10)])]);
+    assert_eq!(
+        codes(&keyed.0),
+        vec![(CODE_COMPLEXITY_ABOVE_THRESHOLD, "k")]
+    );
+    assert_eq!(
+        codes(&keyed.1),
+        vec![(CODE_COMPLEXITY_ABOVE_THRESHOLD, "k")]
+    );
+
+    let mut twin_base = core();
+    twin_base.push(("C.java", vec![spec("moved2", "y", 12, 10)]));
+    let twin = both_orders(&twin_base, &[]);
+    assert_eq!(codes(&twin.0), codes(&twin.1), "two unmatched y bases");
+}
