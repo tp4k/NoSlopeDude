@@ -11,11 +11,11 @@
 //! summarized once per set in a `BaseSet`, so each candidate costs
 //! O(log base), not O(base).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::config::{PolicyConfig, Severity};
 use crate::git::path::RepoPath;
-use crate::identity::matching::{CallableRef, MatchOutput, MatchPairing};
+use crate::identity::matching::{CallableRef, MatchOutput, MatchPairing, MatchTier};
 use crate::model::Callable;
 use crate::policy::diagnostics::{
     BaseCallable, PolicyDiagnostic, CODE_COMPLEXITY_ABOVE_THRESHOLD, CODE_COMPLEXITY_INCREASED,
@@ -188,12 +188,8 @@ impl<'a> Classifier<'a> {
             .get(callable_ref.index)
     }
 
-    fn base_set(&self, members: &[CallableRef]) -> BaseSet {
-        BaseSet::new(
-            members
-                .iter()
-                .filter_map(|member| self.base_callable(member)),
-        )
+    fn base_set<'r>(&self, members: impl Iterator<Item = &'r CallableRef>) -> BaseSet {
+        BaseSet::new(members.filter_map(|member| self.base_callable(member)))
     }
 
     fn push(
@@ -300,8 +296,12 @@ pub fn classify(
     };
 
     let mut positional: HashMap<(&RepoPath, usize), &CallableRef> = HashMap::new();
+    let mut tier3_matched_bases: HashSet<(&RepoPath, usize)> = HashSet::new();
     for found in &matched.matches {
         mark(&found.candidate);
+        if found.tier == MatchTier::BodyFingerprint {
+            tier3_matched_bases.insert((&found.base.path, found.base.index));
+        }
         match found.pairing {
             MatchPairing::FingerprintExact => {
                 classifier.pair(&found.candidate, Some(&found.base));
@@ -315,8 +315,13 @@ pub fn classify(
     let mut remainder_sets: Vec<BaseSet> = Vec::with_capacity(matched.positional_remainders.len());
     let mut surplus: HashMap<(&RepoPath, usize), usize> = HashMap::new();
     for (set_index, remainder) in matched.positional_remainders.iter().enumerate() {
-        let set = classifier.base_set(&remainder.base);
-        let unmatched_possible = remainder.candidate.len() > remainder.base.len();
+        let options: Vec<&CallableRef> = remainder
+            .base
+            .iter()
+            .filter(|base_ref| !tier3_matched_bases.contains(&(&base_ref.path, base_ref.index)))
+            .collect();
+        let set = classifier.base_set(options.iter().copied());
+        let unmatched_possible = remainder.candidate.len() > options.len();
         for candidate_ref in &remainder.candidate {
             let key = (&candidate_ref.path, candidate_ref.index);
             match positional.remove(&key) {
@@ -339,7 +344,7 @@ pub fn classify(
     }
 
     for ambiguity in &matched.ambiguities {
-        let set = classifier.base_set(&ambiguity.base);
+        let set = classifier.base_set(ambiguity.base.iter());
         let unmatched_possible = ambiguity.candidate.len() > ambiguity.base.len();
         for (position, candidate_ref) in ambiguity.candidate.iter().enumerate() {
             mark(candidate_ref);
