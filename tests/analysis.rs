@@ -257,3 +257,32 @@ fn test_callable_identities_and_fingerprints_match_the_identity_module() {
         );
     }
 }
+
+fn fingerprint_with_body_span(
+    analysis: &FileAnalysis,
+    source: &str,
+    body_span: nsd::ir::Span,
+) -> String {
+    let mut callable = analysis.ir.callables[0].clone();
+    callable.body_span = body_span;
+    identity::body_fingerprint(&analysis.ir, &callable, source)
+}
+
+fn span(start_byte: u32, end_byte: u32) -> nsd::ir::Span {
+    nsd::ir::Span {
+        start_byte,
+        end_byte,
+        start_line: 1,
+        end_line: 1,
+    }
+}
+
+#[test]
+fn test_bodies_without_an_ir_subtree_share_one_fingerprint() {
+    let source = "class C { int m() { return 1; } }";
+    let analysis = analyze_text("C.java", source);
+    let past_source = fingerprint_with_body_span(&analysis, source, span(9_000, 9_010));
+    let further_past = fingerprint_with_body_span(&analysis, source, span(70_000, 70_001));
+    assert_eq!(past_source, further_past);
+    assert_ne!(past_source, analysis.callables[0].body_fingerprint);
+}
