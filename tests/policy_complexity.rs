@@ -770,3 +770,16 @@ fn test_a_tier3_matched_base_leaves_the_remainder_options() {
 
     assert_eq!(codes(&diagnostics), vec![]);
 }
+
+#[test]
+fn test_an_unmatched_surplus_base_stays_a_remainder_option() {
+    let diagnostics = run(
+        &[(
+            "A.java",
+            vec![spec("cb", "x", 20, 10), spec("cb", "y", 12, 10)],
+        )],
+        &[("A.java", vec![spec("cb", "x2", 20, 10)])],
+    );
+
+    assert_eq!(codes(&diagnostics), vec![(CODE_MATCH_AMBIGUITY, "cb")]);
+}
