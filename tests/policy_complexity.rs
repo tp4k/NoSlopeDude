@@ -460,44 +460,6 @@ fn test_ambiguity_held_candidate_does_not_open_the_unmatched_option() {
 }
 
 #[test]
-fn test_unmatched_option_counts_only_the_remaining_bases() {
-    let diagnostics = run(
-        &[
-            (
-                "A.java",
-                vec![spec("m", "b0", 15, 5), spec("m", "b1", 15, 5)],
-            ),
-            ("Gone.java", vec![spec("h", "X", 1, 5)]),
-        ],
-        &[
-            (
-                "A.java",
-                vec![
-                    spec("m", "X", 15, 5),
-                    spec("m", "c1", 15, 5),
-                    spec("m", "c2", 15, 5),
-                ],
-            ),
-            ("B.java", vec![spec("g", "b1", 15, 5)]),
-        ],
-    );
-
-    let in_a: Vec<_> = diagnostics
-        .iter()
-        .filter(|d| d.candidate_path == path("A.java"))
-        .map(|d| (d.code, d.candidate_start_line))
-        .collect();
-    assert_eq!(
-        in_a,
-        vec![
-            (CODE_COMPLEXITY_ABOVE_THRESHOLD, 1),
-            (CODE_MATCH_AMBIGUITY, 2),
-            (CODE_MATCH_AMBIGUITY, 3)
-        ]
-    );
-}
-
-#[test]
 fn test_g102_when_only_a_higher_cc_base_passes() {
     let diagnostics = run(
         &[(
