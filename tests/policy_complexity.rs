@@ -20,7 +20,10 @@ use nsd::identity::{CallableIdentity, OwnerDigest};
 use nsd::ir::CallableKind;
 use nsd::model::{Callable, LanguageFamily};
 use nsd::policy::complexity::{classify, FileMetrics};
-use nsd::policy::diagnostics::{PolicyDiagnostic, CODE_E101, CODE_E102, CODE_G102};
+use nsd::policy::diagnostics::{
+    PolicyDiagnostic, CODE_COMPLEXITY_ABOVE_THRESHOLD, CODE_COMPLEXITY_INCREASED,
+    CODE_MATCH_AMBIGUITY,
+};
 
 const MODE_REGULAR: i32 = 0o100644;
 const BOUND: Duration = Duration::from_secs(30);
@@ -135,7 +138,10 @@ fn edited(base_cc: u32, base_sloc: usize, cc: u32, sloc: usize) -> Vec<PolicyDia
 fn test_added_callable_above_threshold_raises_e101() {
     let diagnostics = run(&[], &[("A.java", vec![spec("m", "f", 11, 5)])]);
 
-    assert_eq!(codes(&diagnostics), vec![(CODE_E101, "m")]);
+    assert_eq!(
+        codes(&diagnostics),
+        vec![(CODE_COMPLEXITY_ABOVE_THRESHOLD, "m")]
+    );
     assert_eq!(diagnostics[0].candidate_path, path("A.java"));
     assert_eq!(diagnostics[0].base, None);
 }
@@ -150,7 +156,10 @@ fn test_cc_10_is_not_above_threshold() {
 fn test_crossing_the_threshold_raises_e101() {
     let diagnostics = edited(10, 5, 11, 5);
 
-    assert_eq!(codes(&diagnostics), vec![(CODE_E101, "m")]);
+    assert_eq!(
+        codes(&diagnostics),
+        vec![(CODE_COMPLEXITY_ABOVE_THRESHOLD, "m")]
+    );
     let base = diagnostics[0].base.as_ref().expect("a paired E101");
     assert_eq!((base.cc, base.sloc), (10, 5));
 }
@@ -159,7 +168,7 @@ fn test_crossing_the_threshold_raises_e101() {
 fn test_cc_increase_above_threshold_raises_e102() {
     let diagnostics = edited(11, 50, 12, 40);
 
-    assert_eq!(codes(&diagnostics), vec![(CODE_E102, "m")]);
+    assert_eq!(codes(&diagnostics), vec![(CODE_COMPLEXITY_INCREASED, "m")]);
     let base = diagnostics[0].base.as_ref().expect("E102 has a base");
     assert_eq!(base.path, path("A.java"));
     assert_eq!((base.cc, base.sloc), (11, 50));
@@ -172,19 +181,28 @@ fn test_base_sloc_9_plus_1_passes() {
 
 #[test]
 fn test_base_sloc_9_plus_2_fails() {
-    assert_eq!(codes(&edited(11, 9, 11, 11)), vec![(CODE_E102, "m")]);
+    assert_eq!(
+        codes(&edited(11, 9, 11, 11)),
+        vec![(CODE_COMPLEXITY_INCREASED, "m")]
+    );
 }
 
 #[test]
 fn test_base_sloc_100_plus_10_passes_plus_11_fails() {
     assert!(edited(11, 100, 11, 110).is_empty());
-    assert_eq!(codes(&edited(11, 100, 11, 111)), vec![(CODE_E102, "m")]);
+    assert_eq!(
+        codes(&edited(11, 100, 11, 111)),
+        vec![(CODE_COMPLEXITY_INCREASED, "m")]
+    );
 }
 
 #[test]
 fn test_base_sloc_0_plus_1_passes_plus_2_fails() {
     assert!(edited(11, 0, 11, 1).is_empty());
-    assert_eq!(codes(&edited(11, 0, 11, 2)), vec![(CODE_E102, "m")]);
+    assert_eq!(
+        codes(&edited(11, 0, 11, 2)),
+        vec![(CODE_COMPLEXITY_INCREASED, "m")]
+    );
 }
 
 #[test]
@@ -217,12 +235,12 @@ fn test_off_disables_the_code() {
     assert!(run_with(&crossing.0, &crossing.1, &e101_off).is_empty());
     assert_eq!(
         codes(&run_with(&crossing.0, &crossing.1, &e102_off)),
-        vec![(CODE_E101, "m")]
+        vec![(CODE_COMPLEXITY_ABOVE_THRESHOLD, "m")]
     );
     assert!(run_with(&growing.0, &growing.1, &e102_off).is_empty());
     assert_eq!(
         codes(&run_with(&growing.0, &growing.1, &e101_off)),
-        vec![(CODE_E102, "m")]
+        vec![(CODE_COMPLEXITY_INCREASED, "m")]
     );
 }
 
@@ -240,13 +258,16 @@ fn test_positional_fallback_that_could_hide_a_regression_raises_g102() {
         &[("A.java", vec![spec("cb", "y2", 20, 10)])],
     );
 
-    assert_eq!(codes(&diagnostics), vec![(CODE_G102, "cb")]);
+    assert_eq!(codes(&diagnostics), vec![(CODE_MATCH_AMBIGUITY, "cb")]);
 }
 
 #[test]
 fn test_one_to_one_positional_remainder_never_raises_g102() {
     assert!(edited(12, 10, 12, 10).is_empty());
-    assert_eq!(codes(&edited(12, 10, 13, 10)), vec![(CODE_E102, "m")]);
+    assert_eq!(
+        codes(&edited(12, 10, 13, 10)),
+        vec![(CODE_COMPLEXITY_INCREASED, "m")]
+    );
 }
 
 fn moved_bucket(base_count: usize, candidate_count: usize, cc: u32) -> Vec<PolicyDiagnostic> {
@@ -283,7 +304,10 @@ fn test_tier3_bucket_that_could_change_a_verdict_raises_g102() {
 
     assert_eq!(
         codes(&diagnostics),
-        vec![(CODE_G102, "new0"), (CODE_G102, "new1")]
+        vec![
+            (CODE_MATCH_AMBIGUITY, "new0"),
+            (CODE_MATCH_AMBIGUITY, "new1")
+        ]
     );
 }
 
@@ -309,7 +333,10 @@ fn test_zero_to_two_bucket_raises_plain_e101() {
 
     assert_eq!(
         codes(&diagnostics),
-        vec![(CODE_E101, "new0"), (CODE_E101, "new1")]
+        vec![
+            (CODE_COMPLEXITY_ABOVE_THRESHOLD, "new0"),
+            (CODE_COMPLEXITY_ABOVE_THRESHOLD, "new1")
+        ]
     );
 }
 
@@ -337,9 +364,18 @@ fn test_exact_fingerprint_pair_uses_the_same_thresholds() {
         )
     };
 
-    assert_eq!(codes(&exact(10, 5, 11, 5)), vec![(CODE_E101, "m")]);
-    assert_eq!(codes(&exact(11, 50, 12, 40)), vec![(CODE_E102, "m")]);
-    assert_eq!(codes(&exact(11, 9, 11, 11)), vec![(CODE_E102, "m")]);
+    assert_eq!(
+        codes(&exact(10, 5, 11, 5)),
+        vec![(CODE_COMPLEXITY_ABOVE_THRESHOLD, "m")]
+    );
+    assert_eq!(
+        codes(&exact(11, 50, 12, 40)),
+        vec![(CODE_COMPLEXITY_INCREASED, "m")]
+    );
+    assert_eq!(
+        codes(&exact(11, 9, 11, 11)),
+        vec![(CODE_COMPLEXITY_INCREASED, "m")]
+    );
     assert!(exact(11, 9, 11, 10).is_empty());
 }
 
@@ -361,7 +397,7 @@ fn test_positional_remainder_with_a_surplus_candidate_raises_g102() {
         )],
     );
 
-    assert_eq!(codes(&diagnostics)[0], (CODE_G102, "cb"));
+    assert_eq!(codes(&diagnostics)[0], (CODE_MATCH_AMBIGUITY, "cb"));
     assert_eq!(diagnostics[0].candidate_start_line, 1);
 }
 
@@ -375,7 +411,7 @@ fn test_g102_when_only_a_higher_cc_base_passes() {
         &[("A.java", vec![spec("cb", "new", 15, 100)])],
     );
 
-    assert_eq!(codes(&diagnostics), vec![(CODE_G102, "cb")]);
+    assert_eq!(codes(&diagnostics), vec![(CODE_MATCH_AMBIGUITY, "cb")]);
 }
 
 #[test]
@@ -399,7 +435,10 @@ fn test_tier3_bucket_agreeing_verdict_pairs_members_in_order() {
 
     assert_eq!(
         codes(&diagnostics),
-        vec![(CODE_E102, "new0"), (CODE_E102, "new1")]
+        vec![
+            (CODE_COMPLEXITY_INCREASED, "new0"),
+            (CODE_COMPLEXITY_INCREASED, "new1")
+        ]
     );
     let base_lines: Vec<usize> = diagnostics
         .iter()
@@ -450,7 +489,9 @@ fn test_large_same_key_group_classifies_in_bounded_time() {
     );
 
     assert_eq!(diagnostics.len(), LARGE_GROUP);
-    assert!(diagnostics.iter().all(|d| d.code == CODE_E102));
+    assert!(diagnostics
+        .iter()
+        .all(|d| d.code == CODE_COMPLEXITY_INCREASED));
 }
 
 #[test]
@@ -461,7 +502,9 @@ fn test_large_tier3_bucket_classifies_in_bounded_time() {
     );
 
     assert_eq!(diagnostics.len(), LARGE_GROUP);
-    assert!(diagnostics.iter().all(|d| d.code == CODE_E102));
+    assert!(diagnostics
+        .iter()
+        .all(|d| d.code == CODE_COMPLEXITY_INCREASED));
 }
 
 #[test]
@@ -498,11 +541,11 @@ fn test_output_is_deterministic_under_input_order() {
     assert_eq!(
         codes(&forward),
         vec![
-            (CODE_E102, "grow"),
-            (CODE_G102, "cb"),
-            (CODE_E101, "fresh"),
-            (CODE_E101, "one"),
-            (CODE_E101, "two"),
+            (CODE_COMPLEXITY_INCREASED, "grow"),
+            (CODE_MATCH_AMBIGUITY, "cb"),
+            (CODE_COMPLEXITY_ABOVE_THRESHOLD, "fresh"),
+            (CODE_COMPLEXITY_ABOVE_THRESHOLD, "one"),
+            (CODE_COMPLEXITY_ABOVE_THRESHOLD, "two"),
         ]
     );
 }
@@ -624,7 +667,10 @@ fn scratch_cc3_to_cc11(policy: &PolicyConfig) -> Vec<PolicyDiagnostic> {
 fn test_scratch_repo_new_complex_method_raises_e101() {
     let diagnostics = scratch_cc3_to_cc11(&default_policy());
 
-    assert_eq!(codes(&diagnostics), vec![(CODE_E101, "run")]);
+    assert_eq!(
+        codes(&diagnostics),
+        vec![(CODE_COMPLEXITY_ABOVE_THRESHOLD, "run")]
+    );
     assert_eq!(diagnostics[0].candidate_path, path("Widget.java"));
     let base = diagnostics[0].base.as_ref().expect("the method was paired");
     assert_eq!(base.cc, 3);

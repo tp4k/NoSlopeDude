@@ -4,9 +4,17 @@
 
 use crate::git::path::RepoPath;
 
-pub const CODE_E101: &str = "NSD-E101";
-pub const CODE_E102: &str = "NSD-E102";
-pub const CODE_G102: &str = "NSD-G102";
+/// A candidate callable has `CC > 10` while its matched base callable is
+/// absent or has `CC <= 10` (`nsd-plan-final.md` *Diagnostics*, `NSD-E101`).
+pub const CODE_COMPLEXITY_ABOVE_THRESHOLD: &str = "NSD-E101";
+
+/// Base and candidate both have `CC > 10`, and CC increased or SLOC grew past
+/// `max(1, floor(base_sloc/10))` (`NSD-E102`).
+pub const CODE_COMPLEXITY_INCREASED: &str = "NSD-E102";
+
+/// A callable-match ambiguity that could change an E101/E102 verdict
+/// (`NSD-G102`).
+pub const CODE_MATCH_AMBIGUITY: &str = "NSD-G102";
 
 /// The matched base callable behind a diagnostic.
 #[derive(Debug, Clone, PartialEq, Eq)]

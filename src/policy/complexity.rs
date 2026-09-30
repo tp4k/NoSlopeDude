@@ -17,7 +17,10 @@ use crate::config::{PolicyConfig, Severity};
 use crate::git::path::RepoPath;
 use crate::identity::matching::{CallableRef, MatchOutput, MatchPairing};
 use crate::model::Callable;
-use crate::policy::diagnostics::{BaseCallable, PolicyDiagnostic, CODE_E101, CODE_E102, CODE_G102};
+use crate::policy::diagnostics::{
+    BaseCallable, PolicyDiagnostic, CODE_COMPLEXITY_ABOVE_THRESHOLD, CODE_COMPLEXITY_INCREASED,
+    CODE_MATCH_AMBIGUITY,
+};
 
 /// The immutable policy CC threshold (`nsd-plan-final.md` *CLI and
 /// configuration*); unrelated to the D13 erosion-mass cut.
@@ -230,8 +233,8 @@ impl<'a> Classifier<'a> {
         let base_callable = base.and_then(|base_ref| self.base_callable(base_ref));
         let code = match effective(raw_verdict(candidate, base_callable), self.policy) {
             Verdict::Pass => return,
-            Verdict::E101 => CODE_E101,
-            Verdict::E102 => CODE_E102,
+            Verdict::E101 => CODE_COMPLEXITY_ABOVE_THRESHOLD,
+            Verdict::E102 => CODE_COMPLEXITY_INCREASED,
         };
         self.push(code, candidate_ref, candidate, base);
     }
@@ -251,12 +254,12 @@ impl<'a> Classifier<'a> {
         };
         let code = match set.common_verdict(candidate, unmatched_possible, self.policy) {
             None => {
-                self.push(CODE_G102, candidate_ref, candidate, None);
+                self.push(CODE_MATCH_AMBIGUITY, candidate_ref, candidate, None);
                 return;
             }
             Some(Verdict::Pass) => return,
-            Some(Verdict::E101) => CODE_E101,
-            Some(Verdict::E102) => CODE_E102,
+            Some(Verdict::E101) => CODE_COMPLEXITY_ABOVE_THRESHOLD,
+            Some(Verdict::E102) => CODE_COMPLEXITY_INCREASED,
         };
         self.push(code, candidate_ref, candidate, designated);
     }
