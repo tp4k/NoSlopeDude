@@ -51,3 +51,21 @@ pub struct FindingDiagnostic {
     pub candidate_start_line: usize,
     pub candidate_end_line: usize,
 }
+
+/// A candidate finding is suppressed by a directive that is new, or whose
+/// matched base finding was not suppressed (`NSD-S101`).
+pub const CODE_NEW_SUPPRESSION: &str = "NSD-S101";
+
+/// An invalid, unknown-rule or unused suppression directive (`NSD-S102`).
+pub const CODE_INVALID_SUPPRESSION: &str = "NSD-S102";
+
+/// One S101 or S102 about a candidate directive. `rule_id` is the directive's
+/// target for an S101, and for an S102 only when the directive names a valid
+/// rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuppressionDiagnostic {
+    pub code: &'static str,
+    pub rule_id: Option<RuleId>,
+    pub candidate_path: RepoPath,
+    pub directive_line: usize,
+}

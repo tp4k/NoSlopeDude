@@ -25,3 +25,4 @@ pub mod metrics;
 pub mod parse;
 pub mod report;
 pub mod rules;
+pub mod suppress;
