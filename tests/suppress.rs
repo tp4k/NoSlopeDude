@@ -560,3 +560,49 @@ fn test_single_snapshot_reports_every_invalid_and_unused_directive() {
     ];
     assert_eq!(found, expected);
 }
+
+#[test]
+fn test_legacy_directives_in_a_renamed_file_are_tolerated() {
+    let (_dir, repo) = common::init_repo();
+    let text = run_with(&[
+        "// nsd-ignore[NSD-E101]: legacy",
+        "work();",
+        DIRECTIVE,
+        CATCH,
+    ]);
+    let entry = |name: &str| {
+        vec![(
+            name.as_bytes().to_vec(),
+            MODE_REGULAR,
+            text.clone().into_bytes(),
+        )]
+    };
+    let base = common::commit_entries(&repo, &entry("Widget.java"));
+    let candidate = common::commit_entries(&repo, &entry("Renamed.java"));
+
+    let output = evaluate(&repo, base, candidate);
+
+    assert_eq!(output.diagnostics, vec![]);
+    assert!(output.findings.is_empty());
+}
+
+#[test]
+fn test_partial_rule_or_missing_colon_is_invalid() {
+    for directive in [
+        "// nsd-ignore[EMPTY-CATCH]: x",
+        "// nsd-ignore[JAVA-EMPTY-CATCH] legacy api",
+    ] {
+        let (output, text) = pair(&["work();"], &[directive, CATCH]);
+
+        assert_eq!(
+            sites(&output),
+            vec![(CODE_INVALID_SUPPRESSION, None, line_of(&text, "nsd-ignore"))],
+            "{directive}"
+        );
+        assert_eq!(
+            v101_lines(&output),
+            vec![line_of(&text, CATCH)],
+            "{directive}"
+        );
+    }
+}
