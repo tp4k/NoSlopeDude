@@ -304,11 +304,10 @@ pub fn match_callables(
 }
 
 /// Lets a candidate that only a same-key positional fallback paired take the
-/// tier-3 pair instead, when its fingerprint equals exactly one base that
-/// tiers 1-2 left unmatched and no other candidate competes for it. The
-/// group's remaining candidates are then positionally re-paired with its base
-/// list, so the result does not depend on the candidates' source order. A 1:1
-/// group is a keyed edit, not an ambiguity, and is left alone.
+/// tier-3 pair instead, when its fingerprint equals a base that tiers 1-2 left
+/// unmatched. The group's remaining candidates are then positionally re-paired
+/// with its base list, so the result does not depend on the candidates' source
+/// order. A 1:1 group is a keyed edit, not an ambiguity, and is left alone.
 fn displace_positional_fallbacks(
     base: &[FileCallables],
     candidate: &[FileCallables],
@@ -341,22 +340,6 @@ fn displace_positional_fallbacks(
             }
         }
     }
-    let mut competing: HashMap<&str, usize> = HashMap::new();
-    for (file_index, file) in candidate.iter().enumerate() {
-        for (index, (_, fingerprint)) in file.callables.iter().enumerate() {
-            if !candidate_matched[file_index][index] {
-                *competing.entry(fingerprint.as_str()).or_default() += 1;
-            }
-        }
-    }
-    for found in matches.iter() {
-        if found.pairing == MatchPairing::Positional {
-            *competing
-                .entry(candidate_fingerprint(&found.candidate))
-                .or_default() += 1;
-        }
-    }
-
     let displaced_in = |remainder: &PositionalRemainder| -> HashSet<usize> {
         if remainder.base.len() == 1 && remainder.candidate.len() == 1 {
             return HashSet::new();
@@ -364,11 +347,7 @@ fn displace_positional_fallbacks(
         remainder
             .candidate
             .iter()
-            .filter(|found| {
-                let fingerprint = candidate_fingerprint(found);
-                unmatched_bases.get(fingerprint) == Some(&1)
-                    && competing.get(fingerprint) == Some(&1)
-            })
+            .filter(|found| unmatched_bases.contains_key(candidate_fingerprint(found)))
             .map(|found| found.index)
             .collect()
     };

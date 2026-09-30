@@ -21,7 +21,8 @@ use std::path::PathBuf;
 use nsd::git::diff::{self, Change};
 use nsd::git::path::RepoPath;
 use nsd::identity::matching::{
-    match_callables, CallableRef, FileCallables, MatchPairing, MatchTier, PositionalRemainder,
+    match_callables, Ambiguity, CallableRef, FileCallables, MatchPairing, MatchTier,
+    PositionalRemainder,
 };
 use nsd::identity::{self, CallableIdentity, OwnerDigest};
 use nsd::ir::CallableKind;
@@ -971,10 +972,10 @@ fn test_key_pairs_are_never_displaced_by_a_tier3_fingerprint() {
     );
 }
 
-/// Two candidates with the same body compete for one unmatched base: tier 3
-/// would see a 1:2 bucket, so neither is displaced out of the positional pairs.
+/// Two candidates with the same body reach one unmatched base: tier 3 sees a
+/// 1:2 bucket and leaves it an ambiguity instead of pairing either.
 #[test]
-fn test_competing_positional_candidates_are_not_displaced() {
+fn test_competing_positional_candidates_enter_the_tier3_bucket() {
     let callback = synth_identity("cb", &[]);
     let moved = synth_identity("moved", &[]);
     let base = vec![
@@ -997,19 +998,13 @@ fn test_competing_positional_candidates_are_not_displaced() {
 
     let output = match_callables(&base, &candidate, &[]);
 
+    assert!(output.matches.is_empty(), "{output:#?}");
     assert_eq!(
-        match_summary(&output, &candidate),
-        vec![
-            (
-                callable_ref("A.java", 0),
-                "blake3:y".to_string(),
-                MatchTier::Structural
-            ),
-            (
-                callable_ref("A.java", 1),
-                "blake3:y".to_string(),
-                MatchTier::Structural
-            ),
-        ]
+        output.ambiguities,
+        vec![Ambiguity {
+            fingerprint: "blake3:y".to_string(),
+            base: vec![callable_ref("B.java", 0)],
+            candidate: vec![callable_ref("A.java", 0), callable_ref("A.java", 1)],
+        }]
     );
 }
