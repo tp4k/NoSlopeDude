@@ -931,3 +931,42 @@ fn test_positional_candidate_takes_its_tier3_base_in_either_order() {
     assert_eq!(match_summary(&from_y_first, &y_first), expected);
     assert!(from_y_first.ambiguities.is_empty(), "{from_y_first:#?}");
 }
+
+/// Tier 1 pairs that are not positional fallback are never displaced by a
+/// same-fingerprint base elsewhere: a fingerprint-exact same-key pair, and a
+/// 1:1 same-key edit whose new body equals another base's body.
+#[test]
+fn test_key_pairs_are_never_displaced_by_a_tier3_fingerprint() {
+    let keyed = synth_identity("m", &[]);
+    let other = synth_identity("n", &[]);
+    let base = vec![
+        synth_file("A.java", &[(keyed.clone(), "blake3:f")]),
+        synth_file("B.java", &[(other.clone(), "blake3:f")]),
+    ];
+    let exact = vec![synth_file("A.java", &[(keyed.clone(), "blake3:f")])];
+    let edit_base = vec![
+        synth_file("A.java", &[(keyed.clone(), "blake3:old")]),
+        synth_file("B.java", &[(other.clone(), "blake3:f")]),
+    ];
+    let edited = vec![synth_file("A.java", &[(keyed.clone(), "blake3:f")])];
+
+    let exact_output = match_callables(&base, &exact, &[]);
+    let edited_output = match_callables(&edit_base, &edited, &[]);
+
+    assert_eq!(
+        match_summary(&exact_output, &exact),
+        vec![(
+            callable_ref("A.java", 0),
+            "blake3:f".to_string(),
+            MatchTier::Structural
+        )]
+    );
+    assert_eq!(
+        match_summary(&edited_output, &edited),
+        vec![(
+            callable_ref("A.java", 0),
+            "blake3:f".to_string(),
+            MatchTier::Structural
+        )]
+    );
+}
