@@ -58,20 +58,21 @@ pub struct FileAnalysis {
     pub findings: Vec<AnalyzedFinding>,
 }
 
-/// Analyzes one file from its repo path and bytes.
+/// Analyzes one file from its repo path and bytes. Checks run in the order
+/// extension, path, size, encoding, so a skippable binary never fails closed.
 pub fn analyze_file(
     relative_path: &Path,
     bytes: &[u8],
 ) -> Result<FileAnalysis, UnanalyzableReason> {
-    relative_path
-        .to_str()
-        .ok_or(UnanalyzableReason::NonUtf8Path)?;
     let extension = relative_path
         .extension()
         .and_then(|extension| extension.to_str())
         .unwrap_or("");
     let language = LanguageFamily::from_extension(extension)
         .ok_or(UnanalyzableReason::UnsupportedExtension)?;
+    relative_path
+        .to_str()
+        .ok_or(UnanalyzableReason::NonUtf8Path)?;
     if bytes.len() as u64 > SOURCE_CEILING_BYTES {
         return Err(UnanalyzableReason::TooLarge);
     }
