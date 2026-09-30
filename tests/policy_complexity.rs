@@ -801,3 +801,19 @@ fn test_a_tier3_matched_candidate_leaves_the_unmatched_option() {
     assert_eq!(codes(&x_first), vec![]);
     assert_eq!(codes(&y_first), vec![]);
 }
+
+#[test]
+fn test_an_unmatched_extra_candidate_keeps_the_unmatched_option() {
+    let diagnostics = run(
+        &[("A.java", vec![spec("cb", "x", 20, 10)])],
+        &[(
+            "A.java",
+            vec![spec("cb", "x2", 20, 10), spec("cb", "z", 12, 10)],
+        )],
+    );
+
+    assert_eq!(
+        codes(&diagnostics),
+        vec![(CODE_MATCH_AMBIGUITY, "cb"), (CODE_MATCH_AMBIGUITY, "cb")]
+    );
+}
