@@ -297,10 +297,12 @@ pub fn classify(
 
     let mut positional: HashMap<(&RepoPath, usize), &CallableRef> = HashMap::new();
     let mut tier3_matched_bases: HashSet<(&RepoPath, usize)> = HashSet::new();
+    let mut tier3_matched_candidates: HashSet<(&RepoPath, usize)> = HashSet::new();
     for found in &matched.matches {
         mark(&found.candidate);
         if found.tier == MatchTier::BodyFingerprint {
             tier3_matched_bases.insert((&found.base.path, found.base.index));
+            tier3_matched_candidates.insert((&found.candidate.path, found.candidate.index));
         }
         match found.pairing {
             MatchPairing::FingerprintExact => {
@@ -321,7 +323,14 @@ pub fn classify(
             .filter(|base_ref| !tier3_matched_bases.contains(&(&base_ref.path, base_ref.index)))
             .collect();
         let set = classifier.base_set(options.iter().copied());
-        let unmatched_possible = remainder.candidate.len() > remainder.base.len();
+        let open_candidates = remainder
+            .candidate
+            .iter()
+            .filter(|candidate_ref| {
+                !tier3_matched_candidates.contains(&(&candidate_ref.path, candidate_ref.index))
+            })
+            .count();
+        let unmatched_possible = open_candidates > remainder.base.len();
         for candidate_ref in &remainder.candidate {
             let key = (&candidate_ref.path, candidate_ref.index);
             match positional.remove(&key) {
