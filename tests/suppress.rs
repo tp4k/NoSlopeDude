@@ -7,6 +7,7 @@ mod common;
 
 use std::collections::BTreeSet;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use git2::{Oid, Repository};
 use nsd::analysis::{analyze_file, FileAnalysis};
@@ -27,6 +28,10 @@ const PAD_METHODS: usize = 10;
 const FILE: &str = "Widget.java";
 const CATCH: &str = "try { work(); } catch (Exception e) { }";
 const OTHER_CATCH: &str = "try { other(); } catch (Exception e) { }";
+const SCALE_BOUND: Duration = Duration::from_secs(1);
+const SCALE_PAIRS: usize = 14_000;
+const SCALE_DIRECTIVE: &str = "// nsd-ignore[JAVA-EMPTY-CATCH]: x";
+const SCALE_CATCH: &str = "try{a();}catch(Exception e){}";
 const DIRECTIVE: &str = "// nsd-ignore[JAVA-EMPTY-CATCH]: legacy API";
 
 // ---------------------------------------------------------------------
@@ -694,4 +699,32 @@ fn test_directive_on_a_later_block_comment_line_is_invalid() {
         vec![(CODE_INVALID_SUPPRESSION, None, line_of(&text, "nsd-ignore"))]
     );
     assert_eq!(v101_lines(&output), vec![line_of(&text, CATCH)]);
+}
+
+#[test]
+fn test_scan_with_many_directives_and_findings_is_not_quadratic() {
+    let mut text = String::from("class W { void run() {\n");
+    for _ in 0..SCALE_PAIRS {
+        text.push_str(SCALE_DIRECTIVE);
+        text.push('\n');
+        text.push_str(SCALE_CATCH);
+        text.push('\n');
+    }
+    text.push_str(SCALE_DIRECTIVE);
+    text.push_str("\ntail();\n} }\n");
+    let analysis = analyze_file(Path::new(FILE), text.as_bytes()).expect("analyze file");
+    let files = [FindingFile {
+        path: RepoPath::from_bytes(FILE.as_bytes().to_vec()),
+        source: text.as_bytes(),
+        analysis: &analysis,
+    }];
+
+    let started = Instant::now();
+    let found = scan_suppressions(&files, &Config::default().policy);
+    let elapsed = started.elapsed();
+
+    assert!(elapsed < SCALE_BOUND, "scan took {elapsed:?}");
+    let sites: Vec<(&str, usize)> = found.iter().map(|d| (d.code, d.directive_line)).collect();
+    let unused = line_of(&text, "tail();") - 1;
+    assert_eq!(sites, vec![(CODE_INVALID_SUPPRESSION, unused)]);
 }
