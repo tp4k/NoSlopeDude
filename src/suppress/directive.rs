@@ -46,25 +46,34 @@ fn directive(node: &IrNode, source: &[u8]) -> Option<Directive> {
     let start = node.span.start_byte as usize;
     let bytes = source.get(start..node.span.end_byte as usize)?;
     let text = String::from_utf8_lossy(bytes);
-    let (opener, body) = if let Some(body) = text.strip_prefix(LINE_COMMENT_OPENER) {
-        (LINE_COMMENT_OPENER, body)
+    let (form, offset) = if let Some(body) = text.strip_prefix(LINE_COMMENT_OPENER) {
+        let rest = body.trim_start().strip_prefix(DIRECTIVE_PREFIX)?;
+        let valid = is_standalone(source, start);
+        let form = match parse_rule(rest) {
+            Some(rule) if valid => Form::Valid(rule),
+            _ => Form::Invalid,
+        };
+        (form, 0)
     } else {
         let body = text.strip_prefix(BLOCK_COMMENT_OPENER)?;
-        (
-            BLOCK_COMMENT_OPENER,
-            body.trim_start_matches(BLOCK_DOC_MARK),
-        )
-    };
-    let rest = body.trim_start().strip_prefix(DIRECTIVE_PREFIX)?;
-    let valid = opener == LINE_COMMENT_OPENER && is_standalone(source, start);
-    let form = match parse_rule(rest) {
-        Some(rule) if valid => Form::Valid(rule),
-        _ => Form::Invalid,
+        (Form::Invalid, block_directive_offset(body)?)
     };
     Some(Directive {
-        line: node.span.start_line as usize,
+        line: node.span.start_line as usize + offset,
         text: text.into_owned(),
         form,
+    })
+}
+
+/// The line offset, within a block comment whose opener is already stripped,
+/// of the first line that begins with `nsd-ignore` after its optional leading
+/// whitespace and `*`s.
+fn block_directive_offset(body: &str) -> Option<usize> {
+    body.lines().position(|line| {
+        line.trim_start()
+            .trim_start_matches(BLOCK_DOC_MARK)
+            .trim_start()
+            .starts_with(DIRECTIVE_PREFIX)
     })
 }
 
