@@ -622,3 +622,24 @@ fn test_many_identical_findings_match_in_bounded_time() {
     assert_eq!(output.pairs.len(), LARGE_GROUP);
     assert!(output.diagnostics.is_empty());
 }
+
+#[test]
+fn test_pairs_name_the_base_and_candidate_file_across_a_rename() {
+    let pads: Vec<String> = (0..PAD_METHODS)
+        .map(|k| method(&format!("pad{k}"), &["work();"]))
+        .collect();
+    let mut methods = pads;
+    methods.push(method("run", &["work();", CATCH]));
+    let text = class("Widget", &methods);
+    let (_dir, repo) = common::init_repo();
+    let base = commit(&repo, &[("Old.java", text.clone())]);
+    let candidate = commit(&repo, &[("New.java", text)]);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    assert_eq!(evaluation.output.pairs.len(), 1);
+    let pair = &evaluation.output.pairs[0];
+    assert_eq!(pair.base.path, path("Old.java"));
+    assert_eq!(pair.candidate.path, path("New.java"));
+    assert_eq!(pair.base.index, pair.candidate.index);
+}

@@ -172,7 +172,10 @@ pub fn match_findings<'a>(
         candidate.iter().map(|file| (&file.path, file)).collect();
     let mut line_maps: HashMap<&RepoPath, LineMap> = HashMap::new();
     for file in base {
-        if let Some(counter) = candidate_by_path.get(counterpart(&file.path)) {
+        let counter = candidate_by_path.get(counterpart(&file.path));
+        if let Some(counter) = counter.filter(|counter| {
+            !file.analysis.findings.is_empty() && !counter.analysis.findings.is_empty()
+        }) {
             line_maps.insert(&file.path, map_lines(file.source, counter.source)?);
         }
     }
