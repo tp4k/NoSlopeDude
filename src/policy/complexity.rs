@@ -330,7 +330,7 @@ pub fn classify(
                 !tier3_matched_candidates.contains(&(&candidate_ref.path, candidate_ref.index))
             })
             .count();
-        let unmatched_possible = open_candidates > remainder.base.len();
+        let unmatched_possible = open_candidates > options.len();
         for candidate_ref in &remainder.candidate {
             let key = (&candidate_ref.path, candidate_ref.index);
             match positional.remove(&key) {
