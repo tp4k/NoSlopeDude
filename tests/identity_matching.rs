@@ -1008,3 +1008,49 @@ fn test_competing_positional_candidates_enter_the_tier3_bucket() {
         }]
     );
 }
+
+/// A displacement inside a renamed file's positional group keeps the tier-2
+/// provenance on the re-paired candidate, in either source order.
+#[test]
+fn test_displacement_in_a_renamed_file_keeps_the_rename_tier() {
+    let callback = synth_identity("cb", &[]);
+    let moved = synth_identity("moved", &[]);
+    let base = vec![
+        synth_file("Old.java", &[(callback.clone(), "blake3:x")]),
+        synth_file("B.java", &[(moved.clone(), "blake3:y")]),
+    ];
+    let renamed = [Change::Renamed {
+        from: RepoPath::from_bytes(b"Old.java".to_vec()),
+        to: RepoPath::from_bytes(b"New.java".to_vec()),
+        kind: nsd::git::snapshot::EntryKind::Regular,
+        similarity: 100,
+    }];
+    let expected = vec![
+        (
+            callable_ref("B.java", 0),
+            "blake3:y".to_string(),
+            MatchTier::BodyFingerprint,
+        ),
+        (
+            callable_ref("Old.java", 0),
+            "blake3:x2".to_string(),
+            MatchTier::Rename,
+        ),
+    ];
+
+    for fingerprints in [["blake3:y", "blake3:x2"], ["blake3:x2", "blake3:y"]] {
+        let candidate = vec![synth_file(
+            "New.java",
+            &[
+                (callback.clone(), fingerprints[0]),
+                (callback.clone(), fingerprints[1]),
+            ],
+        )];
+        let output = match_callables(&base, &candidate, &renamed);
+        assert_eq!(
+            match_summary(&output, &candidate),
+            expected,
+            "{fingerprints:?}"
+        );
+    }
+}
