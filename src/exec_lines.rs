@@ -38,14 +38,11 @@ pub(crate) fn is_executable_leaf(node: Node, language: LanguageFamily) -> bool {
 }
 
 /// Iterative pre-order traversal via a single reused `TreeCursor` (no
-/// native call-stack growth): visits `root` and every descendant. Private
-/// to this module and, now that `collect_executable_lines` (the production
-/// caller) has moved to `rules::collect_ir_executable_lines`, the IR-native
-/// retarget of the same D11 rule, used only by the test helpers below —
-/// `#[cfg(test)]` reflects that honestly rather than leaving a
-/// production-only dead-code warning for `-D warnings` to catch.
+/// native call-stack growth): visits `root` and every descendant. The one
+/// copy shared by the `exec_lines`, `clones` and `lower` test helpers;
+/// `#[cfg(test)]` because nothing in production calls it.
 #[cfg(test)]
-fn for_each_descendant<'tree>(root: Node<'tree>, mut visit: impl FnMut(Node<'tree>)) {
+pub(crate) fn for_each_descendant<'tree>(root: Node<'tree>, mut visit: impl FnMut(Node<'tree>)) {
     let mut cursor = root.walk();
     loop {
         visit(cursor.node());

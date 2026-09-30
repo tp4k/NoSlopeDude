@@ -348,15 +348,6 @@ pub fn is_in_catch_body(node: &IrNode) -> bool {
     node.in_catch_body
 }
 
-/// The salvage query (WS-6 item 8, *Architecture* -> salvage row): whether
-/// `span` is provably clear of every typed damage span in `damage` -- `true`
-/// means the entity at `span` shares no byte with any damage and is safe to
-/// measure; `false` (including a merely partial overlap) is fail-closed: any
-/// residual damage keeps the whole entity out.
-pub fn is_clear_of_damage(span: Span, damage: &[DamageSpan]) -> bool {
-    !damage.iter().any(|entry| span.intersects(entry.span))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -414,19 +405,5 @@ mod tests {
     #[test]
     fn test_two_zero_width_spans_at_different_positions_do_not_intersect() {
         assert!(!span(5, 5).intersects(span(6, 6)));
-    }
-
-    #[test]
-    fn test_is_clear_of_damage_is_true_with_no_damage() {
-        assert!(is_clear_of_damage(span(0, 10), &[]));
-    }
-
-    #[test]
-    fn test_is_clear_of_damage_is_false_when_a_zero_width_damage_sits_at_the_boundary() {
-        let damage = [DamageSpan {
-            kind: DamageKind::Unclassified,
-            span: span(10, 10),
-        }];
-        assert!(!is_clear_of_damage(span(0, 10), &damage));
     }
 }

@@ -26,7 +26,7 @@ use rayon::prelude::*;
 use tree_sitter::Node;
 
 #[cfg(test)]
-use crate::exec_lines::is_comment_kind;
+use crate::exec_lines::{for_each_descendant, is_comment_kind};
 use crate::hashing::Digest;
 use crate::ir::IrNode;
 use crate::lower;
@@ -521,31 +521,5 @@ fn for_each_ir_node<'a>(root: &'a IrNode, visit: &mut impl FnMut(&'a IrNode)) {
     while let Some(node) = stack.pop() {
         visit(node);
         stack.extend(node.children.iter().rev());
-    }
-}
-
-/// Iterative pre-order traversal via a single reused `TreeCursor`: visits
-/// `root` and every descendant. Unlike WS-2's `walk_excluding`, this stream
-/// never needs to skip a subtree (no nested-callable exclusion applies to
-/// measuring one clone span), so it carries no exclusion predicate.
-/// Kept solely for `normalized_statement_tokens` above -- the retargeted
-/// production path uses `for_each_ir_node` instead. `#[cfg(test)]` for the
-/// same reason: its only caller is.
-#[cfg(test)]
-fn for_each_descendant<'tree>(root: Node<'tree>, mut visit: impl FnMut(Node<'tree>)) {
-    let mut cursor = root.walk();
-    loop {
-        visit(cursor.node());
-        if cursor.goto_first_child() {
-            continue;
-        }
-        loop {
-            if cursor.goto_next_sibling() {
-                break;
-            }
-            if !cursor.goto_parent() {
-                return;
-            }
-        }
     }
 }
