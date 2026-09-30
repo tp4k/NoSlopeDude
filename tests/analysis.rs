@@ -158,6 +158,19 @@ fn test_non_utf8_path_is_unanalyzable() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn test_non_utf8_path_with_an_unsupported_extension_is_unsupported() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let path = Path::new(OsStr::from_bytes(b"img/bad\xff.png"));
+    assert_eq!(
+        analyze_file(path, b"\x89PNG\r\n").err(),
+        Some(UnanalyzableReason::UnsupportedExtension)
+    );
+}
+
 #[test]
 fn test_unsupported_extension_is_unanalyzable() {
     assert_eq!(
