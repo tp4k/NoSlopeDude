@@ -376,8 +376,7 @@ fn test_a_clean_callable_nested_inside_a_damaged_outer_callable_is_not_measured(
 /// so the callable's `dirty` bit is already set before any span-vs-span
 /// comparison happens. `Span::intersects`'s two zero-width branches
 /// (`src/ir/mod.rs:61-66`) sit on no production path at all any more
-/// (`is_clear_of_damage`'s only caller left is `#[cfg(test)]`,
-/// `src/lower/mod.rs:24`) and are pinned solely by `src/ir/mod.rs::ir::
+/// (no production caller left; the lower tests inline the check) and are pinned solely by `src/ir/mod.rs::ir::
 /// tests::*`; deleting both branches leaves every salvage integration test
 /// in this file green.
 #[test]
@@ -534,7 +533,7 @@ fn test_stray_damage_outside_any_callable_or_block_does_not_reach_metrics() {
 
 /// WS-6 round 3 (perf HIGH: `prune_damage`'s old `Vec<Span>` membership
 /// test made the redact step `Θ(nodes × pruned-entities)`, and the old
-/// per-entity `is_clear_of_damage` scan made entity classification
+/// per-entity damage-intersection scan made entity classification
 /// `Θ(entities × damage)`): 1,200 independently-damaged callables in one
 /// file must still salvage in bounded wall-clock time, not the quadratic
 /// blowup either bound would produce -- the same shape and assertion style
