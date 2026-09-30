@@ -317,6 +317,7 @@ pub fn classify(
     let ambiguity_held_candidates: HashSet<(&RepoPath, usize)> = matched
         .ambiguities
         .iter()
+        .filter(|ambiguity| !ambiguity.base.is_empty())
         .flat_map(|ambiguity| &ambiguity.candidate)
         .map(|candidate_ref| (&candidate_ref.path, candidate_ref.index))
         .collect();
