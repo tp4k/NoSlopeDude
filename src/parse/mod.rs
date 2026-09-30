@@ -65,8 +65,17 @@ fn parse_one(root: &Path, file: &DiscoveredFile) -> (Option<ParsedFile>, Option<
         }
     };
 
-    let extension = file
-        .relative_path
+    parse_source(&file.relative_path, file.language, source)
+}
+
+/// `parse_one`'s post-read half, also the entry point for callers that
+/// already hold a file's text (a snapshot's bytes, not a worktree path).
+pub(crate) fn parse_source(
+    relative_path: &Path,
+    language: LanguageFamily,
+    source: String,
+) -> (Option<ParsedFile>, Option<ParseFailure>) {
+    let extension = relative_path
         .extension()
         .and_then(|extension| extension.to_str())
         .unwrap_or("");
@@ -74,7 +83,7 @@ fn parse_one(root: &Path, file: &DiscoveredFile) -> (Option<ParsedFile>, Option<
         return (
             None,
             Some(ParseFailure {
-                relative_path: file.relative_path.clone(),
+                relative_path: relative_path.to_path_buf(),
                 reason: ParseFailureReason::UnsupportedExtension,
                 detail: Some(format!("unrecognized extension {extension:?}")),
             }),
@@ -86,7 +95,7 @@ fn parse_one(root: &Path, file: &DiscoveredFile) -> (Option<ParsedFile>, Option<
         return (
             None,
             Some(ParseFailure {
-                relative_path: file.relative_path.clone(),
+                relative_path: relative_path.to_path_buf(),
                 reason: ParseFailureReason::GrammarSetup,
                 detail: Some(format!("failed to set grammar: {error}")),
             }),
@@ -97,7 +106,7 @@ fn parse_one(root: &Path, file: &DiscoveredFile) -> (Option<ParsedFile>, Option<
         return (
             None,
             Some(ParseFailure {
-                relative_path: file.relative_path.clone(),
+                relative_path: relative_path.to_path_buf(),
                 reason: ParseFailureReason::GrammarSetup,
                 detail: Some("tree-sitter returned no tree".to_string()),
             }),
@@ -106,15 +115,15 @@ fn parse_one(root: &Path, file: &DiscoveredFile) -> (Option<ParsedFile>, Option<
 
     let has_error = tree.root_node().has_error();
     let parsed_file = ParsedFile {
-        relative_path: file.relative_path.clone(),
-        language: file.language,
+        relative_path: relative_path.to_path_buf(),
+        language,
         source,
         tree,
     };
 
     if has_error {
         let failure = ParseFailure {
-            relative_path: file.relative_path.clone(),
+            relative_path: relative_path.to_path_buf(),
             reason: ParseFailureReason::SyntaxError,
             detail: first_error_line(parsed_file.tree.root_node())
                 .map(|line| format!("first error at line {line}")),

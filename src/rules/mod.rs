@@ -122,12 +122,15 @@ type PerFileScan = (Vec<RuleFinding>, Option<FileLanguageLines>);
 /// `start_line` then `rule_id`, for a deterministic result regardless of
 /// which rayon task finished first.
 fn sort_findings(findings: &mut [RuleFinding]) {
-    findings.sort_by(|a, b| {
-        a.relative_path
-            .cmp(&b.relative_path)
-            .then(a.start_line.cmp(&b.start_line))
-            .then(a.rule_id.cmp(b.rule_id))
-    });
+    findings.sort_by(cmp_findings);
+}
+
+/// The order `sort_findings` imposes.
+pub(crate) fn cmp_findings(a: &RuleFinding, b: &RuleFinding) -> std::cmp::Ordering {
+    a.relative_path
+        .cmp(&b.relative_path)
+        .then(a.start_line.cmp(&b.start_line))
+        .then(a.rule_id.cmp(b.rule_id))
 }
 
 /// D22: every rule finding across every parsed file, one rayon task per
@@ -159,48 +162,60 @@ fn scan_file_for_rules(file: &ParsedFile) -> Vec<RuleFinding> {
 /// already-lowered IR tree (no D9 nested-callable exclusion — a rule
 /// applies inside a nested callable's body too).
 fn findings_from_ir(file: &ParsedFile, ir_file: &lower::IrFile) -> Vec<RuleFinding> {
+    findings_with_nodes(file, ir_file)
+        .into_iter()
+        .map(|(finding, _)| finding)
+        .collect()
+}
+
+/// `findings_from_ir`, each finding paired with the IR nodes the rule
+/// flagged, in traversal order (unsorted).
+pub(crate) fn findings_with_nodes<'a>(
+    file: &ParsedFile,
+    ir_file: &'a lower::IrFile,
+) -> Vec<(RuleFinding, Vec<&'a IrNode>)> {
     let language = file.language;
     let mut findings = Vec::new();
     for_each_ir_node(&ir_file.root, |node, is_root| {
-        if is_unreachable_container(node, is_root, language) {
-            if let Some((start_line, end_line, flagged_lines)) = find_unreachable_after_return(node)
-            {
-                findings.push(RuleFinding {
+        let mut push = |rule_id: RuleId, flagged: Flagged<'a>| {
+            findings.push((
+                RuleFinding {
                     relative_path: file.relative_path.clone(),
                     language,
-                    rule_id: unreachable_rule_id(language),
-                    start_line,
-                    end_line,
-                    flagged_lines,
-                });
+                    rule_id,
+                    start_line: flagged.start_line,
+                    end_line: flagged.end_line,
+                    flagged_lines: flagged.flagged_lines,
+                },
+                flagged.nodes,
+            ));
+        };
+        if is_unreachable_container(node, is_root, language) {
+            if let Some(flagged) = find_unreachable_after_return(node) {
+                push(unreachable_rule_id(language), flagged);
             }
         }
         if node.decision == Some(DecisionKind::Catch) {
-            if let Some((start_line, end_line, flagged_lines)) = find_empty_catch(node) {
-                findings.push(RuleFinding {
-                    relative_path: file.relative_path.clone(),
-                    language,
-                    rule_id: empty_catch_rule_id(language),
-                    start_line,
-                    end_line,
-                    flagged_lines,
-                });
+            if let Some(flagged) = find_empty_catch(node) {
+                push(empty_catch_rule_id(language), flagged);
             }
         }
         if node.decision == Some(DecisionKind::Branch) {
-            if let Some((start_line, end_line, flagged_lines)) = find_redundant_else(node) {
-                findings.push(RuleFinding {
-                    relative_path: file.relative_path.clone(),
-                    language,
-                    rule_id: redundant_else_rule_id(language),
-                    start_line,
-                    end_line,
-                    flagged_lines,
-                });
+            if let Some(flagged) = find_redundant_else(node) {
+                push(redundant_else_rule_id(language), flagged);
             }
         }
     });
     findings
+}
+
+/// One rule match: its reported line extent and lines, plus the IR subtrees
+/// it flagged.
+struct Flagged<'a> {
+    start_line: usize,
+    end_line: usize,
+    flagged_lines: Vec<usize>,
+    nodes: Vec<&'a IrNode>,
 }
 
 /// D11: `collect_ir_executable_lines` over a whole lowered file's root —
@@ -390,7 +405,7 @@ fn is_unreachable_container(node: &IrNode, is_root: bool, language: LanguageFami
 /// statement after the first such terminator, to the end of the block,
 /// except a JS/TS statement `is_hoisted_or_type_only` exempts — those are
 /// not unreachable code in effect, only in source position.
-fn find_unreachable_after_return(node: &IrNode) -> Option<(usize, usize, Vec<usize>)> {
+fn find_unreachable_after_return(node: &IrNode) -> Option<Flagged<'_>> {
     let statements = statement_children(node);
     let terminator_index = statements
         .iter()
@@ -408,7 +423,12 @@ fn find_unreachable_after_return(node: &IrNode) -> Option<(usize, usize, Vec<usi
     for statement in &unreachable {
         collect_ir_executable_lines(statement, &mut lines);
     }
-    Some((start_line, end_line, lines.into_iter().collect()))
+    Some(Flagged {
+        start_line,
+        end_line,
+        flagged_lines: lines.into_iter().collect(),
+        nodes: unreachable,
+    })
 }
 
 /// D22, `*-EMPTY-CATCH`: a `catch` clause whose body block has neither a
@@ -428,7 +448,7 @@ fn find_unreachable_after_return(node: &IrNode) -> Option<(usize, usize, Vec<usi
 /// the same structural test `is_unreachable_container` uses) picks the body
 /// block specifically — the anonymous keyword has no children at all, so
 /// `children.first()` is `None` and it is excluded.
-fn find_empty_catch(node: &IrNode) -> Option<(usize, usize, Vec<usize>)> {
+fn find_empty_catch(node: &IrNode) -> Option<Flagged<'_>> {
     let body = node.children.iter().find(|child| {
         child.in_catch_body
             && child
@@ -443,7 +463,12 @@ fn find_empty_catch(node: &IrNode) -> Option<(usize, usize, Vec<usize>)> {
     let end_line = node.span.end_line as usize;
     let mut lines = BTreeSet::new();
     collect_ir_executable_lines(node, &mut lines);
-    Some((start_line, end_line, lines.into_iter().collect()))
+    Some(Flagged {
+        start_line,
+        end_line,
+        flagged_lines: lines.into_iter().collect(),
+        nodes: vec![node],
+    })
 }
 
 /// D22, `*-REDUNDANT-ELSE-AFTER-RETURN`: an `else` branch whose sibling
@@ -458,7 +483,7 @@ fn find_empty_catch(node: &IrNode) -> Option<(usize, usize, Vec<usize>)> {
 /// `node.children` directly rather than collecting `statement_children`'s
 /// `Vec<&IrNode>` first, so the common case (an `if` with no `else`) takes
 /// no heap allocation.
-fn find_redundant_else(node: &IrNode) -> Option<(usize, usize, Vec<usize>)> {
+fn find_redundant_else(node: &IrNode) -> Option<Flagged<'_>> {
     let mut named = node
         .children
         .iter()
@@ -473,7 +498,12 @@ fn find_redundant_else(node: &IrNode) -> Option<(usize, usize, Vec<usize>)> {
     let end_line = alternative.span.end_line as usize;
     let mut lines = BTreeSet::new();
     collect_ir_executable_lines(alternative, &mut lines);
-    Some((start_line, end_line, lines.into_iter().collect()))
+    Some(Flagged {
+        start_line,
+        end_line,
+        flagged_lines: lines.into_iter().collect(),
+        nodes: vec![alternative],
+    })
 }
 
 /// Conservative "always returns": the node itself is a bare `return`/

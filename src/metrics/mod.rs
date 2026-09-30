@@ -12,12 +12,15 @@
 //! arbitrarily deep source tree degrades in time, not by aborting (D18).
 
 use std::cmp::Ordering;
+use std::path::Path;
 
 use rayon::prelude::*;
 
 use crate::ir::{DecisionKind, IrCallable, IrNode, Span};
 use crate::lower;
-use crate::model::{Callable, FileScanSummary, MetricsResult, SyntaxBlock, CC_EROSION_THRESHOLD};
+use crate::model::{
+    Callable, FileScanSummary, LanguageFamily, MetricsResult, SyntaxBlock, CC_EROSION_THRESHOLD,
+};
 use crate::parse::ParsedFile;
 
 /// How many rows the top-callables ranking keeps.
@@ -162,14 +165,29 @@ fn scan_file(
         })
         .collect();
 
-    let callables = ir_file
+    let callables = callables_from_ir(&file.relative_path, file.language, ir_file);
+
+    let summary = FileScanSummary {
+        relative_path: file.relative_path.clone(),
+        scanned_lines,
+    };
+    (callables, syntax_blocks, summary)
+}
+
+/// One `Callable` per `IrFile::callables` entry, index-aligned with it.
+pub(crate) fn callables_from_ir(
+    relative_path: &Path,
+    language: LanguageFamily,
+    ir_file: &lower::IrFile,
+) -> Vec<Callable> {
+    ir_file
         .callables
         .iter()
         .map(|callable| {
             let CallableMetrics { cc, sloc } = scan_callable_body(callable.body_span, ir_file);
             Callable {
-                relative_path: file.relative_path.clone(),
-                language: file.language,
+                relative_path: relative_path.to_path_buf(),
+                language,
                 name: callable.name.clone(),
                 start_line: callable.span.start_line as usize,
                 end_line: callable.span.end_line as usize,
@@ -178,13 +196,7 @@ fn scan_file(
                 mass: mass(cc, sloc),
             }
         })
-        .collect();
-
-    let summary = FileScanSummary {
-        relative_path: file.relative_path.clone(),
-        scanned_lines,
-    };
-    (callables, syntax_blocks, summary)
+        .collect()
 }
 
 struct CallableMetrics {
@@ -329,5 +341,48 @@ fn decision_weight(kind: DecisionKind) -> u32 {
         | DecisionKind::Ternary
         | DecisionKind::And
         | DecisionKind::Or => 1,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parse;
+
+    const SOURCE: &str = "class C {\n    int m(int a) {\n        if (a > 0) {\n            return 1;\n        }\n        return 0;\n    }\n}\n";
+
+    fn lowered(source: &str) -> lower::IrFile {
+        let (parsed, _) = parse::parse_source(
+            Path::new("C.java"),
+            LanguageFamily::Java,
+            source.to_string(),
+        );
+        lower::lower_file(&parsed.expect("java parses"))
+    }
+
+    fn span(start_byte: u32, end_byte: u32, start_line: u32, end_line: u32) -> Span {
+        Span {
+            start_byte,
+            end_byte,
+            start_line,
+            end_line,
+        }
+    }
+
+    /// Deferred row 51: a body span with no IR subtree measures as an empty
+    /// body, whichever span it is (past the source, or inside one token).
+    #[test]
+    fn test_a_body_without_an_ir_subtree_measures_cc_1_sloc_0() {
+        let ir_file = lowered(SOURCE);
+        let unmatched = [
+            span(10_000, 10_040, 400, 410),
+            span(1, 3, 1, 1),
+            span(u32::MAX - 1, u32::MAX, 1, 1),
+        ];
+        for body_span in unmatched {
+            assert!(find_ir_subtree(&ir_file.root, body_span).is_none());
+            let CallableMetrics { cc, sloc } = scan_callable_body(body_span, &ir_file);
+            assert_eq!((cc, sloc), (1, 0), "{body_span:?}");
+        }
     }
 }

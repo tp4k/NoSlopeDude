@@ -1,13 +1,28 @@
 //! Per-file snapshot analysis: one file's bytes and repo path in, its
-//! callable metrics, identities, fingerprints and rule findings out.
+//! callable metrics, identities, fingerprints and rule findings out. The
+//! file is parsed and lowered exactly once; metrics, rules and identity all
+//! read that one `IrFile`. Unlike `parse_all`, it reads nothing from disk, so
+//! a snapshot's bytes (a commit or the index) analyze the same as a worktree
+//! file.
 
 use std::path::{Path, PathBuf};
 
-use crate::identity::CallableIdentity;
-use crate::lower::IrFile;
+use crate::clones;
+use crate::git::snapshot::SOURCE_CEILING_BYTES;
+use crate::hashing::Digest;
+use crate::identity::{self, CallableIdentity};
+use crate::ir::IrNode;
+use crate::lower::{self, IrFile};
+use crate::metrics;
 use crate::model::{Callable, LanguageFamily, RuleFinding};
+use crate::parse;
+use crate::rules;
 
-/// Why a file could not be analyzed.
+/// Hash domain of a finding's normalized-syntax digest, distinct from the
+/// callable body-fingerprint and clone-run domains.
+const FINDING_SYNTAX_FAMILY_PREFIX: &str = "finding-syntax";
+
+/// Why a file could not be analyzed; a later `A102` stream maps it to a code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnanalyzableReason {
     NonUtf8Path,
@@ -24,14 +39,17 @@ pub struct AnalyzedCallable {
     pub body_fingerprint: String,
 }
 
-/// One rule finding plus its normalized-syntax digest and enclosing callable.
+/// One rule finding with a whitespace- and comment-insensitive digest of the
+/// IR subtrees it flagged, and the index (into `FileAnalysis::callables`) of
+/// its innermost enclosing callable, `None` for file-level code.
 pub struct AnalyzedFinding {
     pub finding: RuleFinding,
     pub syntax_digest: String,
     pub enclosing_callable: Option<usize>,
 }
 
-/// The in-memory analysis of one file.
+/// The in-memory analysis of one file. `callables` is index-aligned with
+/// `ir.callables`; `ir.damage` holds the salvaged parse-damage spans.
 pub struct FileAnalysis {
     pub relative_path: PathBuf,
     pub language: LanguageFamily,
@@ -42,8 +60,84 @@ pub struct FileAnalysis {
 
 /// Analyzes one file from its repo path and bytes.
 pub fn analyze_file(
-    _relative_path: &Path,
-    _bytes: &[u8],
+    relative_path: &Path,
+    bytes: &[u8],
 ) -> Result<FileAnalysis, UnanalyzableReason> {
-    unimplemented!("analyze_file")
+    relative_path
+        .to_str()
+        .ok_or(UnanalyzableReason::NonUtf8Path)?;
+    let extension = relative_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("");
+    let language = LanguageFamily::from_extension(extension)
+        .ok_or(UnanalyzableReason::UnsupportedExtension)?;
+    if bytes.len() as u64 > SOURCE_CEILING_BYTES {
+        return Err(UnanalyzableReason::TooLarge);
+    }
+    let source =
+        String::from_utf8(bytes.to_vec()).map_err(|_| UnanalyzableReason::InvalidEncoding)?;
+
+    let (parsed, _syntax_error) = parse::parse_source(relative_path, language, source);
+    let parsed = parsed.ok_or(UnanalyzableReason::ParserUnavailable)?;
+    let ir = lower::lower_file(&parsed);
+
+    let metrics = metrics::callables_from_ir(&parsed.relative_path, language, &ir);
+    let identities = identity::identities(&ir);
+    let callables: Vec<AnalyzedCallable> = metrics
+        .into_iter()
+        .zip(identities)
+        .zip(&ir.callables)
+        .map(|((metrics, identity), ir_callable)| AnalyzedCallable {
+            metrics,
+            identity,
+            body_fingerprint: identity::body_fingerprint(&ir, ir_callable, &parsed.source),
+        })
+        .collect();
+
+    let mut flagged = rules::findings_with_nodes(&parsed, &ir);
+    flagged.sort_by(|(a, _), (b, _)| rules::cmp_findings(a, b));
+    let findings = flagged
+        .into_iter()
+        .map(|(finding, nodes)| AnalyzedFinding {
+            syntax_digest: syntax_digest(&nodes, &parsed.source),
+            enclosing_callable: nodes.first().and_then(|node| innermost_callable(&ir, node)),
+            finding,
+        })
+        .collect();
+
+    Ok(FileAnalysis {
+        relative_path: parsed.relative_path,
+        language,
+        ir,
+        callables,
+        findings,
+    })
+}
+
+/// A digest over the normalized leaf tokens of each flagged subtree
+/// (`clones::ir_statement_tokens`: comments dropped, anonymous-token
+/// whitespace collapsed), so reformatting never changes it.
+fn syntax_digest(nodes: &[&IrNode], source: &str) -> String {
+    let mut digest = Digest::new(FINDING_SYNTAX_FAMILY_PREFIX);
+    for node in nodes {
+        digest.push(clones::ir_statement_tokens(node, source).as_bytes());
+    }
+    format!("blake3:{:032x}", digest.finish())
+}
+
+/// The index of the smallest callable whose span contains `node`; among
+/// callables with equal spans, the later one in document order.
+fn innermost_callable(ir: &IrFile, node: &IrNode) -> Option<usize> {
+    let mut best: Option<(usize, u32)> = None;
+    for (index, callable) in ir.callables.iter().enumerate() {
+        let span = callable.span;
+        if span.start_byte <= node.span.start_byte && node.span.end_byte <= span.end_byte {
+            let length = span.end_byte - span.start_byte;
+            if best.is_none_or(|(_, best_length)| length <= best_length) {
+                best = Some((index, length));
+            }
+        }
+    }
+    best.map(|(index, _)| index)
 }
