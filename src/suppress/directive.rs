@@ -50,7 +50,10 @@ fn directive(node: &IrNode, source: &[u8]) -> Option<Directive> {
         (LINE_COMMENT_OPENER, body)
     } else {
         let body = text.strip_prefix(BLOCK_COMMENT_OPENER)?;
-        (BLOCK_COMMENT_OPENER, body.trim_start_matches(BLOCK_DOC_MARK))
+        (
+            BLOCK_COMMENT_OPENER,
+            body.trim_start_matches(BLOCK_DOC_MARK),
+        )
     };
     let rest = body.trim_start().strip_prefix(DIRECTIVE_PREFIX)?;
     let valid = opener == LINE_COMMENT_OPENER && is_standalone(source, start);
