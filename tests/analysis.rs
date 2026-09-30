@@ -312,3 +312,44 @@ fn test_finding_syntax_covers_every_flagged_statement() {
     let edited = only_finding_digest(&unreachable_method("c();"));
     assert_ne!(original, edited);
 }
+
+#[test]
+fn test_enclosing_callable_after_a_closed_callable_is_the_outer_one_or_none() {
+    let source = "\
+function first() {
+  function deep() {
+    function deepest() {}
+    try { a(); } catch (e) {}
+  }
+  try { b(); } catch (e) {}
+}
+try { c(); } catch (e) {}
+function second() {
+  try { d(); } catch (e) {}
+}
+try { e(); } catch (e) {}
+";
+    let analysis = analyze_text("siblings.js", source);
+    let mut by_line: Vec<(usize, Option<&str>)> = analysis
+        .findings
+        .iter()
+        .map(|f| {
+            (
+                f.finding.start_line,
+                f.enclosing_callable
+                    .map(|index| analysis.callables[index].metrics.name.as_str()),
+            )
+        })
+        .collect();
+    by_line.sort();
+    assert_eq!(
+        by_line,
+        vec![
+            (4, Some("deep")),
+            (6, Some("first")),
+            (8, None),
+            (10, Some("second")),
+            (12, None)
+        ]
+    );
+}
