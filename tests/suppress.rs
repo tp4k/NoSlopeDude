@@ -634,3 +634,31 @@ fn test_two_directives_on_one_unchanged_line_raise_no_s102() {
 
     assert_eq!(sites(&output), vec![]);
 }
+
+#[test]
+fn test_modified_multiline_block_directive_raises_s102() {
+    let (_dir, repo) = common::init_repo();
+    let base_text = run_with(&[
+        "/* nsd-ignore[JAVA-EMPTY-CATCH]: a",
+        "   first */",
+        "work();",
+    ]);
+    let candidate_text = run_with(&[
+        "/* nsd-ignore[JAVA-EMPTY-CATCH]: a",
+        "   second */",
+        "work();",
+    ]);
+    let base = commit(&repo, &base_text);
+    let candidate = commit(&repo, &candidate_text);
+
+    let output = evaluate(&repo, base, candidate);
+
+    assert_eq!(
+        sites(&output),
+        vec![(
+            CODE_INVALID_SUPPRESSION,
+            None,
+            line_of(&candidate_text, "nsd-ignore")
+        )]
+    );
+}
