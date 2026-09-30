@@ -399,6 +399,34 @@ fn test_positional_remainder_with_a_surplus_candidate_raises_g102() {
 
     assert_eq!(codes(&diagnostics)[0], (CODE_MATCH_AMBIGUITY, "cb"));
     assert_eq!(diagnostics[0].candidate_start_line, 1);
+    assert_eq!(
+        codes(&diagnostics),
+        vec![(CODE_MATCH_AMBIGUITY, "cb"), (CODE_MATCH_AMBIGUITY, "cb")]
+    );
+    assert_eq!(diagnostics[1].candidate_start_line, 2);
+}
+
+#[test]
+fn test_surplus_positional_candidate_cannot_hide_a_regression() {
+    let mut e101_off = default_policy();
+    e101_off.nsd_e101 = Severity::Off;
+    let base = [("A.java", vec![spec("cb", "x", 12, 10)])];
+    let scenario = |candidates: Vec<Spec>| {
+        let diagnostics = run_with(&base, &[("A.java", candidates)], &e101_off);
+        diagnostics
+            .iter()
+            .map(|d| (d.code, d.candidate_start_line))
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        scenario(vec![spec("cb", "a", 12, 10), spec("cb", "b", 20, 10)]),
+        vec![(CODE_MATCH_AMBIGUITY, 2)]
+    );
+    assert_eq!(
+        scenario(vec![spec("cb", "b", 20, 10), spec("cb", "a", 12, 10)]),
+        vec![(CODE_MATCH_AMBIGUITY, 1)]
+    );
 }
 
 #[test]
