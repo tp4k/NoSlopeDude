@@ -20,7 +20,10 @@ use std::path::PathBuf;
 
 use nsd::git::diff::{self, Change};
 use nsd::git::path::RepoPath;
-use nsd::identity::matching::{match_callables, CallableRef, FileCallables, MatchTier};
+use nsd::identity::matching::{
+    match_callables, Ambiguity, CallableRef, FileCallables, MatchPairing, MatchTier,
+    PositionalRemainder,
+};
 use nsd::identity::{self, CallableIdentity, OwnerDigest};
 use nsd::ir::CallableKind;
 use nsd::lower::{self, IrFile};
@@ -770,4 +773,284 @@ fn test_duplicate_candidate_path_panics_in_debug() {
     ];
 
     let _ = match_callables(&base, &candidate, &[]);
+}
+
+/// Within one same-key group, the fingerprint-equal pair and the pairs made
+/// by the positional fallback carry different provenance.
+#[test]
+fn test_fingerprint_exact_and_positional_pairs_are_distinguished() {
+    let callback = synth_identity("cb", &[]);
+    let base = vec![synth_file(
+        "A.java",
+        &[
+            (callback.clone(), "blake3:a"),
+            (callback.clone(), "blake3:b"),
+            (callback.clone(), "blake3:c"),
+        ],
+    )];
+    let candidate = vec![synth_file(
+        "A.java",
+        &[
+            (callback.clone(), "blake3:c"),
+            (callback.clone(), "blake3:x"),
+            (callback.clone(), "blake3:y"),
+        ],
+    )];
+
+    let output = match_callables(&base, &candidate, &[]);
+
+    let pairing_of = |base_index: usize| {
+        output
+            .matches
+            .iter()
+            .find(|m| m.base == callable_ref("A.java", base_index))
+            .map(|m| m.pairing)
+    };
+    assert_eq!(output.matches.len(), 3, "{output:#?}");
+    assert_eq!(pairing_of(2), Some(MatchPairing::FingerprintExact));
+    assert_eq!(pairing_of(0), Some(MatchPairing::Positional));
+    assert_eq!(pairing_of(1), Some(MatchPairing::Positional));
+}
+
+/// The callables a same-key group could not pair by fingerprint are exposed,
+/// one remainder per group, sorted by (path bytes, index) of the first base
+/// member; a group that fingerprint-paired completely has none.
+#[test]
+fn test_positional_remainders_are_reported() {
+    let callback = synth_identity("cb", &[]);
+    let exact = synth_identity("exact", &[]);
+    let base = vec![
+        synth_file(
+            "Z.java",
+            &[(callback.clone(), "blake3:z1"), (exact.clone(), "blake3:e")],
+        ),
+        synth_file(
+            "A.java",
+            &[
+                (callback.clone(), "blake3:a1"),
+                (callback.clone(), "blake3:a2"),
+                (callback.clone(), "blake3:keep"),
+            ],
+        ),
+    ];
+    let candidate = vec![
+        synth_file(
+            "Z.java",
+            &[(callback.clone(), "blake3:z2"), (exact.clone(), "blake3:e")],
+        ),
+        synth_file(
+            "A.java",
+            &[
+                (callback.clone(), "blake3:keep"),
+                (callback.clone(), "blake3:a3"),
+                (callback.clone(), "blake3:a4"),
+            ],
+        ),
+    ];
+
+    let output = match_callables(&base, &candidate, &[]);
+
+    assert_eq!(
+        output.positional_remainders,
+        vec![
+            PositionalRemainder {
+                base: vec![callable_ref("A.java", 0), callable_ref("A.java", 1)],
+                candidate: vec![callable_ref("A.java", 1), callable_ref("A.java", 2)],
+            },
+            PositionalRemainder {
+                base: vec![callable_ref("Z.java", 0)],
+                candidate: vec![callable_ref("Z.java", 0)],
+            },
+        ]
+    );
+}
+
+/// (base ref, candidate fingerprint) for every match, in output order.
+fn match_summary(
+    output: &nsd::identity::matching::MatchOutput,
+    candidate: &[FileCallables],
+) -> Vec<(CallableRef, String, MatchTier)> {
+    output
+        .matches
+        .iter()
+        .map(|m| {
+            let file = candidate
+                .iter()
+                .find(|file| file.path == m.candidate.path)
+                .expect("candidate file");
+            (
+                m.base.clone(),
+                file.callables[m.candidate.index].1.clone(),
+                m.tier,
+            )
+        })
+        .collect()
+}
+
+/// A candidate positionally paired in a non-1:1 same-key group, whose body
+/// equals a base left unmatched elsewhere, takes that tier-3 pair instead; the
+/// result does not depend on the candidate's source order.
+#[test]
+fn test_positional_candidate_takes_its_tier3_base_in_either_order() {
+    let callback = synth_identity("cb", &[]);
+    let moved = synth_identity("moved", &[]);
+    let base = vec![
+        synth_file("A.java", &[(callback.clone(), "blake3:x")]),
+        synth_file("B.java", &[(moved.clone(), "blake3:y")]),
+    ];
+    let x_first = vec![synth_file(
+        "A.java",
+        &[
+            (callback.clone(), "blake3:x2"),
+            (callback.clone(), "blake3:y"),
+        ],
+    )];
+    let y_first = vec![synth_file(
+        "A.java",
+        &[
+            (callback.clone(), "blake3:y"),
+            (callback.clone(), "blake3:x2"),
+        ],
+    )];
+
+    let from_x_first = match_callables(&base, &x_first, &[]);
+    let from_y_first = match_callables(&base, &y_first, &[]);
+
+    let expected = vec![
+        (
+            callable_ref("A.java", 0),
+            "blake3:x2".to_string(),
+            MatchTier::Structural,
+        ),
+        (
+            callable_ref("B.java", 0),
+            "blake3:y".to_string(),
+            MatchTier::BodyFingerprint,
+        ),
+    ];
+    assert_eq!(match_summary(&from_x_first, &x_first), expected);
+    assert_eq!(match_summary(&from_y_first, &y_first), expected);
+    assert!(from_y_first.ambiguities.is_empty(), "{from_y_first:#?}");
+}
+
+/// Tier 1 pairs that are not positional fallback are never displaced by a
+/// same-fingerprint base elsewhere: a fingerprint-exact same-key pair, and a
+/// 1:1 same-key edit whose new body equals another base's body.
+#[test]
+fn test_key_pairs_are_never_displaced_by_a_tier3_fingerprint() {
+    let keyed = synth_identity("m", &[]);
+    let other = synth_identity("n", &[]);
+    let base = vec![
+        synth_file("A.java", &[(keyed.clone(), "blake3:f")]),
+        synth_file("B.java", &[(other.clone(), "blake3:f")]),
+    ];
+    let exact = vec![synth_file("A.java", &[(keyed.clone(), "blake3:f")])];
+    let edit_base = vec![
+        synth_file("A.java", &[(keyed.clone(), "blake3:old")]),
+        synth_file("B.java", &[(other.clone(), "blake3:f")]),
+    ];
+    let edited = vec![synth_file("A.java", &[(keyed.clone(), "blake3:f")])];
+
+    let exact_output = match_callables(&base, &exact, &[]);
+    let edited_output = match_callables(&edit_base, &edited, &[]);
+
+    assert_eq!(
+        match_summary(&exact_output, &exact),
+        vec![(
+            callable_ref("A.java", 0),
+            "blake3:f".to_string(),
+            MatchTier::Structural
+        )]
+    );
+    assert_eq!(
+        match_summary(&edited_output, &edited),
+        vec![(
+            callable_ref("A.java", 0),
+            "blake3:f".to_string(),
+            MatchTier::Structural
+        )]
+    );
+}
+
+/// Two candidates with the same body reach one unmatched base: tier 3 sees a
+/// 1:2 bucket and leaves it an ambiguity instead of pairing either.
+#[test]
+fn test_competing_positional_candidates_enter_the_tier3_bucket() {
+    let callback = synth_identity("cb", &[]);
+    let moved = synth_identity("moved", &[]);
+    let base = vec![
+        synth_file(
+            "A.java",
+            &[
+                (callback.clone(), "blake3:p"),
+                (callback.clone(), "blake3:q"),
+            ],
+        ),
+        synth_file("B.java", &[(moved.clone(), "blake3:y")]),
+    ];
+    let candidate = vec![synth_file(
+        "A.java",
+        &[
+            (callback.clone(), "blake3:y"),
+            (callback.clone(), "blake3:y"),
+        ],
+    )];
+
+    let output = match_callables(&base, &candidate, &[]);
+
+    assert!(output.matches.is_empty(), "{output:#?}");
+    assert_eq!(
+        output.ambiguities,
+        vec![Ambiguity {
+            fingerprint: "blake3:y".to_string(),
+            base: vec![callable_ref("B.java", 0)],
+            candidate: vec![callable_ref("A.java", 0), callable_ref("A.java", 1)],
+        }]
+    );
+}
+
+/// A displacement inside a renamed file's positional group keeps the tier-2
+/// provenance on the re-paired candidate, in either source order.
+#[test]
+fn test_displacement_in_a_renamed_file_keeps_the_rename_tier() {
+    let callback = synth_identity("cb", &[]);
+    let moved = synth_identity("moved", &[]);
+    let base = vec![
+        synth_file("Old.java", &[(callback.clone(), "blake3:x")]),
+        synth_file("B.java", &[(moved.clone(), "blake3:y")]),
+    ];
+    let renamed = [Change::Renamed {
+        from: RepoPath::from_bytes(b"Old.java".to_vec()),
+        to: RepoPath::from_bytes(b"New.java".to_vec()),
+        kind: nsd::git::snapshot::EntryKind::Regular,
+        similarity: 100,
+    }];
+    let expected = vec![
+        (
+            callable_ref("B.java", 0),
+            "blake3:y".to_string(),
+            MatchTier::BodyFingerprint,
+        ),
+        (
+            callable_ref("Old.java", 0),
+            "blake3:x2".to_string(),
+            MatchTier::Rename,
+        ),
+    ];
+
+    for fingerprints in [["blake3:y", "blake3:x2"], ["blake3:x2", "blake3:y"]] {
+        let candidate = vec![synth_file(
+            "New.java",
+            &[
+                (callback.clone(), fingerprints[0]),
+                (callback.clone(), fingerprints[1]),
+            ],
+        )];
+        let output = match_callables(&base, &candidate, &renamed);
+        assert_eq!(
+            match_summary(&output, &candidate),
+            expected,
+            "{fingerprints:?}"
+        );
+    }
 }

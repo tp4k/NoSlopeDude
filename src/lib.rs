@@ -16,6 +16,7 @@ pub mod policy;
 pub mod profile;
 pub mod target;
 
+pub mod analysis;
 pub mod clones;
 pub mod identity;
 pub mod ir;
@@ -24,3 +25,4 @@ pub mod metrics;
 pub mod parse;
 pub mod report;
 pub mod rules;
+pub mod suppress;

@@ -179,11 +179,17 @@ fn test_row_marks_a_dirty_src_tree() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let repo = dir.path();
     let run_git = |args: &[&str]| -> anyhow::Result<Output> {
-        Ok(Command::new("git")
+        let output = Command::new("git")
             .arg("-C")
             .arg(repo)
             .args(args)
-            .output()?)
+            .output()?;
+        anyhow::ensure!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(output)
     };
     run_git(&["init"])?;
     run_git(&[
@@ -239,11 +245,17 @@ fn test_row_marks_a_dirty_cargo_manifest() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let repo = dir.path();
     let run_git = |args: &[&str]| -> anyhow::Result<Output> {
-        Ok(Command::new("git")
+        let output = Command::new("git")
             .arg("-C")
             .arg(repo)
             .args(args)
-            .output()?)
+            .output()?;
+        anyhow::ensure!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(output)
     };
     run_git(&["init"])?;
     run_git(&[
@@ -349,11 +361,17 @@ fn test_date_cell_fails_when_git_status_fails() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let repo = dir.path();
     let run_git = |args: &[&str]| -> anyhow::Result<Output> {
-        Ok(Command::new("git")
+        let output = Command::new("git")
             .arg("-C")
             .arg(repo)
             .args(args)
-            .output()?)
+            .output()?;
+        anyhow::ensure!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(output)
     };
     run_git(&["init"])?;
     run_git(&[

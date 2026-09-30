@@ -139,6 +139,7 @@ in the final plan's *Amendments* tables (A1–A10).
    - **Best-effort LRU eviction, 1 GiB / 30-day default.** The payload is large because `enumerate_candidates` emits every contiguous sub-run, so eviction is real work, not a follow-up.
 5. **Output and delivery**
    - Implement canonical scoped JSON, terminal and agent renderers, scan-only HTML with excerpts capped at 20 lines / 4 KiB and an explicit truncation marker, deterministic caps, and per-reason analysis accounting.
+   - Report mapped parser gaps and coverage explicitly; ratios use *analyzed* executable lines and carry completeness metadata (status row M1-8). Moved into this step on 2026-09-30 by user decision so it lands in the same run as M6-1 and M6-2 and the golden digest is recaptured once; it includes restoring the per-file `SyntaxError` provenance that M0b-7's salvage removed.
    - Nested-checkout exclusion in `scan` discovery: a directory containing its own `.git` is excluded regardless of `.gitignore`.
    - Document copyable pre-commit and CI commands; do not add a hook installer or provider-specific workflow in v1.
 

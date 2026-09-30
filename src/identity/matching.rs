@@ -62,12 +62,31 @@ pub enum MatchTier {
     BodyFingerprint,
 }
 
-/// One matched base/candidate callable pair and the tier that paired it.
+/// How a same-key or tier-3 pair was formed: by equal body fingerprint, or
+/// by the order-preserving positional fallback among a same-key group's
+/// leftovers (`nsd-plan-final.md` *Stable data model*).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchPairing {
+    FingerprintExact,
+    Positional,
+}
+
+/// One matched base/candidate callable pair, the tier that paired it, and
+/// whether it was fingerprint-exact or positional.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallableMatch {
     pub base: CallableRef,
     pub candidate: CallableRef,
     pub tier: MatchTier,
+    pub pairing: MatchPairing,
+}
+
+/// One same-key group's leftovers after fingerprint pairing, when both sides
+/// still have members: the pool the `Positional` pairs were drawn from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PositionalRemainder {
+    pub base: Vec<CallableRef>,
+    pub candidate: Vec<CallableRef>,
 }
 
 /// A tier-3 fingerprint bucket with more than one leftover callable on
@@ -82,11 +101,13 @@ pub struct Ambiguity {
 
 /// Deterministic matching output: `matches` sorted by (base path bytes, base
 /// callable index), and each `Ambiguity`'s own two lists sorted the same way,
-/// with `ambiguities` itself sorted by fingerprint.
+/// with `ambiguities` itself sorted by fingerprint and `positional_remainders`
+/// by their first base member.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MatchOutput {
     pub matches: Vec<CallableMatch>,
     pub ambiguities: Vec<Ambiguity>,
+    pub positional_remainders: Vec<PositionalRemainder>,
 }
 
 /// Matches `base`'s callables against `candidate`'s, tiers 1-3 in order.
@@ -131,6 +152,7 @@ pub fn match_callables(
         .collect();
 
     let mut matches = Vec::new();
+    let mut positional_remainders = Vec::new();
 
     // Tier 1: same path, equal identity.
     for (base_index, base_file) in base.iter().enumerate() {
@@ -145,7 +167,7 @@ pub fn match_callables(
             0..candidate_file.callables.len(),
         );
         record_matches(
-            &pairs,
+            pairs,
             MatchSide {
                 file: base_file,
                 matched: &mut base_matched[base_index],
@@ -155,7 +177,10 @@ pub fn match_callables(
                 matched: &mut candidate_matched[candidate_index],
             },
             MatchTier::Structural,
-            &mut matches,
+            Recorded {
+                matches: &mut matches,
+                remainders: &mut positional_remainders,
+            },
         );
     }
 
@@ -182,7 +207,7 @@ pub fn match_callables(
             candidate_leftover,
         );
         record_matches(
-            &pairs,
+            pairs,
             MatchSide {
                 file: base_file,
                 matched: &mut base_matched[base_index],
@@ -192,9 +217,21 @@ pub fn match_callables(
                 matched: &mut candidate_matched[candidate_index],
             },
             MatchTier::Rename,
-            &mut matches,
+            Recorded {
+                matches: &mut matches,
+                remainders: &mut positional_remainders,
+            },
         );
     }
+
+    displace_positional_fallbacks(
+        base,
+        candidate,
+        &mut matches,
+        &positional_remainders,
+        &mut base_matched,
+        &mut candidate_matched,
+    );
 
     // Tier 3: pooled across every file (the same file included, so an
     // in-place rename matches too), an exactly-1:1 leftover fingerprint.
@@ -236,6 +273,7 @@ pub fn match_callables(
                 base: base_ref.clone(),
                 candidate: candidate_ref.clone(),
                 tier: MatchTier::BodyFingerprint,
+                pairing: MatchPairing::FingerprintExact,
             });
         } else if base_refs.len() > 1 || candidate_refs.len() > 1 {
             ambiguities.push(Ambiguity {
@@ -256,10 +294,121 @@ pub fn match_callables(
             .sort_by(|a, b| ref_order(a).cmp(&ref_order(b)));
     }
     ambiguities.sort_by(|a, b| a.fingerprint.cmp(&b.fingerprint));
+    positional_remainders.sort_by(|a, b| ref_order(&a.base[0]).cmp(&ref_order(&b.base[0])));
 
     MatchOutput {
         matches,
         ambiguities,
+        positional_remainders,
+    }
+}
+
+/// Lets a candidate that only a same-key positional fallback paired take the
+/// tier-3 pair instead, when its fingerprint equals a base that tiers 1-2 left
+/// unmatched. The group's remaining candidates are then positionally re-paired
+/// with its base list, so the result does not depend on the candidates' source
+/// order. A 1:1 group is a keyed edit, not an ambiguity, and is left alone.
+fn displace_positional_fallbacks(
+    base: &[FileCallables],
+    candidate: &[FileCallables],
+    matches: &mut Vec<CallableMatch>,
+    remainders: &[PositionalRemainder],
+    base_matched: &mut [Vec<bool>],
+    candidate_matched: &mut [Vec<bool>],
+) {
+    let base_index_of: HashMap<&RepoPath, usize> = base
+        .iter()
+        .enumerate()
+        .map(|(index, file)| (&file.path, index))
+        .collect();
+    let candidate_index_of: HashMap<&RepoPath, usize> = candidate
+        .iter()
+        .enumerate()
+        .map(|(index, file)| (&file.path, index))
+        .collect();
+    let candidate_fingerprint = |found: &CallableRef| -> &str {
+        candidate[candidate_index_of[&found.path]].callables[found.index]
+            .1
+            .as_str()
+    };
+
+    let mut unmatched_bases: HashMap<&str, usize> = HashMap::new();
+    for (file_index, file) in base.iter().enumerate() {
+        for (index, (_, fingerprint)) in file.callables.iter().enumerate() {
+            if !base_matched[file_index][index] {
+                *unmatched_bases.entry(fingerprint.as_str()).or_default() += 1;
+            }
+        }
+    }
+    let displaced_in = |remainder: &PositionalRemainder| -> HashSet<usize> {
+        if remainder.base.len() == 1 && remainder.candidate.len() == 1 {
+            return HashSet::new();
+        }
+        remainder
+            .candidate
+            .iter()
+            .filter(|found| unmatched_bases.contains_key(candidate_fingerprint(found)))
+            .map(|found| found.index)
+            .collect()
+    };
+    let affected: Vec<(&PositionalRemainder, HashSet<usize>)> = remainders
+        .iter()
+        .map(|remainder| (remainder, displaced_in(remainder)))
+        .filter(|(_, displaced)| !displaced.is_empty())
+        .collect();
+    if affected.is_empty() {
+        return;
+    }
+
+    let mut tier_of: HashMap<(RepoPath, usize), MatchTier> = HashMap::new();
+    let touched: HashSet<(&RepoPath, usize)> = affected
+        .iter()
+        .flat_map(|(remainder, _)| {
+            remainder
+                .candidate
+                .iter()
+                .map(|found| (&found.path, found.index))
+        })
+        .collect();
+    let mut kept = Vec::with_capacity(matches.len());
+    for found in matches.drain(..) {
+        let key = (&found.candidate.path, found.candidate.index);
+        if found.pairing == MatchPairing::Positional && touched.contains(&key) {
+            tier_of.insert(
+                (found.candidate.path.clone(), found.candidate.index),
+                found.tier,
+            );
+            base_matched[base_index_of[&found.base.path]][found.base.index] = false;
+            candidate_matched[candidate_index_of[&found.candidate.path]][found.candidate.index] =
+                false;
+        } else {
+            kept.push(found);
+        }
+    }
+    *matches = kept;
+
+    for (remainder, displaced) in affected {
+        let Some(tier) = remainder
+            .candidate
+            .iter()
+            .find_map(|found| tier_of.get(&(found.path.clone(), found.index)).copied())
+        else {
+            continue;
+        };
+        let staying = remainder
+            .candidate
+            .iter()
+            .filter(|found| !displaced.contains(&found.index));
+        for (base_ref, candidate_ref) in remainder.base.iter().zip(staying) {
+            base_matched[base_index_of[&base_ref.path]][base_ref.index] = true;
+            candidate_matched[candidate_index_of[&candidate_ref.path]][candidate_ref.index] = true;
+            matches.push(CallableMatch {
+                base: base_ref.clone(),
+                candidate: candidate_ref.clone(),
+                tier,
+                pairing: MatchPairing::Positional,
+            });
+        }
     }
 }
 
@@ -278,23 +427,33 @@ fn group_and_pair(
     base_indices: impl Iterator<Item = usize>,
     candidate_callables: &[(CallableIdentity, String)],
     candidate_indices: impl Iterator<Item = usize>,
-) -> Vec<(usize, usize)> {
+) -> GroupPairs {
     let base_groups = identity_groups(base_callables, base_indices);
     let candidate_groups = identity_groups(candidate_callables, candidate_indices);
 
-    let mut pairs = Vec::new();
+    let mut pairs = GroupPairs::default();
     for (identity, base_group) in &base_groups {
         let Some(candidate_group) = candidate_groups.get(identity) else {
             continue;
         };
-        pairs.extend(pair_group(
+        let group = pair_group(
             base_group,
             base_callables,
             candidate_group,
             candidate_callables,
-        ));
+        );
+        pairs.pairs.extend(group.pairs);
+        pairs.remainders.extend(group.remainders);
     }
     pairs
+}
+
+/// Local-index pairs with their provenance, plus each same-key group's
+/// leftovers that the positional fallback drew from (base, candidate).
+#[derive(Default)]
+struct GroupPairs {
+    pairs: Vec<(usize, usize, MatchPairing)>,
+    remainders: Vec<(Vec<usize>, Vec<usize>)>,
 }
 
 fn identity_groups(
@@ -318,7 +477,7 @@ fn pair_group(
     base_callables: &[(CallableIdentity, String)],
     candidate_indices: &[usize],
     candidate_callables: &[(CallableIdentity, String)],
-) -> Vec<(usize, usize)> {
+) -> GroupPairs {
     let mut base_by_fingerprint: HashMap<&str, Vec<usize>> = HashMap::new();
     for &index in base_indices {
         base_by_fingerprint
@@ -343,7 +502,11 @@ fn pair_group(
         };
         let paired = base_bucket.len().min(candidate_bucket.len());
         for k in 0..paired {
-            pairs.push((base_bucket[k], candidate_bucket[k]));
+            pairs.push((
+                base_bucket[k],
+                candidate_bucket[k],
+                MatchPairing::FingerprintExact,
+            ));
             consumed_base.insert(base_bucket[k]);
             consumed_candidate.insert(candidate_bucket[k]);
         }
@@ -361,9 +524,18 @@ fn pair_group(
         .collect();
     let paired = remaining_base.len().min(remaining_candidate.len());
     for k in 0..paired {
-        pairs.push((remaining_base[k], remaining_candidate[k]));
+        pairs.push((
+            remaining_base[k],
+            remaining_candidate[k],
+            MatchPairing::Positional,
+        ));
     }
-    pairs
+    let remainders = if paired > 0 {
+        vec![(remaining_base, remaining_candidate)]
+    } else {
+        Vec::new()
+    };
+    GroupPairs { pairs, remainders }
 }
 
 /// One side (base or candidate) of a single file's tier-1/tier-2 pairing:
@@ -375,15 +547,26 @@ struct MatchSide<'a> {
     matched: &'a mut [bool],
 }
 
+/// Where `record_matches` appends its results.
+struct Recorded<'a> {
+    matches: &'a mut Vec<CallableMatch>,
+    remainders: &'a mut Vec<PositionalRemainder>,
+}
+
 /// Marks every paired local index as matched in both sides' bitmaps and
-/// records one `CallableMatch` per pair, tagged with `tier`.
+/// records one `CallableMatch` per pair, tagged with `tier`, and one
+/// `PositionalRemainder` per group that had one.
 fn record_matches(
-    pairs: &[(usize, usize)],
+    pairs: GroupPairs,
     base: MatchSide<'_>,
     candidate: MatchSide<'_>,
     tier: MatchTier,
-    matches: &mut Vec<CallableMatch>,
+    recorded: Recorded<'_>,
 ) {
+    let Recorded {
+        matches,
+        remainders,
+    } = recorded;
     let MatchSide {
         file: base_file,
         matched: base_matched,
@@ -392,7 +575,22 @@ fn record_matches(
         file: candidate_file,
         matched: candidate_matched,
     } = candidate;
-    for &(base_index, candidate_index) in pairs {
+    let refs = |file: &FileCallables, indices: &[usize]| -> Vec<CallableRef> {
+        indices
+            .iter()
+            .map(|&index| CallableRef {
+                path: file.path.clone(),
+                index,
+            })
+            .collect()
+    };
+    for (base_indices, candidate_indices) in &pairs.remainders {
+        remainders.push(PositionalRemainder {
+            base: refs(base_file, base_indices),
+            candidate: refs(candidate_file, candidate_indices),
+        });
+    }
+    for &(base_index, candidate_index, pairing) in &pairs.pairs {
         base_matched[base_index] = true;
         candidate_matched[candidate_index] = true;
         matches.push(CallableMatch {
@@ -405,6 +603,7 @@ fn record_matches(
                 index: candidate_index,
             },
             tier,
+            pairing,
         });
     }
 }

@@ -150,8 +150,8 @@ fn test_version_constants_are_exported() {
 }
 
 /// Iterative pre-order traversal via a single reused `TreeCursor`: the same
-/// shape as `src/lower/mod.rs:148-164`'s `for_each_descendant`, a fresh copy
-/// here since that one is private to the `lower` module.
+/// shape as `crate::exec_lines::for_each_descendant`, a fresh copy
+/// here since that one is `pub(crate)`.
 fn for_each_descendant<'tree>(
     root: tree_sitter::Node<'tree>,
     mut visit: impl FnMut(tree_sitter::Node<'tree>),

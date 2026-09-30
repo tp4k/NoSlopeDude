@@ -6,6 +6,10 @@
 //! Exit-code mapping for the diagnostics this module reports is M5-3's job,
 //! not this one's.
 
+pub mod complexity;
+pub mod diagnostics;
+pub mod findings;
+
 use std::path::Path;
 
 use git2::{ObjectType, Oid, Repository};

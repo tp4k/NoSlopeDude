@@ -20,11 +20,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tree_sitter::Node;
 
-#[cfg(test)]
-use crate::exec_lines::is_comment_kind;
 use crate::exec_lines::is_executable_leaf;
 #[cfg(test)]
-use crate::ir::is_clear_of_damage;
+use crate::exec_lines::{for_each_descendant, is_comment_kind};
 use crate::ir::{
     CallableKind, DamageKind, DamageSpan, DecisionKind, IrBlock, IrCallable, IrNode, OwnerEntry,
     OwnerSegment, Span, TerminatorKind,
@@ -129,7 +127,7 @@ pub fn lower_all(parsed_files: &[ParsedFile]) -> Vec<IrFile> {
 /// membership test is O(1) average instead of a linear `Vec` scan (fixing
 /// (d): no per-node or per-entity work now scales with `damage.len()` or
 /// the pruned-entity count). Each entity's own dirty bit is read exactly
-/// once here (fixing (e): the old double `is_clear_of_damage` evaluation
+/// once here (fixing (e): the old double damage-intersection evaluation
 /// -- once to build the prune list, once again in `retain` -- is gone).
 ///
 /// WS-9 (C1): increments `LOWERING_COUNT` on every call, the seam
@@ -633,32 +631,6 @@ fn statement_token_stream(statement: Node, language: LanguageFamily, source: &st
     tokens
 }
 
-/// Iterative pre-order traversal via a single reused `TreeCursor`: visits
-/// `root` and every descendant. The same shape as
-/// `exec_lines::for_each_descendant` / `clones::for_each_descendant`, a
-/// fresh copy here since both are private to their own modules. Test-only --
-/// see `STATEMENT_TOKEN_SEPARATOR`'s doc comment; `build_ir` below has its
-/// own production traversal, since it also needs to assemble a tree rather
-/// than only visit.
-#[cfg(test)]
-fn for_each_descendant<'tree>(root: Node<'tree>, mut visit: impl FnMut(Node<'tree>)) {
-    let mut cursor = root.walk();
-    loop {
-        visit(cursor.node());
-        if cursor.goto_first_child() {
-            continue;
-        }
-        loop {
-            if cursor.goto_next_sibling() {
-                break;
-            }
-            if !cursor.goto_parent() {
-                return;
-            }
-        }
-    }
-}
-
 /// A structurally-unreachable fallback `IrNode` for the two dead branches in
 /// `build_ir` below: `stack` always holds exactly one frame per node
 /// currently open between the traversal's `goto_first_child` into it and
@@ -772,6 +744,10 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
                 owner: owner_stack.last().copied(),
             });
             tables.callable_dirty.push(false);
+            debug_assert!(
+                entity_slot.is_none(),
+                "node is both block- and callable-shaped"
+            );
             entity_slot = Some(EntitySlot::Callable(tables.callable_dirty.len() - 1));
         }
         let owner_pushed = classification.owner_segment.is_some();
@@ -1036,7 +1012,10 @@ mod tests {
 
             let mut compared_in_file = 0usize;
             for statement in statements {
-                if !is_clear_of_damage(Span::from_node(statement), &damage) {
+                if damage
+                    .iter()
+                    .any(|d| Span::from_node(statement).intersects(d.span))
+                {
                     continue;
                 }
                 let ir_tokens = statement_token_stream(statement, language, &source);
@@ -1123,7 +1102,10 @@ mod tests {
             assert_eq!(ir_nodes.len(), ts_nodes.len(), "{}", path.display());
             let mut checked_in_file = 0usize;
             for (ir_node, ts_node) in ir_nodes.iter().zip(ts_nodes.iter()) {
-                if !is_clear_of_damage(Span::from_node(*ts_node), &damage) {
+                if damage
+                    .iter()
+                    .any(|d| Span::from_node(*ts_node).intersects(d.span))
+                {
                     continue;
                 }
                 let expected = is_executable_leaf(*ts_node, language);
@@ -1252,7 +1234,7 @@ mod tests {
     /// file-level `scanned_lines`, `clones::run`, `rules::run`) can ever
     /// reach a node whose own span carries damage. The surrounding clean
     /// callable is unaffected: it survives in `ir_file.callables`, and none
-    /// of its own nodes fail `is_clear_of_damage`.
+    /// of its own nodes intersects a damage span.
     #[test]
     fn test_stray_damage_outside_any_callable_or_block_is_excluded_from_every_analyzer() {
         let source = "export function safe(x) {\n  return x;\n}\n\n)));\n".to_string();
@@ -1287,7 +1269,10 @@ mod tests {
         for node in nodes {
             if node.executable || node.is_clone_statement {
                 assert!(
-                    is_clear_of_damage(node.span, &ir_file.damage),
+                    !ir_file
+                        .damage
+                        .iter()
+                        .any(|entry| node.span.intersects(entry.span)),
                     "expected every executable/clone-candidate node to be damage-clear: {:?}",
                     node.span
                 );

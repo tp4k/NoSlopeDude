@@ -46,7 +46,7 @@ CC or mass. Which node kinds are callables, and how each one finds its own
 body, is named per language under Lowering below.
 
 A callable whose `span` shares any byte with a `DamageSpan` (`DamageKind`,
-`ir::is_clear_of_damage`) is excluded fail-closed (`lower::cascade_exclusions`,
+`Span::intersects`) is excluded fail-closed (`lower::cascade_exclusions`,
 `lower::prune_damage`): it never enters `IrFile::callables` at all, so it
 contributes no CC, SLOC, mass, scanned lines, clone candidates or findings,
 and a pruned damage subtree contributes nothing to any metric, rule or
