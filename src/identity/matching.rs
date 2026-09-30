@@ -224,6 +224,15 @@ pub fn match_callables(
         );
     }
 
+    displace_positional_fallbacks(
+        base,
+        candidate,
+        &mut matches,
+        &positional_remainders,
+        &mut base_matched,
+        &mut candidate_matched,
+    );
+
     // Tier 3: pooled across every file (the same file included, so an
     // in-place rename matches too), an exactly-1:1 leftover fingerprint.
     let mut pools: HashMap<&str, (Vec<CallableRef>, Vec<CallableRef>)> = HashMap::new();
@@ -291,6 +300,136 @@ pub fn match_callables(
         matches,
         ambiguities,
         positional_remainders,
+    }
+}
+
+/// Lets a candidate that only a same-key positional fallback paired take the
+/// tier-3 pair instead, when its fingerprint equals exactly one base that
+/// tiers 1-2 left unmatched and no other candidate competes for it. The
+/// group's remaining candidates are then positionally re-paired with its base
+/// list, so the result does not depend on the candidates' source order. A 1:1
+/// group is a keyed edit, not an ambiguity, and is left alone.
+fn displace_positional_fallbacks(
+    base: &[FileCallables],
+    candidate: &[FileCallables],
+    matches: &mut Vec<CallableMatch>,
+    remainders: &[PositionalRemainder],
+    base_matched: &mut [Vec<bool>],
+    candidate_matched: &mut [Vec<bool>],
+) {
+    let base_index_of: HashMap<&RepoPath, usize> = base
+        .iter()
+        .enumerate()
+        .map(|(index, file)| (&file.path, index))
+        .collect();
+    let candidate_index_of: HashMap<&RepoPath, usize> = candidate
+        .iter()
+        .enumerate()
+        .map(|(index, file)| (&file.path, index))
+        .collect();
+    let candidate_fingerprint = |found: &CallableRef| -> &str {
+        candidate[candidate_index_of[&found.path]].callables[found.index]
+            .1
+            .as_str()
+    };
+
+    let mut unmatched_bases: HashMap<&str, usize> = HashMap::new();
+    for (file_index, file) in base.iter().enumerate() {
+        for (index, (_, fingerprint)) in file.callables.iter().enumerate() {
+            if !base_matched[file_index][index] {
+                *unmatched_bases.entry(fingerprint.as_str()).or_default() += 1;
+            }
+        }
+    }
+    let mut competing: HashMap<&str, usize> = HashMap::new();
+    for (file_index, file) in candidate.iter().enumerate() {
+        for (index, (_, fingerprint)) in file.callables.iter().enumerate() {
+            if !candidate_matched[file_index][index] {
+                *competing.entry(fingerprint.as_str()).or_default() += 1;
+            }
+        }
+    }
+    for found in matches.iter() {
+        if found.pairing == MatchPairing::Positional {
+            *competing
+                .entry(candidate_fingerprint(&found.candidate))
+                .or_default() += 1;
+        }
+    }
+
+    let displaced_in = |remainder: &PositionalRemainder| -> HashSet<usize> {
+        if remainder.base.len() == 1 && remainder.candidate.len() == 1 {
+            return HashSet::new();
+        }
+        remainder
+            .candidate
+            .iter()
+            .filter(|found| {
+                let fingerprint = candidate_fingerprint(found);
+                unmatched_bases.get(fingerprint) == Some(&1)
+                    && competing.get(fingerprint) == Some(&1)
+            })
+            .map(|found| found.index)
+            .collect()
+    };
+    let affected: Vec<(&PositionalRemainder, HashSet<usize>)> = remainders
+        .iter()
+        .map(|remainder| (remainder, displaced_in(remainder)))
+        .filter(|(_, displaced)| !displaced.is_empty())
+        .collect();
+    if affected.is_empty() {
+        return;
+    }
+
+    let mut tier_of: HashMap<(RepoPath, usize), MatchTier> = HashMap::new();
+    let touched: HashSet<(&RepoPath, usize)> = affected
+        .iter()
+        .flat_map(|(remainder, _)| {
+            remainder
+                .candidate
+                .iter()
+                .map(|found| (&found.path, found.index))
+        })
+        .collect();
+    let mut kept = Vec::with_capacity(matches.len());
+    for found in matches.drain(..) {
+        let key = (&found.candidate.path, found.candidate.index);
+        if found.pairing == MatchPairing::Positional && touched.contains(&key) {
+            tier_of.insert(
+                (found.candidate.path.clone(), found.candidate.index),
+                found.tier,
+            );
+            base_matched[base_index_of[&found.base.path]][found.base.index] = false;
+            candidate_matched[candidate_index_of[&found.candidate.path]][found.candidate.index] =
+                false;
+        } else {
+            kept.push(found);
+        }
+    }
+    *matches = kept;
+
+    for (remainder, displaced) in affected {
+        let Some(tier) = remainder
+            .candidate
+            .iter()
+            .find_map(|found| tier_of.get(&(found.path.clone(), found.index)).copied())
+        else {
+            continue;
+        };
+        let staying = remainder
+            .candidate
+            .iter()
+            .filter(|found| !displaced.contains(&found.index));
+        for (base_ref, candidate_ref) in remainder.base.iter().zip(staying) {
+            base_matched[base_index_of[&base_ref.path]][base_ref.index] = true;
+            candidate_matched[candidate_index_of[&candidate_ref.path]][candidate_ref.index] = true;
+            matches.push(CallableMatch {
+                base: base_ref.clone(),
+                candidate: candidate_ref.clone(),
+                tier,
+                pairing: MatchPairing::Positional,
+            });
+        }
     }
 }
 
