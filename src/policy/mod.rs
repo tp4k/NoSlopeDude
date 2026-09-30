@@ -8,6 +8,7 @@
 
 pub mod complexity;
 pub mod diagnostics;
+pub mod findings;
 
 use std::path::Path;
 

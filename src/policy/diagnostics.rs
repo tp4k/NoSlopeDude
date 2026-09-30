@@ -3,6 +3,7 @@
 //! mapping is M5-3's job.
 
 use crate::git::path::RepoPath;
+use crate::model::RuleId;
 
 /// A candidate callable has `CC > 10` while its matched base callable is
 /// absent or has `CC <= 10` (`nsd-plan-final.md` *Diagnostics*, `NSD-E101`).
@@ -15,6 +16,10 @@ pub const CODE_COMPLEXITY_INCREASED: &str = "NSD-E102";
 /// A callable-match ambiguity that could change an E101/E102 verdict
 /// (`NSD-G102`).
 pub const CODE_MATCH_AMBIGUITY: &str = "NSD-G102";
+
+/// A candidate core-rule finding with no matched base finding
+/// (`NSD-V101`).
+pub const CODE_UNMATCHED_FINDING: &str = "NSD-V101";
 
 /// The matched base callable behind a diagnostic.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,4 +40,14 @@ pub struct PolicyDiagnostic {
     pub candidate_start_line: usize,
     pub candidate_end_line: usize,
     pub base: Option<BaseCallable>,
+}
+
+/// One V101 about an unmatched candidate finding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FindingDiagnostic {
+    pub code: &'static str,
+    pub rule_id: RuleId,
+    pub candidate_path: RepoPath,
+    pub candidate_start_line: usize,
+    pub candidate_end_line: usize,
 }
