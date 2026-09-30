@@ -151,6 +151,7 @@ pub fn match_callables(
         .collect();
 
     let mut matches = Vec::new();
+    let mut positional_remainders = Vec::new();
 
     // Tier 1: same path, equal identity.
     for (base_index, base_file) in base.iter().enumerate() {
@@ -165,7 +166,7 @@ pub fn match_callables(
             0..candidate_file.callables.len(),
         );
         record_matches(
-            &pairs,
+            pairs,
             MatchSide {
                 file: base_file,
                 matched: &mut base_matched[base_index],
@@ -175,7 +176,10 @@ pub fn match_callables(
                 matched: &mut candidate_matched[candidate_index],
             },
             MatchTier::Structural,
-            &mut matches,
+            Recorded {
+                matches: &mut matches,
+                remainders: &mut positional_remainders,
+            },
         );
     }
 
@@ -202,7 +206,7 @@ pub fn match_callables(
             candidate_leftover,
         );
         record_matches(
-            &pairs,
+            pairs,
             MatchSide {
                 file: base_file,
                 matched: &mut base_matched[base_index],
@@ -212,7 +216,10 @@ pub fn match_callables(
                 matched: &mut candidate_matched[candidate_index],
             },
             MatchTier::Rename,
-            &mut matches,
+            Recorded {
+                matches: &mut matches,
+                remainders: &mut positional_remainders,
+            },
         );
     }
 
@@ -277,11 +284,12 @@ pub fn match_callables(
             .sort_by(|a, b| ref_order(a).cmp(&ref_order(b)));
     }
     ambiguities.sort_by(|a, b| a.fingerprint.cmp(&b.fingerprint));
+    positional_remainders.sort_by(|a, b| ref_order(&a.base[0]).cmp(&ref_order(&b.base[0])));
 
     MatchOutput {
         matches,
         ambiguities,
-        positional_remainders: Vec::new(),
+        positional_remainders,
     }
 }
 
@@ -300,23 +308,33 @@ fn group_and_pair(
     base_indices: impl Iterator<Item = usize>,
     candidate_callables: &[(CallableIdentity, String)],
     candidate_indices: impl Iterator<Item = usize>,
-) -> Vec<(usize, usize)> {
+) -> GroupPairs {
     let base_groups = identity_groups(base_callables, base_indices);
     let candidate_groups = identity_groups(candidate_callables, candidate_indices);
 
-    let mut pairs = Vec::new();
+    let mut pairs = GroupPairs::default();
     for (identity, base_group) in &base_groups {
         let Some(candidate_group) = candidate_groups.get(identity) else {
             continue;
         };
-        pairs.extend(pair_group(
+        let group = pair_group(
             base_group,
             base_callables,
             candidate_group,
             candidate_callables,
-        ));
+        );
+        pairs.pairs.extend(group.pairs);
+        pairs.remainders.extend(group.remainders);
     }
     pairs
+}
+
+/// Local-index pairs with their provenance, plus each same-key group's
+/// leftovers that the positional fallback drew from (base, candidate).
+#[derive(Default)]
+struct GroupPairs {
+    pairs: Vec<(usize, usize, MatchPairing)>,
+    remainders: Vec<(Vec<usize>, Vec<usize>)>,
 }
 
 fn identity_groups(
@@ -340,7 +358,7 @@ fn pair_group(
     base_callables: &[(CallableIdentity, String)],
     candidate_indices: &[usize],
     candidate_callables: &[(CallableIdentity, String)],
-) -> Vec<(usize, usize)> {
+) -> GroupPairs {
     let mut base_by_fingerprint: HashMap<&str, Vec<usize>> = HashMap::new();
     for &index in base_indices {
         base_by_fingerprint
@@ -365,7 +383,11 @@ fn pair_group(
         };
         let paired = base_bucket.len().min(candidate_bucket.len());
         for k in 0..paired {
-            pairs.push((base_bucket[k], candidate_bucket[k]));
+            pairs.push((
+                base_bucket[k],
+                candidate_bucket[k],
+                MatchPairing::FingerprintExact,
+            ));
             consumed_base.insert(base_bucket[k]);
             consumed_candidate.insert(candidate_bucket[k]);
         }
@@ -383,9 +405,18 @@ fn pair_group(
         .collect();
     let paired = remaining_base.len().min(remaining_candidate.len());
     for k in 0..paired {
-        pairs.push((remaining_base[k], remaining_candidate[k]));
+        pairs.push((
+            remaining_base[k],
+            remaining_candidate[k],
+            MatchPairing::Positional,
+        ));
     }
-    pairs
+    let remainders = if paired > 0 {
+        vec![(remaining_base, remaining_candidate)]
+    } else {
+        Vec::new()
+    };
+    GroupPairs { pairs, remainders }
 }
 
 /// One side (base or candidate) of a single file's tier-1/tier-2 pairing:
@@ -397,15 +428,26 @@ struct MatchSide<'a> {
     matched: &'a mut [bool],
 }
 
+/// Where `record_matches` appends its results.
+struct Recorded<'a> {
+    matches: &'a mut Vec<CallableMatch>,
+    remainders: &'a mut Vec<PositionalRemainder>,
+}
+
 /// Marks every paired local index as matched in both sides' bitmaps and
-/// records one `CallableMatch` per pair, tagged with `tier`.
+/// records one `CallableMatch` per pair, tagged with `tier`, and one
+/// `PositionalRemainder` per group that had one.
 fn record_matches(
-    pairs: &[(usize, usize)],
+    pairs: GroupPairs,
     base: MatchSide<'_>,
     candidate: MatchSide<'_>,
     tier: MatchTier,
-    matches: &mut Vec<CallableMatch>,
+    recorded: Recorded<'_>,
 ) {
+    let Recorded {
+        matches,
+        remainders,
+    } = recorded;
     let MatchSide {
         file: base_file,
         matched: base_matched,
@@ -414,7 +456,22 @@ fn record_matches(
         file: candidate_file,
         matched: candidate_matched,
     } = candidate;
-    for &(base_index, candidate_index) in pairs {
+    let refs = |file: &FileCallables, indices: &[usize]| -> Vec<CallableRef> {
+        indices
+            .iter()
+            .map(|&index| CallableRef {
+                path: file.path.clone(),
+                index,
+            })
+            .collect()
+    };
+    for (base_indices, candidate_indices) in &pairs.remainders {
+        remainders.push(PositionalRemainder {
+            base: refs(base_file, base_indices),
+            candidate: refs(candidate_file, candidate_indices),
+        });
+    }
+    for &(base_index, candidate_index, pairing) in &pairs.pairs {
         base_matched[base_index] = true;
         candidate_matched[candidate_index] = true;
         matches.push(CallableMatch {
@@ -427,7 +484,7 @@ fn record_matches(
                 index: candidate_index,
             },
             tier,
-            pairing: MatchPairing::FingerprintExact,
+            pairing,
         });
     }
 }
