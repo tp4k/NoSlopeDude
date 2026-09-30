@@ -321,7 +321,7 @@ pub fn classify(
             .filter(|base_ref| !tier3_matched_bases.contains(&(&base_ref.path, base_ref.index)))
             .collect();
         let set = classifier.base_set(options.iter().copied());
-        let unmatched_possible = remainder.candidate.len() > options.len();
+        let unmatched_possible = remainder.candidate.len() > remainder.base.len();
         for candidate_ref in &remainder.candidate {
             let key = (&candidate_ref.path, candidate_ref.index);
             match positional.remove(&key) {
