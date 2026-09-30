@@ -643,3 +643,91 @@ fn test_pairs_name_the_base_and_candidate_file_across_a_rename() {
     assert_eq!(pair.candidate.path, path("New.java"));
     assert_eq!(pair.base.index, pair.candidate.index);
 }
+
+#[test]
+fn test_inserted_duplicate_in_a_renamed_file_is_reported_at_its_own_line() {
+    let pads: Vec<String> = (0..PAD_METHODS)
+        .map(|k| method(&format!("pad{k}"), &["work();"]))
+        .collect();
+    let with = |run: String| {
+        let mut methods = pads.clone();
+        methods.push(run);
+        class("Widget", &methods)
+    };
+    let (_dir, repo) = common::init_repo();
+    let base = commit(
+        &repo,
+        &[(
+            "Old.java",
+            with(method("run", &["a();", CATCH, "b();", CATCH])),
+        )],
+    );
+    let candidate_text = with(method(
+        "run",
+        &["z();", CATCH, "a();", CATCH, "b();", CATCH],
+    ));
+    let candidate = commit(&repo, &[("New.java", candidate_text.clone())]);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    assert!(
+        matches!(evaluation.changes.as_slice(), [Change::Renamed { .. }]),
+        "{:?}",
+        evaluation.changes
+    );
+    let first_catch = *catch_lines(&candidate_text).first().expect("a catch line");
+    assert_eq!(
+        v101_sites(&evaluation),
+        vec![(rules::JAVA_EMPTY_CATCH, "New.java".to_string(), first_catch)]
+    );
+}
+
+#[test]
+fn test_output_is_sorted_by_candidate_path() {
+    const FILES: usize = 12;
+    let names: Vec<String> = (0..FILES).map(|k| format!("F{k:02}.java")).collect();
+    let (_dir, repo) = common::init_repo();
+    let base_files: Vec<(&str, String)> = names
+        .iter()
+        .map(|name| {
+            (
+                name.as_str(),
+                class("C", &[method("run", &["work();", CATCH])]),
+            )
+        })
+        .collect();
+    let candidate_files: Vec<(&str, String)> = names
+        .iter()
+        .map(|name| {
+            (
+                name.as_str(),
+                class("C", &[method("run", &["work();", CATCH, "more();", CATCH])]),
+            )
+        })
+        .collect();
+    let base = commit(&repo, &base_files);
+    let candidate = commit(&repo, &candidate_files);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    let diagnosed: Vec<String> = v101_sites(&evaluation)
+        .into_iter()
+        .map(|(_, file, _)| file)
+        .collect();
+    assert_eq!(diagnosed, names);
+    let paired: Vec<&RepoPath> = evaluation
+        .output
+        .pairs
+        .iter()
+        .map(|pair| &pair.candidate.path)
+        .collect();
+    let expected: Vec<RepoPath> = names.iter().map(|name| path(name)).collect();
+    assert_eq!(paired, expected.iter().collect::<Vec<_>>());
+    let unmatched: Vec<&RepoPath> = evaluation
+        .output
+        .unmatched_candidates
+        .iter()
+        .map(|found| &found.path)
+        .collect();
+    assert_eq!(unmatched, expected.iter().collect::<Vec<_>>());
+}
