@@ -728,3 +728,27 @@ fn test_scan_with_many_directives_and_findings_is_not_quadratic() {
     let unused = line_of(&text, "tail();") - 1;
     assert_eq!(sites, vec![(CODE_INVALID_SUPPRESSION, unused)]);
 }
+
+#[test]
+fn test_directive_suppresses_every_finding_of_its_rule_on_the_next_line() {
+    let two_catches = format!("{CATCH} {OTHER_CATCH}");
+    let (output, text) = pair(&["work();"], &[DIRECTIVE, &two_catches]);
+
+    let directive_line = line_of(&text, DIRECTIVE);
+    assert_eq!(
+        sites(&output),
+        vec![
+            (
+                CODE_NEW_SUPPRESSION,
+                Some("JAVA-EMPTY-CATCH"),
+                directive_line
+            ),
+            (
+                CODE_NEW_SUPPRESSION,
+                Some("JAVA-EMPTY-CATCH"),
+                directive_line
+            ),
+        ]
+    );
+    assert_eq!(v101_lines(&output), Vec::<usize>::new());
+}
