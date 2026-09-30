@@ -44,16 +44,21 @@ impl FileState {
         let directives = directives(&file.analysis.ir.root, file.source);
         let mut used = vec![false; directives.len()];
         let mut suppressed = HashSet::new();
+        let mut by_site: HashMap<(RuleId, usize), Vec<usize>> = HashMap::new();
+        for (index, analyzed) in file.analysis.findings.iter().enumerate() {
+            let finding = &analyzed.finding;
+            by_site
+                .entry((finding.rule_id, finding.start_line))
+                .or_default()
+                .push(index);
+        }
         for (slot, directive) in directives.iter().enumerate() {
             let Form::Valid(rule) = directive.form else {
                 continue;
             };
-            for (index, analyzed) in file.analysis.findings.iter().enumerate() {
-                let finding = &analyzed.finding;
-                if finding.rule_id == rule && finding.start_line == directive.line + 1 {
-                    used[slot] = true;
-                    suppressed.insert(index);
-                }
+            if let Some(indices) = by_site.get(&(rule, directive.line + 1)) {
+                used[slot] = true;
+                suppressed.extend(indices);
             }
         }
         FileState {
