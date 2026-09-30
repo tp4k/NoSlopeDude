@@ -314,6 +314,13 @@ pub fn classify(
         }
     }
 
+    let ambiguity_held_candidates: HashSet<(&RepoPath, usize)> = matched
+        .ambiguities
+        .iter()
+        .flat_map(|ambiguity| &ambiguity.candidate)
+        .map(|candidate_ref| (&candidate_ref.path, candidate_ref.index))
+        .collect();
+
     let mut remainder_sets: Vec<BaseSet> = Vec::with_capacity(matched.positional_remainders.len());
     let mut surplus: HashMap<(&RepoPath, usize), usize> = HashMap::new();
     for (set_index, remainder) in matched.positional_remainders.iter().enumerate() {
@@ -327,7 +334,9 @@ pub fn classify(
             .candidate
             .iter()
             .filter(|candidate_ref| {
-                !tier3_matched_candidates.contains(&(&candidate_ref.path, candidate_ref.index))
+                let key = (&candidate_ref.path, candidate_ref.index);
+                !tier3_matched_candidates.contains(&key)
+                    && !ambiguity_held_candidates.contains(&key)
             })
             .count();
         let unmatched_possible = open_candidates > options.len();
