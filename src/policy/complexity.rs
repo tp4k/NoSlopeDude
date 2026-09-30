@@ -312,14 +312,23 @@ pub fn classify(
         }
     }
 
-    for remainder in &matched.positional_remainders {
+    let mut remainder_sets: Vec<BaseSet> = Vec::with_capacity(matched.positional_remainders.len());
+    let mut surplus: HashMap<(&RepoPath, usize), usize> = HashMap::new();
+    for (set_index, remainder) in matched.positional_remainders.iter().enumerate() {
         let set = classifier.base_set(&remainder.base);
         let unmatched_possible = remainder.candidate.len() > remainder.base.len();
         for candidate_ref in &remainder.candidate {
-            if let Some(paired) = positional.remove(&(&candidate_ref.path, candidate_ref.index)) {
-                classifier.decide(candidate_ref, &set, unmatched_possible, Some(paired));
+            let key = (&candidate_ref.path, candidate_ref.index);
+            match positional.remove(&key) {
+                Some(paired) => {
+                    classifier.decide(candidate_ref, &set, unmatched_possible, Some(paired));
+                }
+                None => {
+                    surplus.insert(key, set_index);
+                }
             }
         }
+        remainder_sets.push(set);
     }
     for ((path, index), paired) in positional {
         let candidate_ref = CallableRef {
@@ -356,7 +365,12 @@ pub fn classify(
         })
         .collect();
     for candidate_ref in &unmatched {
-        classifier.pair(candidate_ref, None);
+        match surplus.get(&(&candidate_ref.path, candidate_ref.index)) {
+            Some(&set_index) => {
+                classifier.decide(candidate_ref, &remainder_sets[set_index], true, None);
+            }
+            None => classifier.pair(candidate_ref, None),
+        }
     }
 
     let mut out = classifier.out;
