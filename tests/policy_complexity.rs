@@ -460,6 +460,54 @@ fn test_ambiguity_held_candidate_does_not_open_the_unmatched_option() {
 }
 
 #[test]
+fn test_zero_to_k_ambiguity_member_still_opens_the_unmatched_option() {
+    let diagnostics = run(
+        &[("A.java", vec![spec("m", "b0", 15, 5)])],
+        &[
+            ("A.java", vec![spec("m", "c0", 15, 5), spec("m", "Y", 5, 5)]),
+            ("B.java", vec![spec("g", "Y", 5, 5)]),
+        ],
+    );
+
+    let all: Vec<_> = diagnostics
+        .iter()
+        .map(|d| (d.code, d.candidate_path.clone(), d.candidate_start_line))
+        .collect();
+    assert_eq!(all, vec![(CODE_MATCH_AMBIGUITY, path("A.java"), 1)]);
+}
+
+#[test]
+fn test_displaced_ambiguity_held_candidate_leaves_a_three_to_two_remainder() {
+    let diagnostics = run(
+        &[
+            (
+                "A.java",
+                vec![spec("m", "b0", 15, 5), spec("m", "b1", 15, 5)],
+            ),
+            (
+                "Gone.java",
+                vec![spec("h1", "X", 1, 5), spec("h2", "X", 1, 5)],
+            ),
+        ],
+        &[(
+            "A.java",
+            vec![
+                spec("m", "X", 15, 5),
+                spec("m", "c1", 15, 5),
+                spec("m", "c2", 15, 5),
+            ],
+        )],
+    );
+
+    let in_a: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.candidate_path == path("A.java"))
+        .map(|d| (d.code, d.candidate_start_line))
+        .collect();
+    assert_eq!(in_a, vec![(CODE_COMPLEXITY_ABOVE_THRESHOLD, 1)]);
+}
+
+#[test]
 fn test_g102_when_only_a_higher_cc_base_passes() {
     let diagnostics = run(
         &[(
