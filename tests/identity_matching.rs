@@ -20,7 +20,9 @@ use std::path::PathBuf;
 
 use nsd::git::diff::{self, Change};
 use nsd::git::path::RepoPath;
-use nsd::identity::matching::{match_callables, CallableRef, FileCallables, MatchTier};
+use nsd::identity::matching::{
+    match_callables, CallableRef, FileCallables, MatchPairing, MatchTier, PositionalRemainder,
+};
 use nsd::identity::{self, CallableIdentity, OwnerDigest};
 use nsd::ir::CallableKind;
 use nsd::lower::{self, IrFile};
@@ -770,4 +772,94 @@ fn test_duplicate_candidate_path_panics_in_debug() {
     ];
 
     let _ = match_callables(&base, &candidate, &[]);
+}
+
+/// Within one same-key group, the fingerprint-equal pair and the pairs made
+/// by the positional fallback carry different provenance.
+#[test]
+fn test_fingerprint_exact_and_positional_pairs_are_distinguished() {
+    let callback = synth_identity("cb", &[]);
+    let base = vec![synth_file(
+        "A.java",
+        &[
+            (callback.clone(), "blake3:a"),
+            (callback.clone(), "blake3:b"),
+            (callback.clone(), "blake3:c"),
+        ],
+    )];
+    let candidate = vec![synth_file(
+        "A.java",
+        &[
+            (callback.clone(), "blake3:c"),
+            (callback.clone(), "blake3:x"),
+            (callback.clone(), "blake3:y"),
+        ],
+    )];
+
+    let output = match_callables(&base, &candidate, &[]);
+
+    let pairing_of = |base_index: usize| {
+        output
+            .matches
+            .iter()
+            .find(|m| m.base == callable_ref("A.java", base_index))
+            .map(|m| m.pairing)
+    };
+    assert_eq!(output.matches.len(), 3, "{output:#?}");
+    assert_eq!(pairing_of(2), Some(MatchPairing::FingerprintExact));
+    assert_eq!(pairing_of(0), Some(MatchPairing::Positional));
+    assert_eq!(pairing_of(1), Some(MatchPairing::Positional));
+}
+
+/// The callables a same-key group could not pair by fingerprint are exposed,
+/// one remainder per group, sorted by (path bytes, index) of the first base
+/// member; a group that fingerprint-paired completely has none.
+#[test]
+fn test_positional_remainders_are_reported() {
+    let callback = synth_identity("cb", &[]);
+    let exact = synth_identity("exact", &[]);
+    let base = vec![
+        synth_file(
+            "Z.java",
+            &[(callback.clone(), "blake3:z1"), (exact.clone(), "blake3:e")],
+        ),
+        synth_file(
+            "A.java",
+            &[
+                (callback.clone(), "blake3:a1"),
+                (callback.clone(), "blake3:a2"),
+                (callback.clone(), "blake3:keep"),
+            ],
+        ),
+    ];
+    let candidate = vec![
+        synth_file(
+            "Z.java",
+            &[(callback.clone(), "blake3:z2"), (exact.clone(), "blake3:e")],
+        ),
+        synth_file(
+            "A.java",
+            &[
+                (callback.clone(), "blake3:keep"),
+                (callback.clone(), "blake3:a3"),
+                (callback.clone(), "blake3:a4"),
+            ],
+        ),
+    ];
+
+    let output = match_callables(&base, &candidate, &[]);
+
+    assert_eq!(
+        output.positional_remainders,
+        vec![
+            PositionalRemainder {
+                base: vec![callable_ref("A.java", 0), callable_ref("A.java", 1)],
+                candidate: vec![callable_ref("A.java", 1), callable_ref("A.java", 2)],
+            },
+            PositionalRemainder {
+                base: vec![callable_ref("Z.java", 0)],
+                candidate: vec![callable_ref("Z.java", 0)],
+            },
+        ]
+    );
 }
