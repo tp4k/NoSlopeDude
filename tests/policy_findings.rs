@@ -731,3 +731,104 @@ fn test_output_is_sorted_by_candidate_path() {
         .collect();
     assert_eq!(unmatched, expected.iter().collect::<Vec<_>>());
 }
+
+#[test]
+fn test_rule_id_separates_findings_with_equal_syntax() {
+    let (_dir, repo) = common::init_repo();
+    let base_text = "class A {\n    int m(boolean x) {\n        if (x) {\n            return 1;\n        } else {\n            return 2;\n        }\n    }\n}\n".to_string();
+    let candidate_text = "class A {\n    int m(boolean x) {\n        return 1;\n        {\n            return 2;\n        }\n    }\n}\n".to_string();
+    let base = commit(&repo, &[("A.java", base_text)]);
+    let candidate = commit(&repo, &[("A.java", candidate_text)]);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    assert_eq!(
+        v101_sites(&evaluation),
+        vec![(
+            rules::JAVA_UNREACHABLE_AFTER_RETURN,
+            "A.java".to_string(),
+            4
+        )]
+    );
+    assert!(evaluation.output.pairs.is_empty());
+}
+
+#[test]
+fn test_replaced_finding_with_different_syntax_is_new() {
+    let (_dir, repo) = common::init_repo();
+    let base_text = class("Widget", &[method("run", &["work();", CATCH])]);
+    let candidate_text = class(
+        "Widget",
+        &[method(
+            "run",
+            &["work();", "try { work(); } catch (Throwable t) { }"],
+        )],
+    );
+    let base = commit(&repo, &[("Widget.java", base_text)]);
+    let candidate = commit(&repo, &[("Widget.java", candidate_text.clone())]);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    assert_eq!(evaluation.matched.matches.len(), 1);
+    assert_eq!(
+        v101_sites(&evaluation),
+        vec![(
+            rules::JAVA_EMPTY_CATCH,
+            "Widget.java".to_string(),
+            catch_lines(&candidate_text)[0]
+        )]
+    );
+    assert!(evaluation.output.pairs.is_empty());
+}
+
+#[test]
+fn test_many_identical_findings_without_line_mappings_match_in_bounded_time() {
+    let line = "try{}catch(E e){}\n";
+    let wrap = |body: &str| format!("class Big {{\n    void run() {{\n{body}    }}\n}}\n");
+    let text = wrap(&line.repeat(LARGE_GROUP));
+    let reindented = wrap(&format!("  {line}").repeat(LARGE_GROUP));
+    let mapped = nsd::git::diff::map_lines(text.as_bytes(), reindented.as_bytes())
+        .expect("map lines")
+        .base_to_candidate;
+    let first_body_line = 3;
+    assert!(
+        (first_body_line..first_body_line + LARGE_GROUP).all(|l| !mapped.contains_key(&l)),
+        "a catch line still maps"
+    );
+    let (_dir, repo) = common::init_repo();
+    let base = commit(&repo, &[("Big.java", text)]);
+    let candidate = commit(&repo, &[("Big.java", reindented)]);
+
+    let changes = diff_commit_to_commit(&repo, Some(base), candidate).expect("diff commits");
+    let (base_paths, candidate_paths) = changed_paths(&changes);
+    let base_files = analyzed(
+        &CommitSnapshot::at(&repo, base).expect("base snapshot"),
+        &repo,
+        &base_paths,
+    );
+    let candidate_files = analyzed(
+        &CommitSnapshot::at(&repo, candidate).expect("candidate snapshot"),
+        &repo,
+        &candidate_paths,
+    );
+    let matched = match_callables(
+        &callables_of(&base_files),
+        &callables_of(&candidate_files),
+        &changes,
+    );
+
+    let started = Instant::now();
+    let output = match_findings(
+        &finding_files(&base_files),
+        &finding_files(&candidate_files),
+        &matched,
+        &changes,
+        &default_policy(),
+    )
+    .expect("match findings");
+    let elapsed = started.elapsed();
+
+    assert!(elapsed < BOUND, "matching took {elapsed:?}");
+    assert_eq!(output.pairs.len(), LARGE_GROUP);
+    assert!(output.diagnostics.is_empty());
+}
