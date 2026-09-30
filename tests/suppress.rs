@@ -662,3 +662,36 @@ fn test_modified_multiline_block_directive_raises_s102() {
         )]
     );
 }
+
+#[test]
+fn test_directive_on_a_later_javadoc_line_is_invalid() {
+    let (output, text) = pair(
+        &["work();"],
+        &[
+            "/**",
+            " * nsd-ignore[JAVA-EMPTY-CATCH]: reason",
+            " */",
+            CATCH,
+        ],
+    );
+
+    assert_eq!(
+        sites(&output),
+        vec![(CODE_INVALID_SUPPRESSION, None, line_of(&text, "nsd-ignore"))]
+    );
+    assert_eq!(v101_lines(&output), vec![line_of(&text, CATCH)]);
+}
+
+#[test]
+fn test_directive_on_a_later_block_comment_line_is_invalid() {
+    let (output, text) = pair(
+        &["work();"],
+        &["/*", "   nsd-ignore[JAVA-EMPTY-CATCH]: reason", "*/", CATCH],
+    );
+
+    assert_eq!(
+        sites(&output),
+        vec![(CODE_INVALID_SUPPRESSION, None, line_of(&text, "nsd-ignore"))]
+    );
+    assert_eq!(v101_lines(&output), vec![line_of(&text, CATCH)]);
+}
