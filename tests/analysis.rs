@@ -299,3 +299,16 @@ fn test_bodies_without_an_ir_subtree_share_one_fingerprint() {
     assert_eq!(past_source, further_past);
     assert_ne!(past_source, analysis.callables[0].body_fingerprint);
 }
+
+fn unreachable_method(second_statement: &str) -> String {
+    format!(
+        "class C {{\n    int m() {{\n        return 1;\n        a();\n        {second_statement}\n    }}\n}}\n"
+    )
+}
+
+#[test]
+fn test_finding_syntax_covers_every_flagged_statement() {
+    let original = only_finding_digest(&unreachable_method("b();"));
+    let edited = only_finding_digest(&unreachable_method("c();"));
+    assert_ne!(original, edited);
+}
