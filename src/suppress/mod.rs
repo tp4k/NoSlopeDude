@@ -10,6 +10,7 @@
 mod directive;
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 
 use crate::config::{PolicyConfig, Severity};
 use crate::git::diff::{map_lines, Change};
@@ -66,10 +67,11 @@ impl FileState {
         self.directives[slot].form == Form::Invalid || !self.used[slot]
     }
 
-    fn slot_at(&self, line: usize) -> Option<usize> {
-        self.directives
-            .iter()
-            .position(|directive| directive.line == line)
+    /// Slots of the directives on `line`; `directives` is sorted by line.
+    fn slots_at(&self, line: usize) -> Range<usize> {
+        let first = self.directives.partition_point(|d| d.line < line);
+        let last = self.directives.partition_point(|d| d.line <= line);
+        first..last
     }
 }
 
@@ -139,13 +141,11 @@ pub fn apply_suppressions(
                 })
                 .unwrap_or(false);
             if !base_suppressed {
-                let slot = state.slot_at(finding.start_line - 1);
                 diagnostics.push(SuppressionDiagnostic {
                     code: CODE_NEW_SUPPRESSION,
                     rule_id: Some(finding.rule_id),
                     candidate_path: file.path.clone(),
-                    directive_line: slot
-                        .map_or(finding.start_line - 1, |slot| state.directives[slot].line),
+                    directive_line: finding.start_line - 1,
                 });
             }
         }
@@ -172,13 +172,12 @@ pub fn apply_suppressions(
             for slot in problems {
                 let current = &state.directives[slot];
                 let tolerated = twin.is_some_and(|(_, base_state)| {
-                    candidate_to_base
-                        .get(&current.line)
-                        .and_then(|&line| base_state.slot_at(line))
-                        .is_some_and(|base_slot| {
+                    candidate_to_base.get(&current.line).is_some_and(|&line| {
+                        base_state.slots_at(line).any(|base_slot| {
                             base_state.directives[base_slot].text == current.text
                                 && base_state.is_problem(base_slot)
                         })
+                    })
                 });
                 if !tolerated {
                     diagnostics.push(s102(&file.path, current));

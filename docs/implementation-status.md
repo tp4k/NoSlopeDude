@@ -119,7 +119,7 @@ Plan: `nsd-plan-final.md` *M1–M2*, plus `nsd-plan-implementation.md`
 
 ## M3–M5 — Policy, suppressions, clones, cache
 
-Plan: `nsd-plan-final.md` *M3–M5*. M3-1 is in progress and M3-2 is done (library-level) on `feat/m3-policy`; every other row is not started.
+Plan: `nsd-plan-final.md` *M3–M5*. M3-1 is in progress; M3-2 and M3-3 are done (library-level) on `feat/m3-policy`; every other row is not started.
 
 | ID | Deliverable | Status | Branch | Evidence |
 |---|---|---|---|---|

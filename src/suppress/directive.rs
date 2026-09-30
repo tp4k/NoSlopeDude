@@ -8,6 +8,7 @@ use crate::rules::ALL_RULE_IDS;
 const DIRECTIVE_PREFIX: &str = "nsd-ignore";
 const LINE_COMMENT_OPENER: &str = "//";
 const BLOCK_COMMENT_OPENER: &str = "/*";
+const BLOCK_DOC_MARK: char = '*';
 const RULE_OPEN: char = '[';
 const RULE_CLOSE: char = ']';
 const REASON_SEPARATOR: char = ':';
@@ -48,10 +49,8 @@ fn directive(node: &IrNode, source: &[u8]) -> Option<Directive> {
     let (opener, body) = if let Some(body) = text.strip_prefix(LINE_COMMENT_OPENER) {
         (LINE_COMMENT_OPENER, body)
     } else {
-        (
-            BLOCK_COMMENT_OPENER,
-            text.strip_prefix(BLOCK_COMMENT_OPENER)?,
-        )
+        let body = text.strip_prefix(BLOCK_COMMENT_OPENER)?;
+        (BLOCK_COMMENT_OPENER, body.trim_start_matches(BLOCK_DOC_MARK))
     };
     let rest = body.trim_start().strip_prefix(DIRECTIVE_PREFIX)?;
     let valid = opener == LINE_COMMENT_OPENER && is_standalone(source, start);
