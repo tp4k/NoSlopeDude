@@ -492,8 +492,11 @@ fn test_off_disables_s102() {
     let codes = |output: &SuppressionOutput| -> Vec<&'static str> {
         output.diagnostics.iter().map(|d| d.code).collect()
     };
-    assert_eq!(codes(&warn), vec![CODE_INVALID_SUPPRESSION]);
-    assert_eq!(codes(&off), Vec::<&str>::new());
+    assert_eq!(
+        codes(&warn),
+        vec![CODE_INVALID_SUPPRESSION, CODE_NEW_SUPPRESSION]
+    );
+    assert_eq!(codes(&off), vec![CODE_NEW_SUPPRESSION]);
     assert!(scan(&candidate_text, &policy_with_s102(Severity::Off)).is_empty());
 
     let catch_only = run_with(&["work();", DIRECTIVE, CATCH]);
