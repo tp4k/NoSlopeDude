@@ -12,7 +12,8 @@ round; see *How to update this file* at the bottom and the matching rule in
 [`AGENTS.md`](../AGENTS.md).
 
 Last updated: 2026-09-30, from `main@8088781` (M1–M2 merged) plus
-`feat/m3-policy` (M3 work in progress; WS-1 hygiene landed at `ce9a1ee`).
+`feat/m3-policy` (M3 work in progress; WS-1 hygiene landed at `ce9a1ee`, WS-2
+per-file analysis primitive landed at `5d09448`).
 
 ## Legend
 
