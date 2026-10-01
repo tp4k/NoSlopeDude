@@ -96,7 +96,7 @@ pub struct CoverageDiagnostic {
     pub reason: UnanalyzableReason,
 }
 
-/// A changed clone occurrence is new, or extended past the move threshold,
+/// A changed clone occurrence is new, or extended past the extension threshold,
 /// with a qualifying match elsewhere (`NSD-V102`).
 pub const CODE_CLONE_REGRESSION: &str = "NSD-V102";
 

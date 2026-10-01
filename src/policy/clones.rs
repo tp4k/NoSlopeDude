@@ -384,6 +384,40 @@ impl<'a> MovePool<'a> {
     }
 }
 
+/// Per statement count `1..=max_count` of the run starting at `first`: how
+/// many of its executable lines are in `mapped_lines`, and whether any maps
+/// through `base_to_candidate` outside `span`. `statement_lines` holds each
+/// statement's own D11 lines; a line a previous statement of the run already
+/// reached is counted once, as `run_executable_lines` does.
+fn run_tallies(
+    statement_lines: &[Vec<usize>],
+    first: usize,
+    max_count: usize,
+    mapped_lines: &[usize],
+    base_to_candidate: &BTreeMap<usize, usize>,
+    span: (usize, usize),
+) -> Vec<(usize, bool)> {
+    let mut last_counted_line = 0usize;
+    let mut overlap = 0usize;
+    let mut escapes = false;
+    statement_lines[first..first + max_count]
+        .iter()
+        .map(|lines| {
+            for &line in lines {
+                if line <= last_counted_line {
+                    continue;
+                }
+                last_counted_line = line;
+                overlap += usize::from(mapped_lines.binary_search(&line).is_ok());
+                escapes |= base_to_candidate
+                    .get(&line)
+                    .is_some_and(|mapped| !(span.0..=span.1).contains(mapped));
+            }
+            (overlap, escapes)
+        })
+        .collect()
+}
+
 /// The base occurrence of the counterpart file that shares the most
 /// executable lines with the candidate occurrence through the line map; ties
 /// go to the larger one, then source order. A base occurrence with an
@@ -393,6 +427,7 @@ fn diff_mapped(
     base: usize,
     base_view: &FileView<'_>,
     base_by_container: &HashMap<(usize, u32), Vec<Candidate>>,
+    statement_lines: &mut HashMap<(usize, u32), Vec<Vec<usize>>>,
     base_to_candidate: &BTreeMap<usize, usize>,
     span: (usize, usize),
     mapped_lines: &[usize],
@@ -406,20 +441,33 @@ fn diff_mapped(
         let Some(runs) = base_by_container.get(&(base, container as u32)) else {
             continue;
         };
-        for run in runs {
-            if run.start_line > highest || run.end_line < lowest {
-                continue;
-            }
-            let lines = base_view.executable_lines(run);
-            let escapes = lines.iter().any(|line| {
-                base_to_candidate
-                    .get(line)
-                    .is_some_and(|mapped| !(span.0..=span.1).contains(mapped))
+        let touching: Vec<&Candidate> = runs
+            .iter()
+            .filter(|run| run.start_line <= highest && run.end_line >= lowest)
+            .collect();
+        let mut longest: BTreeMap<usize, usize> = BTreeMap::new();
+        for run in &touching {
+            let count = longest.entry(run.first_statement as usize).or_insert(0);
+            *count = (*count).max(run.statement_count);
+        }
+        let table = statement_lines
+            .entry((base, container as u32))
+            .or_insert_with(|| {
+                base_view.containers[container]
+                    .iter()
+                    .map(|statement| run_executable_lines(std::slice::from_ref(statement)))
+                    .collect()
             });
-            let overlap = lines
-                .iter()
-                .filter(|line| mapped_lines.binary_search(line).is_ok())
-                .count();
+        let tallies: BTreeMap<usize, Vec<(usize, bool)>> = longest
+            .into_iter()
+            .map(|(first, count)| {
+                let tally = run_tallies(table, first, count, mapped_lines, base_to_candidate, span);
+                (first, tally)
+            })
+            .collect();
+        for run in touching {
+            let (overlap, escapes) =
+                tallies[&(run.first_statement as usize)][run.statement_count - 1];
             if escapes || overlap == 0 {
                 continue;
             }
@@ -534,6 +582,7 @@ pub fn evaluate_clones(
         }
     }
 
+    let mut statement_lines: HashMap<(usize, u32), Vec<Vec<usize>>> = HashMap::new();
     let mut firing: Vec<(&Subject<'_>, Option<usize>)> = Vec::new();
     let mut added_subjects: Vec<&Subject<'_>> = Vec::new();
     for subject in &subjects {
@@ -550,6 +599,7 @@ pub fn evaluate_clones(
                     base,
                     &base_views[base],
                     &base_by_container,
+                    &mut statement_lines,
                     &facts.maps[slot].base_to_candidate,
                     (subject.run.start_line, subject.run.end_line),
                     &lines,
