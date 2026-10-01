@@ -942,3 +942,17 @@ fn test_unchanged_top_level_suppression_raises_nothing_when_the_file_changes_els
     assert_eq!(found, vec![]);
     assert_eq!(unmatched, 0);
 }
+
+#[test]
+fn test_directive_moved_from_top_level_into_a_new_function_raises_s101() {
+    let base = format!("{TS_DIRECTIVE}\n{TS_CATCH}\n");
+    let candidate = format!("function fresh() {{\n  work();\n  {TS_DIRECTIVE}\n  {TS_CATCH}\n}}\n");
+
+    let (found, unmatched) = ts_sites(&base, &candidate);
+
+    assert_eq!(
+        found,
+        vec![(CODE_NEW_SUPPRESSION, Some(rules::JSTS_EMPTY_CATCH), 3)]
+    );
+    assert_eq!(unmatched, 0);
+}
