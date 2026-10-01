@@ -832,3 +832,31 @@ fn test_many_identical_findings_without_line_mappings_match_in_bounded_time() {
     assert_eq!(output.pairs.len(), LARGE_GROUP);
     assert!(output.diagnostics.is_empty());
 }
+
+#[test]
+fn test_pairs_record_whether_they_matched_in_file_context() {
+    let (_dir, repo) = common::init_repo();
+    let unchanged = class("Widget", &[method("run", &["work();", CATCH])]);
+    let base = commit(&repo, &[("Widget.java", unchanged.clone())]);
+    let candidate = commit(&repo, &[("Widget.java", format!("// pad\n{unchanged}"))]);
+    let in_callable = evaluate(&repo, base, candidate);
+
+    let (_dir, repo) = common::init_repo();
+    let base = commit(
+        &repo,
+        &[(
+            "Widget.java",
+            class("Widget", &[method("legacy", &[CATCH])]),
+        )],
+    );
+    let candidate = commit(
+        &repo,
+        &[("Widget.java", class("Widget", &[method("fresh", &[CATCH])]))],
+    );
+    let in_file = evaluate(&repo, base, candidate);
+
+    assert_eq!(in_callable.output.pairs.len(), 1);
+    assert!(!in_callable.output.pairs[0].in_file_context);
+    assert_eq!(in_file.output.pairs.len(), 1);
+    assert!(in_file.output.pairs[0].in_file_context);
+}

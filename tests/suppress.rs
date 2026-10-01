@@ -752,3 +752,54 @@ fn test_directive_suppresses_every_finding_of_its_rule_on_the_next_line() {
     );
     assert_eq!(v101_lines(&output), Vec::<usize>::new());
 }
+
+// ---------------------------------------------------------------------
+// Suppression follow-ups: file-context carry-over and prose in comments.
+// ---------------------------------------------------------------------
+
+#[test]
+fn test_directive_carried_into_an_unmatched_callable_raises_s101() {
+    let (_dir, repo) = common::init_repo();
+    let base_text = class(&[method("legacy", &[DIRECTIVE, CATCH])]);
+    let candidate_text = class(&[method("fresh", &[DIRECTIVE, CATCH])]);
+    let base = commit(&repo, &base_text);
+    let candidate = commit(&repo, &candidate_text);
+
+    let output = evaluate(&repo, base, candidate);
+
+    assert_eq!(
+        sites(&output),
+        vec![(
+            CODE_NEW_SUPPRESSION,
+            Some(rules::JAVA_EMPTY_CATCH),
+            line_of(&candidate_text, DIRECTIVE)
+        )]
+    );
+    assert!(output.findings.is_empty());
+}
+
+#[test]
+fn test_javadoc_prose_mentioning_nsd_ignore_is_not_a_directive() {
+    let (output, text) = pair(
+        &["work();"],
+        &[
+            "/**",
+            " * nsd-ignore directives are documented here",
+            " */",
+            "work();",
+            "/**",
+            " * nsd-ignore[JAVA-EMPTY-CATCH]: reason",
+            " */",
+            "work();",
+        ],
+    );
+
+    assert_eq!(
+        sites(&output),
+        vec![(
+            CODE_INVALID_SUPPRESSION,
+            None,
+            line_of(&text, "nsd-ignore[")
+        )]
+    );
+}
