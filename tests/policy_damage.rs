@@ -460,3 +460,31 @@ fn test_edit_inside_a_legacy_damaged_top_level_block_raises_a101() {
 
     assert_eq!(evaluation.sites, vec![site("w.tsx", 1, 5)]);
 }
+
+#[test]
+fn test_end_line_edit_of_a_line_sharing_clean_callable_is_not_swallowed() {
+    let base_text = "export const c = () => <div>a & b</div>; export const d = (x: number) => {\n  if (x) { return 1; }\n  return 2;\n};\nexport function ok() {\n  return 1;\n}\n";
+    let edited = base_text.replace("  return 2;\n};\n", "  return 2;\n}; // edited\n");
+    let (_dir, repo) = common::init_repo();
+    let base = commit(&repo, &[("w.tsx", base_text.to_string())]);
+    let candidate = commit(&repo, &[("w.tsx", edited)]);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    assert_eq!(evaluation.changes.len(), 1);
+    assert!(evaluation.sites.is_empty(), "{:?}", evaluation.sites);
+}
+
+#[test]
+fn test_start_line_edit_of_a_line_sharing_clean_callable_is_not_swallowed() {
+    let base_text = "export function d(x: number) {\n  if (x) { return 1; }\n  return 2;\n} export const c = () => <div>a & b</div>;\nexport function ok() {\n  return 1;\n}\n";
+    let edited = base_text.replace("d(x: number)", "d(y: number)");
+    let (_dir, repo) = common::init_repo();
+    let base = commit(&repo, &[("w.tsx", base_text.to_string())]);
+    let candidate = commit(&repo, &[("w.tsx", edited)]);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    assert_eq!(evaluation.changes.len(), 1);
+    assert!(evaluation.sites.is_empty(), "{:?}", evaluation.sites);
+}
