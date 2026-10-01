@@ -1957,9 +1957,11 @@ fn test_extension_of_a_clone_inside_a_longer_method_uses_the_clone_as_base() {
     assert_eq!(found[0].added_lines, 2);
 }
 
-fn container_run(statement_count: usize) -> (Duration, usize) {
+const CUBIC_THRESHOLD_DIVISOR: usize = 10;
+
+fn container_run(statement_count: usize, added: usize) -> (Duration, Vec<CloneDiagnostic>) {
     let base_body = statements("a", statement_count);
-    let extended = format!("{base_body}{}", statements("e", 1));
+    let extended = format!("{base_body}{}", statements("e", added));
     let (_dir, repo) = common::init_repo();
     let base = commit(
         &repo,
@@ -1975,24 +1977,86 @@ fn container_run(statement_count: usize) -> (Duration, usize) {
             ("B.java", java("B", &extended)),
         ],
     );
-    fastest_evaluation(&load(&repo, base, candidate))
+    let sides = load(&repo, base, candidate);
+    let (fastest, _) = fastest_evaluation(&sides);
+    let found = evaluate_sides(
+        &sides,
+        DEFAULT_MIN_CLONE_LINES,
+        &policy_with(Severity::Deny),
+        false,
+    );
+    (fastest, found)
 }
 
 #[test]
 fn test_diff_mapping_does_not_scale_cubically_in_container_size() {
-    let small = container_run(CUBIC_SMALL_CONTAINER);
-    let large = container_run(CUBIC_SMALL_CONTAINER * CUBIC_FACTOR);
+    let large_container = CUBIC_SMALL_CONTAINER * CUBIC_FACTOR;
+    let small = container_run(CUBIC_SMALL_CONTAINER, 1);
+    let large = container_run(large_container, 1);
 
-    assert_eq!((small.1, large.1), (0, 0), "+1 is within the threshold");
+    assert_eq!(
+        (small.1.len(), large.1.len()),
+        (0, 0),
+        "+1 is within the threshold"
+    );
     assert!(
         large.0 < small.0 * SCALING_ASSERT_MULTIPLIER,
         "a cubic pass scales ~64x from s to 4s, a quadratic one ~16x: s={CUBIC_SMALL_CONTAINER} \
-         took {:?}, s={} took {:?}, ratio {:.1}x, expected < {SCALING_ASSERT_MULTIPLIER}x",
+         took {:?}, s={large_container} took {:?}, ratio {:.1}x, expected < \
+         {SCALING_ASSERT_MULTIPLIER}x",
         small.0,
-        CUBIC_SMALL_CONTAINER * CUBIC_FACTOR,
         large.0,
         large.0.as_secs_f64() / small.0.as_secs_f64().max(f64::EPSILON)
     );
+
+    for container in [CUBIC_SMALL_CONTAINER, large_container] {
+        let added = container / CUBIC_THRESHOLD_DIVISOR + 1;
+        let found = container_run(container, added).1;
+        assert_eq!(found.len(), 1, "s={container}, +{added}: {found:?}");
+        assert_eq!(found[0].base_lines, Some(container), "{found:?}");
+        assert_eq!(found[0].added_lines, added, "{found:?}");
+    }
+}
+
+const SHRINK_CLONE_STATEMENTS: usize = 100;
+const SHRINK_KEPT: usize = 50;
+const SHRINK_ADDED: usize = 6;
+const SHRINK_EFFECTIVE_BASE: usize = SHRINK_KEPT + SHRINK_ADDED;
+
+#[test]
+fn test_shrink_plus_add_of_a_hundred_line_clone_is_graded_on_the_effective_base() {
+    let whole = statements("s", SHRINK_CLONE_STATEMENTS);
+    let kept = statement_range("s", 0, SHRINK_KEPT - 1);
+    let shrunk = format!("{kept}{}", statements("e", SHRINK_ADDED));
+    let (_dir, repo) = common::init_repo();
+    let base = commit(
+        &repo,
+        &[
+            ("A.java", java("A", &whole)),
+            ("B.java", java("B", &shrunk)),
+        ],
+    );
+    let candidate = commit(
+        &repo,
+        &[
+            ("A.java", java("A", &shrunk)),
+            ("B.java", java("B", &shrunk)),
+        ],
+    );
+
+    let found = evaluate(&repo, base, candidate);
+
+    assert_eq!(
+        sites(&found),
+        vec![body_site("A.java", SHRINK_EFFECTIVE_BASE)],
+        "{found:?}"
+    );
+    assert_eq!(
+        found[0].base_lines,
+        Some(SHRINK_EFFECTIVE_BASE),
+        "{found:?}"
+    );
+    assert_eq!(found[0].added_lines, SHRINK_ADDED, "{found:?}");
 }
 
 // ---------------------------------------------------------------------
