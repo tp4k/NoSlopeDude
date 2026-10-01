@@ -1455,3 +1455,59 @@ fn test_merging_two_methods_into_an_existing_clone_without_new_lines_raises_noth
         "the same merge plus a new copy raises on the copy only: {copied:?}"
     );
 }
+
+// ---------------------------------------------------------------------
+// The base of an extension is clone-sized even when the enclosing run's
+// tail is not diff-mapped.
+// ---------------------------------------------------------------------
+
+/// Like `extension_inside_larger_method`, but the candidate's `A.java` either
+/// reindents the whole tail (`reindent`) or drops it, so no tail line is an
+/// unchanged context line.
+fn extension_with_unmapped_tail(reindent: bool) -> Vec<CloneDiagnostic> {
+    let core = statements("a", EXTENSION_BASE_SMALL);
+    let tail_body = statements("f", ENCLOSING_TAIL_STATEMENTS);
+    let extension = statements("e", ENCLOSING_EXTENSION);
+    let candidate_tail = if reindent {
+        reindent_all(&tail_body)
+    } else {
+        String::new()
+    };
+    let (_dir, repo) = common::init_repo();
+    let base = commit(
+        &repo,
+        &[
+            ("A.java", java("A", &format!("{core}{tail_body}"))),
+            ("B.java", java("B", &format!("{core}{extension}"))),
+        ],
+    );
+    let candidate = commit(
+        &repo,
+        &[
+            (
+                "A.java",
+                java("A", &format!("{core}{extension}{candidate_tail}")),
+            ),
+            ("B.java", java("B", &format!("{core}{extension}"))),
+        ],
+    );
+    evaluate(&repo, base, candidate)
+}
+
+#[test]
+fn test_reindented_tail_of_an_enclosing_method_does_not_inflate_the_base() {
+    for reindent in [true, false] {
+        let found = extension_with_unmapped_tail(reindent);
+
+        assert_eq!(
+            sites(&found),
+            vec![body_site(
+                "A.java",
+                EXTENSION_BASE_SMALL + ENCLOSING_EXTENSION
+            )],
+            "reindent={reindent}: {found:?}"
+        );
+        assert_eq!(found[0].base_lines, Some(EXTENSION_BASE_SMALL));
+        assert_eq!(found[0].added_lines, ENCLOSING_EXTENSION);
+    }
+}
