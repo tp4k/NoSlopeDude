@@ -37,7 +37,13 @@ pub enum UnanalyzableReason {
 impl UnanalyzableReason {
     /// A stable snake_case spelling of this reason.
     pub fn label(self) -> &'static str {
-        unimplemented!()
+        match self {
+            UnanalyzableReason::NonUtf8Path => "non_utf8_path",
+            UnanalyzableReason::UnsupportedExtension => "unsupported_extension",
+            UnanalyzableReason::TooLarge => "too_large",
+            UnanalyzableReason::InvalidEncoding => "invalid_encoding",
+            UnanalyzableReason::ParserUnavailable => "parser_unavailable",
+        }
     }
 }
 
