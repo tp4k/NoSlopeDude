@@ -147,3 +147,29 @@ to the single anonymous kind `"static get"` (`grammar.js:1252`), whose own
 source text carries whatever internal whitespace and trailing newline the
 author wrote — collapsed before hashing so two copies differing only in
 that token's internal formatting still fingerprint identically.
+
+## V102: clone regressions (M4-2)
+
+`src/policy/clones.rs::evaluate_clones` raises `NSD-V102` over a diff. The
+rules are `nsd-plan-final.md` *Diagnostics* and amendment A3, and
+`nsd-plan-implementation.md` *Policy and analysis behavior*; this section
+only names the terms.
+
+- An *occurrence* is one D15 candidate run, with its D11 `source_lines`.
+  On the candidate side only members of a maximal group (D14 grouping, D15
+  subsumption, over unchanged and changed files) count. On the base side
+  every qualifying run counts, unreduced, and the base version of a changed
+  path never joins the candidate groups.
+- A candidate occurrence is evaluated only if it lies in a changed file and
+  holds an added executable line, so pure line shifts and comment-only
+  edits never fire.
+- An *extension*: the diff maps some base occurrence B onto it (most shared
+  executable lines wins). It fires when its added executable lines exceed
+  `max(1, floor(B.source_lines / 10))`.
+- A *move*: with no such B, it pairs with a deleted base occurrence whose
+  whole-token sequence is a contiguous run of its own (tokens are compared
+  one by one, never through the joined digest string) and which is at most
+  that same threshold shorter. Pairs are taken in source order, largest
+  deleted occurrence first, each base line at most once. A move never fires.
+- A *new occurrence* is an unpaired one. It fires with `base_lines: None`,
+  and `matched_*` names the first other group member in path order.
