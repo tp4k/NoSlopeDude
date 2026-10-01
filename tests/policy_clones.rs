@@ -682,6 +682,31 @@ fn test_move_credit_does_not_reach_a_distinct_copy_of_a_block_with_a_shared_pref
 }
 
 #[test]
+fn test_move_credit_does_not_reach_a_second_copy_in_the_same_container() {
+    let (_dir, repo) = common::init_repo();
+    let base = commit(&repo, &[("S.java", java("S", &block("a")))]);
+    let candidate = commit(
+        &repo,
+        &[
+            ("S.java", java("S", "")),
+            (
+                "N.java",
+                java("N", &format!("{}{}", block("a"), block("a"))),
+            ),
+        ],
+    );
+
+    let found = evaluate(&repo, base, candidate);
+
+    let second = FIRST_BODY_LINE + BLOCK_LINES;
+    assert_eq!(
+        sites(&found),
+        vec![site("N.java", second, second + BLOCK_LINES - 1)]
+    );
+    assert_eq!(found[0].base_lines, None);
+}
+
+#[test]
 fn test_base_unique_block_edited_in_place_and_copied_raises_only_on_the_copy() {
     let extended = format!("{}{}", block("a"), statements("e", 1));
     let (_dir, repo) = common::init_repo();
