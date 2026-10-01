@@ -724,6 +724,29 @@ mod tests {
     }
 
     #[test]
+    fn test_run_tallies_count_a_shared_unmapped_line_once() {
+        let (table, mut base_to_candidate) = shared_line_fixture();
+        base_to_candidate.remove(&FIRST_STATEMENT_LINE);
+        let mapped_lines = [FIRST_STATEMENT_LINE + 1];
+        let span = (FIRST_STATEMENT_LINE, FIRST_STATEMENT_LINE + 1);
+
+        let tallies = run_tallies(
+            &table,
+            0,
+            STATEMENT_COUNT,
+            &mapped_lines,
+            &base_to_candidate,
+            span,
+        );
+
+        assert_eq!(
+            tallies,
+            vec![(0, false, 1), (0, false, 1), (1, false, 1)],
+            "two statements on unmapped line 3 count it once"
+        );
+    }
+
+    #[test]
     fn test_run_tallies_count_an_inside_span_line_outside_the_mapped_lines_as_unmapped() {
         let (table, base_to_candidate) = shared_line_fixture();
         let mapped_lines = [FIRST_STATEMENT_LINE + 1];
