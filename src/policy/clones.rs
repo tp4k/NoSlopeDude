@@ -702,4 +702,42 @@ mod tests {
         }
         assert_eq!(whole.len(), 2, "three statements cover two lines");
     }
+
+    /// The fixture's statement lines, with both lines mapped onto themselves.
+    fn shared_line_fixture() -> (Vec<Vec<usize>>, BTreeMap<usize, usize>) {
+        let analysis = analyze_file(Path::new("A.java"), SHARED_LINE_SOURCE.as_bytes())
+            .expect("the fixture analyzes");
+        let containers = clone_containers(&analysis.ir);
+        let table = containers[0]
+            .iter()
+            .map(|statement| run_executable_lines(std::slice::from_ref(statement)))
+            .collect();
+        let base_to_candidate = BTreeMap::from([
+            (FIRST_STATEMENT_LINE, FIRST_STATEMENT_LINE),
+            (FIRST_STATEMENT_LINE + 1, FIRST_STATEMENT_LINE + 1),
+        ]);
+        (table, base_to_candidate)
+    }
+
+    #[test]
+    fn test_run_tallies_count_an_inside_span_line_outside_the_mapped_lines_as_unmapped() {
+        let (table, base_to_candidate) = shared_line_fixture();
+        let mapped_lines = [FIRST_STATEMENT_LINE + 1];
+        let span = (FIRST_STATEMENT_LINE, FIRST_STATEMENT_LINE + 1);
+
+        let tallies = run_tallies(
+            &table,
+            0,
+            STATEMENT_COUNT,
+            &mapped_lines,
+            &base_to_candidate,
+            span,
+        );
+
+        assert_eq!(
+            tallies,
+            vec![(0, false, 1), (0, false, 1), (1, false, 1)],
+            "line 3 maps inside the span but is not a mapped line"
+        );
+    }
 }

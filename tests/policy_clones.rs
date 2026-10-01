@@ -1286,6 +1286,50 @@ fn test_extension_inside_a_larger_method_is_graded_against_the_clone() {
     );
 }
 
+const COMMENT_SPLIT: usize = 8;
+
+#[test]
+fn test_commented_out_tail_inside_an_extension_does_not_inflate_the_base() {
+    let core = statements("a", EXTENSION_BASE_SMALL);
+    let tail_body = statements("f", ENCLOSING_TAIL_STATEMENTS);
+    let extension = statements("e", ENCLOSING_EXTENSION);
+    let head = statements("e", COMMENT_SPLIT);
+    let rest: String = (COMMENT_SPLIT..ENCLOSING_EXTENSION)
+        .map(|index| format!("        int e{index} = eCall{index}(x);\n"))
+        .collect();
+    let (_dir, repo) = common::init_repo();
+    let base = commit(
+        &repo,
+        &[
+            ("A.java", java("A", &format!("{core}{tail_body}"))),
+            ("B.java", java("B", &format!("{core}{extension}"))),
+        ],
+    );
+    let candidate = commit(
+        &repo,
+        &[
+            (
+                "A.java",
+                java("A", &format!("{core}{head}/*\n{tail_body}*/\n{rest}")),
+            ),
+            ("B.java", java("B", &format!("{core}{extension}"))),
+        ],
+    );
+
+    let found = evaluate(&repo, base, candidate);
+
+    let in_a: Vec<&CloneDiagnostic> = found
+        .iter()
+        .filter(|d| d.candidate_path.render() == "A.java")
+        .collect();
+    assert_eq!(in_a.len(), 1, "{found:?}");
+    assert_eq!(
+        in_a[0].base_lines,
+        Some(EXTENSION_BASE_SMALL + ENCLOSING_EXTENSION)
+    );
+    assert_eq!(in_a[0].added_lines, ENCLOSING_EXTENSION);
+}
+
 /// `A.java` holds filler statements before a 10-line core; `B.java` holds the
 /// core plus the `added` statements the candidate appends to `A.java`.
 fn extension_after_filler(added: usize) -> Vec<CloneDiagnostic> {
