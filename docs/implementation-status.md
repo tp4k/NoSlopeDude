@@ -19,7 +19,8 @@ M3-3 S101/S102 suppressions landed at `8cffdae`; WS-1 of the continue run, M3-4
 A101 parse-damage policy, landed at `2ad58d6`, reduced-coverage rule at
 `20c8b0d`, deleted-line and excluded-block triggers at `d067915`, endpoint
 match for still-measured callables at `4ce648a`; WS-2, M4-1 A102 required
-analysis coverage, landed at `af687e3`, verified against `834dc3b`).
+analysis coverage, landed at `af687e3`, verified against `834dc3b`; WS-3 of the
+continue run, ledger hygiene and the M5-4 row, verified against `c35e5b3`).
 
 ## Legend
 
@@ -136,6 +137,7 @@ Plan: `nsd-plan-final.md` *M3–M5*. M3-1, M3-2, M3-3, M3-4 and M4-1 are done (l
 | M5-1 | Per-blob cache under `$GIT_COMMON_DIR/nsd/cache/v1`, keyed blob OID + language/grammar + measurement fingerprint; atomic writes; corruption or version mismatch is a recomputable miss | `[ ]` | — | — |
 | M5-2 | Best-effort LRU eviction, 1 GiB / 30-day default | `[ ]` | — | — |
 | M5-3 | Exit aggregation over all twelve diagnostics | `[ ]` | — | — |
+| M5-4 | `check` subcommand wiring: compose snapshots, per-file analysis and the M3/M4 evaluators (`policy::complexity::classify`, `policy::findings::match_findings`, `suppress::apply_suppressions`/`scan_suppressions`); use the trusted base `PolicyConfig`, fail closed on a `map_lines` error, build `FindingFile` and `FileCallables` from one file list | `[ ]` | — | — |
 
 ## M6–M7 — Output, CI hardening
 
