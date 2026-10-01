@@ -4,8 +4,9 @@
 //! A valid directive suppresses the finding of its rule that starts on the
 //! next line. Suppression is applied after finding matching: S101 is raised
 //! for a suppressed candidate finding unless its matched base finding was
-//! suppressed too, and a finding in an unmatched callable inherits nothing
-//! from a base finding paired in file context. S102 is delta-based against
+//! suppressed too, and a pair matched in file context carries a base
+//! suppression only if both the candidate and the base finding are outside
+//! every callable. S102 is delta-based against
 //! the base directive the diff maps each candidate directive to.
 
 mod directive;
