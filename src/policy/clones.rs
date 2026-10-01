@@ -386,11 +386,15 @@ impl<'a> MovePool<'a> {
 
 /// The base occurrence of the counterpart file that shares the most
 /// executable lines with the candidate occurrence through the line map; ties
-/// go to the larger one, then source order.
+/// go to the larger one, then source order. A base occurrence with an
+/// executable line that maps outside `span` (the candidate occurrence's
+/// lines) is not eligible: it encloses more than the occurrence.
 fn diff_mapped(
     base: usize,
     base_view: &FileView<'_>,
     base_by_container: &HashMap<(usize, u32), Vec<Candidate>>,
+    base_to_candidate: &BTreeMap<usize, usize>,
+    span: (usize, usize),
     mapped_lines: &[usize],
 ) -> Option<Candidate> {
     let (&lowest, &highest) = (mapped_lines.first()?, mapped_lines.last()?);
@@ -406,12 +410,17 @@ fn diff_mapped(
             if run.start_line > highest || run.end_line < lowest {
                 continue;
             }
-            let overlap = base_view
-                .executable_lines(run)
+            let lines = base_view.executable_lines(run);
+            let escapes = lines.iter().any(|line| {
+                base_to_candidate
+                    .get(line)
+                    .is_some_and(|mapped| !(span.0..=span.1).contains(mapped))
+            });
+            let overlap = lines
                 .iter()
                 .filter(|line| mapped_lines.binary_search(line).is_ok())
                 .count();
-            if overlap == 0 {
+            if escapes || overlap == 0 {
                 continue;
             }
             let rank = (
@@ -537,7 +546,14 @@ pub fn evaluate_clones(
                     .map(|(_, &line)| line)
                     .collect();
                 lines.sort_unstable();
-                diff_mapped(base, &base_views[base], &base_by_container, &lines)
+                diff_mapped(
+                    base,
+                    &base_views[base],
+                    &base_by_container,
+                    &facts.maps[slot].base_to_candidate,
+                    (subject.run.start_line, subject.run.end_line),
+                    &lines,
+                )
             });
         match mapped {
             Some(base_run) => {
