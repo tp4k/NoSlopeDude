@@ -1073,3 +1073,23 @@ fn test_held_surplus_zero_to_q_candidates_still_raise_e101() {
         ]
     );
 }
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "FileMetrics")]
+fn test_callable_ref_past_the_end_of_its_file_metrics_panics_in_debug_builds() {
+    let (base_callables, _) = sides(&[(
+        "A.java",
+        vec![spec("m", "before", 5, 5), spec("n", "x", 5, 5)],
+    )]);
+    let (_, base_metrics) = sides(&[("A.java", vec![spec("m", "before", 5, 5)])]);
+    let (candidate_callables, candidate_metrics) = sides(&[("A.java", vec![spec("n", "x", 5, 5)])]);
+    let matched = match_callables(&base_callables, &candidate_callables, &[]);
+
+    classify(
+        &base_metrics,
+        &candidate_metrics,
+        &matched,
+        &default_policy(),
+    );
+}
