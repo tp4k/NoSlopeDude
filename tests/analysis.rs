@@ -353,3 +353,27 @@ try { e(); } catch (e) {}
         ]
     );
 }
+
+#[test]
+fn test_unanalyzable_reason_labels_are_distinct_and_stable() {
+    let labels: Vec<&str> = [
+        UnanalyzableReason::NonUtf8Path,
+        UnanalyzableReason::UnsupportedExtension,
+        UnanalyzableReason::TooLarge,
+        UnanalyzableReason::InvalidEncoding,
+        UnanalyzableReason::ParserUnavailable,
+    ]
+    .into_iter()
+    .map(UnanalyzableReason::label)
+    .collect();
+    assert_eq!(
+        labels,
+        vec![
+            "non_utf8_path",
+            "unsupported_extension",
+            "too_large",
+            "invalid_encoding",
+            "parser_unavailable"
+        ]
+    );
+}
