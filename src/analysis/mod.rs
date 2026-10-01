@@ -207,3 +207,64 @@ impl CallableIndex {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::{CallableKind, IrCallable, Span};
+
+    const LINE: u32 = 1;
+
+    fn span(start_byte: u32, end_byte: u32) -> Span {
+        Span {
+            start_byte,
+            end_byte,
+            start_line: LINE,
+            end_line: LINE,
+        }
+    }
+
+    fn callable(callable_span: Span) -> IrCallable {
+        IrCallable {
+            span: callable_span,
+            body_span: callable_span,
+            name: String::new(),
+            kind: CallableKind::JavaMethod,
+            is_anonymous: false,
+            signature: Vec::new(),
+            owner: None,
+        }
+    }
+
+    fn ir_with(callable_spans: &[Span]) -> IrFile {
+        IrFile {
+            relative_path: PathBuf::from("Synthetic.java"),
+            language: LanguageFamily::Java,
+            root: IrNode::empty(span(0, 0)),
+            damage: Vec::new(),
+            callables: callable_spans.iter().copied().map(callable).collect(),
+            blocks: Vec::new(),
+            owners: Vec::new(),
+            excluded_callables: Vec::new(),
+            excluded_blocks: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn callable_index_prefers_the_later_of_equal_spans() {
+        let shared = span(0, 50);
+        let index = CallableIndex::of(&ir_with(&[shared, shared]));
+
+        assert_eq!(index.innermost(&IrNode::empty(span(10, 20))), Some(1));
+    }
+
+    #[test]
+    fn callable_index_orders_a_longer_span_before_a_shorter_one_at_the_same_start() {
+        let inner = span(0, 50);
+        let outer = span(0, 100);
+        let index = CallableIndex::of(&ir_with(&[inner, outer]));
+
+        assert_eq!(index.innermost(&IrNode::empty(span(10, 20))), Some(0));
+        assert_eq!(index.innermost(&IrNode::empty(span(60, 70))), Some(1));
+    }
+}
