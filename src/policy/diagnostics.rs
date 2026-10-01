@@ -69,3 +69,16 @@ pub struct SuppressionDiagnostic {
     pub candidate_path: RepoPath,
     pub directive_line: usize,
 }
+
+/// A changed file's parse damage is new, unmappable, intersecting, or
+/// worsened, or a changed callable was left unmeasured by it (`NSD-A101`).
+pub const CODE_PARSE_DAMAGE: &str = "NSD-A101";
+
+/// One A101 about a candidate file's damaged lines.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DamageDiagnostic {
+    pub code: &'static str,
+    pub candidate_path: RepoPath,
+    pub candidate_start_line: usize,
+    pub candidate_end_line: usize,
+}

@@ -78,6 +78,10 @@ pub struct IrFile {
     /// `IrCallable::owner` are then remapped to index the compacted table,
     /// not the pre-pruning one.
     pub owners: Vec<OwnerEntry>,
+    /// The spans of the callables salvage excluded, which are therefore
+    /// absent from `callables`. A101 reads this to tell a damaged changed
+    /// callable apart from a deleted one.
+    pub excluded_callables: Vec<Span>,
 }
 
 /// WS-9 (C1): total number of `lower_file` calls made so far in this
@@ -236,6 +240,7 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
         callables: kept_callables,
         blocks: kept_blocks,
         owners: kept_owners,
+        excluded_callables: Vec::new(),
     }
 }
 
