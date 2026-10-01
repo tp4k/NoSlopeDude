@@ -9,8 +9,11 @@ use crate::policy::diagnostics::{CoverageDiagnostic, CODE_ANALYSIS_UNAVAILABLE};
 /// One included entry with the caller's change status and analysis outcome.
 #[derive(Debug, Clone)]
 pub struct CoverageInput {
+    /// A discovery-included entry.
     pub entry: IncludedEntry,
+    /// True when `entry.path` is the candidate-side path of a `git::diff::Change`: `Added`/`Modified`/`Typechange` `path`, `Renamed` `to`.
     pub changed: bool,
+    /// `analyze_file(..).err()` when the bytes were read; an unreadable included blob must be reported as a failure, never `None`.
     pub failure: Option<UnanalyzableReason>,
 }
 
