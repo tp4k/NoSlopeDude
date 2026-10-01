@@ -515,6 +515,38 @@ fn test_header_deleted_before_a_line_sharing_legacy_damage_raises_a101() {
     assert_eq!(evaluation.sites, vec![site("w.tsx", 3, 3)]);
 }
 
+#[test]
+fn test_callable_matching_only_the_start_image_is_swallowed() {
+    let base_text = "export function e() { return 1; } export function d(x: number) {\n  if (x) { return 1; }\n  return 2;\n} export const c = () => <div>a & b</div>;\nexport function ok() {\n  return 1;\n}\n";
+    let edited = base_text.replace("  return 2;\n", "  const z = <p>q & r</p>;\n  return 2;\n");
+    let (_dir, repo) = common::init_repo();
+    let base = commit(&repo, &[("w.tsx", base_text.to_string())]);
+    let candidate = commit(&repo, &[("w.tsx", edited)]);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    assert_eq!(
+        evaluation.sites,
+        vec![site("w.tsx", 3, 3), site("w.tsx", 5, 5)]
+    );
+}
+
+#[test]
+fn test_callable_matching_only_the_end_image_is_swallowed() {
+    let base_text = "export const c = () => <div>a & b</div>; export function d(x: number) {\n  if (x) { return 1; }\n  return 2;\n} export function e() { return 1; }\nexport function ok() {\n  return 1;\n}\n";
+    let edited = base_text.replace("  return 2;\n", "  const z = <p>q & r</p>;\n  return 2;\n");
+    let (_dir, repo) = common::init_repo();
+    let base = commit(&repo, &[("w.tsx", base_text.to_string())]);
+    let candidate = commit(&repo, &[("w.tsx", edited)]);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    assert_eq!(
+        evaluation.sites,
+        vec![site("w.tsx", 1, 1), site("w.tsx", 3, 3)]
+    );
+}
+
 /// `evaluate_damage` alone (analysis excluded) over a legacy JSX error plus
 /// `count` unchanged functions and one prepended comment line; returns the
 /// minimum of three timings and the A101 count.

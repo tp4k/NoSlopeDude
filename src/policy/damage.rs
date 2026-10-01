@@ -251,3 +251,18 @@ pub fn evaluate_damage(
     }
     Ok(sorted.into_values().collect())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unmapped_pair_is_not_still_measured() {
+        let candidates = CandidateCallables {
+            ranges: BTreeSet::from([(1, 3)]),
+            starts: BTreeSet::from([1]),
+            ends: BTreeSet::from([3]),
+        };
+        assert!(!is_still_measured((None, None), &candidates));
+    }
+}
