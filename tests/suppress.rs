@@ -956,3 +956,18 @@ fn test_directive_moved_from_top_level_into_a_new_function_raises_s101() {
     );
     assert_eq!(unmatched, 0);
 }
+
+#[test]
+fn test_base_side_check_reads_the_paired_base_finding() {
+    let other = "try { other(); } catch (e) { }";
+    let base = format!("{other}\nfunction legacy() {{\n  {TS_DIRECTIVE}\n  {TS_CATCH}\n}}\n");
+    let candidate = format!("{TS_DIRECTIVE}\n{TS_CATCH}\n{other}\n");
+
+    let (found, unmatched) = ts_sites(&base, &candidate);
+
+    assert_eq!(
+        found,
+        vec![(CODE_NEW_SUPPRESSION, Some(rules::JSTS_EMPTY_CATCH), 1)]
+    );
+    assert_eq!(unmatched, 0);
+}
