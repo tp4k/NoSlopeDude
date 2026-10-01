@@ -729,6 +729,71 @@ fn test_move_credit_does_not_reach_a_copy_sharing_the_analysis_of_the_moved_one(
 }
 
 #[test]
+fn test_two_moves_from_base_files_sharing_one_analysis_both_pass() {
+    let (_dir, repo) = common::init_repo();
+    let long = statements("s", LONG_BLOCK_LINES);
+    let base = commit(
+        &repo,
+        &[
+            ("U.java", java("U", &long)),
+            ("S.java", java("S", &long)),
+            ("T.java", java("T", &long)),
+        ],
+    );
+    let candidate = commit(
+        &repo,
+        &[
+            ("U.java", java("U", &long)),
+            ("S.java", java("S", "")),
+            ("T.java", java("T", "")),
+            ("M.java", java("M", &long)),
+            ("N.java", java("N", &long)),
+        ],
+    );
+    let sides = load(&repo, base, candidate);
+    assert!(evaluate_sides(
+        &sides,
+        DEFAULT_MIN_CLONE_LINES,
+        &policy_with(Severity::Deny),
+        false
+    )
+    .is_empty());
+    let shared = sides
+        .base
+        .iter()
+        .find(|file| file.path.render() == "S.java")
+        .expect("S.java is a base file");
+    let base_files: Vec<FindingFile<'_>> = sides
+        .base
+        .iter()
+        .map(|file| {
+            let source = if file.path.render() == "T.java" {
+                shared
+            } else {
+                file
+            };
+            FindingFile {
+                path: file.path.clone(),
+                source: &source.source,
+                analysis: &source.analysis,
+            }
+        })
+        .collect();
+
+    let found = evaluate_clones(
+        &base_files,
+        &finding_files(&sides.candidate),
+        &finding_files(&sides.unchanged),
+        &sides.changes,
+        DEFAULT_MIN_CLONE_LINES,
+        &policy_with(Severity::Deny),
+    )
+    .expect("evaluate clones");
+
+    assert!(found.is_empty());
+}
+
+#[test]
 fn test_move_credit_does_not_reach_a_second_copy_in_the_same_container() {
     let (_dir, repo) = common::init_repo();
     let base = commit(&repo, &[("S.java", java("S", &block("a")))]);
