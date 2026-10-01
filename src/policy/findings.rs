@@ -41,6 +41,7 @@ pub struct FindingRef {
 pub struct FindingPair {
     pub base: FindingRef,
     pub candidate: FindingRef,
+    pub in_file_context: bool,
 }
 
 /// The pairs, the candidate findings left unpaired, and their V101s.
@@ -208,6 +209,7 @@ pub fn match_findings<'a>(
                     pairs.push(FindingPair {
                         base: finding_ref(found),
                         candidate: finding_ref(&group.candidate[position]),
+                        in_file_context: false,
                     });
                 }
                 None => open_base.push(found),
@@ -224,6 +226,7 @@ pub fn match_findings<'a>(
                 pairs.push(FindingPair {
                     base: finding_ref(found),
                     candidate: finding_ref(paired),
+                    in_file_context: false,
                 });
             }
         }
