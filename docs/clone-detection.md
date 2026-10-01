@@ -163,9 +163,12 @@ only names the terms.
 - A candidate occurrence is evaluated only if it lies in a changed file and
   holds an added executable line, so pure line shifts and comment-only
   edits never fire.
-- An *extension*: the diff maps some base occurrence B onto it (most shared
-  executable lines wins). It fires when its added executable lines exceed
-  `max(1, floor(B.source_lines / 10))`.
+- An *extension*: the diff maps some base occurrence B onto it. A base run
+  with an executable line that the diff maps outside the occurrence is not
+  eligible. Among the rest, most shared executable lines wins; a tie goes to
+  the run with the fewest base lines the diff does not map beyond the
+  occurrence's added lines, then to the larger run. It fires when the
+  occurrence's added executable lines exceed `max(1, floor(B.source_lines / 10))`.
 - A *move*: with no such B, it pairs with a deleted base occurrence whose
   whole-token sequence is a contiguous run of its own (tokens are compared
   one by one, never through the joined digest string) and which is at most

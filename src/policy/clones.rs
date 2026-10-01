@@ -44,8 +44,13 @@ fn threshold(base_lines: usize) -> usize {
 
 type PerFileCandidates = Vec<(u128, Candidate)>;
 
-/// Overlap, then size, then source order (earlier is greater).
-type OverlapRank = (usize, usize, Reverse<usize>, Reverse<usize>);
+/// Overlap, then the fewest unmapped lines beyond the occurrence's added
+/// lines, then size, then source order (earlier is greater).
+type OverlapRank = (usize, Reverse<usize>, usize, Reverse<usize>, Reverse<usize>);
+
+/// A run's tally against one occurrence: executable lines mapped into the
+/// occurrence, whether any maps outside it, and how many have no mapping.
+type RunTally = (usize, bool, usize);
 
 /// One analyzed file with its clone containers, over the caller's analysis.
 struct FileView<'a> {
@@ -385,8 +390,9 @@ impl<'a> MovePool<'a> {
 }
 
 /// Per statement count `1..=max_count` of the run starting at `first`: how
-/// many of its executable lines are in `mapped_lines`, and whether any maps
-/// through `base_to_candidate` outside `span`. `statement_lines` holds each
+/// many of its executable lines are in `mapped_lines`, whether any maps
+/// through `base_to_candidate` outside `span`, and how many are absent from
+/// `base_to_candidate`. `statement_lines` holds each
 /// statement's own D11 lines; a line a previous statement of the run already
 /// reached is counted once, as `run_executable_lines` does.
 fn run_tallies(
@@ -396,10 +402,11 @@ fn run_tallies(
     mapped_lines: &[usize],
     base_to_candidate: &BTreeMap<usize, usize>,
     span: (usize, usize),
-) -> Vec<(usize, bool)> {
+) -> Vec<RunTally> {
     let mut last_counted_line = 0usize;
     let mut overlap = 0usize;
     let mut escapes = false;
+    let mut unmapped = 0usize;
     statement_lines[first..first + max_count]
         .iter()
         .map(|lines| {
@@ -409,20 +416,22 @@ fn run_tallies(
                 }
                 last_counted_line = line;
                 overlap += usize::from(mapped_lines.binary_search(&line).is_ok());
-                escapes |= base_to_candidate
-                    .get(&line)
-                    .is_some_and(|mapped| !(span.0..=span.1).contains(mapped));
+                match base_to_candidate.get(&line) {
+                    Some(mapped) => escapes |= !(span.0..=span.1).contains(mapped),
+                    None => unmapped += 1,
+                }
             }
-            (overlap, escapes)
+            (overlap, escapes, unmapped)
         })
         .collect()
 }
 
 /// The base occurrence of the counterpart file that shares the most
 /// executable lines with the candidate occurrence through the line map; ties
-/// go to the larger one, then source order. A base occurrence with an
-/// executable line that maps outside `span` (the candidate occurrence's
-/// lines) is not eligible: it encloses more than the occurrence.
+/// go to the run with the fewest unmapped lines beyond `added` (the
+/// occurrence's added lines), then the larger one, then source order. A base
+/// occurrence with an executable line that maps outside `span` (the candidate
+/// occurrence's lines) is not eligible: it encloses more than the occurrence.
 fn diff_mapped(
     base: usize,
     base_view: &FileView<'_>,
@@ -430,6 +439,7 @@ fn diff_mapped(
     statement_lines: &mut HashMap<(usize, u32), Vec<Vec<usize>>>,
     base_to_candidate: &BTreeMap<usize, usize>,
     span: (usize, usize),
+    added: usize,
     mapped_lines: &[usize],
 ) -> Option<Candidate> {
     let (&lowest, &highest) = (mapped_lines.first()?, mapped_lines.last()?);
@@ -458,7 +468,7 @@ fn diff_mapped(
                     .map(|statement| run_executable_lines(std::slice::from_ref(statement)))
                     .collect()
             });
-        let tallies: BTreeMap<usize, Vec<(usize, bool)>> = longest
+        let tallies: BTreeMap<usize, Vec<RunTally>> = longest
             .into_iter()
             .map(|(first, count)| {
                 let tally = run_tallies(table, first, count, mapped_lines, base_to_candidate, span);
@@ -466,13 +476,14 @@ fn diff_mapped(
             })
             .collect();
         for run in touching {
-            let (overlap, escapes) =
+            let (overlap, escapes, unmapped) =
                 tallies[&(run.first_statement as usize)][run.statement_count - 1];
             if escapes || overlap == 0 {
                 continue;
             }
             let rank = (
                 overlap,
+                Reverse(unmapped.saturating_sub(added)),
                 run.source_lines,
                 Reverse(run.start_line),
                 Reverse(run.end_line),
@@ -602,6 +613,7 @@ pub fn evaluate_clones(
                     &mut statement_lines,
                     &facts.maps[slot].base_to_candidate,
                     (subject.run.start_line, subject.run.end_line),
+                    subject.added,
                     &lines,
                 )
             });
@@ -648,4 +660,46 @@ pub fn evaluate_clones(
         );
     }
     Ok(sorted.into_values().collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::*;
+    use crate::analysis::analyze_file;
+
+    /// Three statements on two lines: the first two share line 3.
+    const SHARED_LINE_SOURCE: &str = "class A {\n    void run(int x) {\n        int a = f(x); int b = g(x);\n        int c = h(x);\n    }\n}\n";
+    const STATEMENT_COUNT: usize = 3;
+    const FIRST_STATEMENT_LINE: usize = 3;
+
+    #[test]
+    fn test_run_tallies_match_run_executable_lines_for_every_prefix() {
+        let analysis = analyze_file(Path::new("A.java"), SHARED_LINE_SOURCE.as_bytes())
+            .expect("the fixture analyzes");
+        let containers = clone_containers(&analysis.ir);
+        let statements = &containers[0];
+        assert_eq!(statements.len(), STATEMENT_COUNT);
+        let table: Vec<Vec<usize>> = statements
+            .iter()
+            .map(|statement| run_executable_lines(std::slice::from_ref(statement)))
+            .collect();
+        let whole = run_executable_lines(statements);
+        let base_to_candidate: BTreeMap<usize, usize> =
+            BTreeMap::from([(FIRST_STATEMENT_LINE, FIRST_STATEMENT_LINE)]);
+        let span = (FIRST_STATEMENT_LINE, FIRST_STATEMENT_LINE);
+
+        let tallies = run_tallies(&table, 0, STATEMENT_COUNT, &whole, &base_to_candidate, span);
+
+        assert_eq!(tallies.len(), STATEMENT_COUNT);
+        for count in 1..=STATEMENT_COUNT {
+            let lines = run_executable_lines(&statements[..count]);
+            let (overlap, escapes, unmapped) = tallies[count - 1];
+            assert_eq!(overlap, lines.len(), "prefix of {count} statements");
+            assert!(!escapes, "line 3 maps inside the span");
+            assert_eq!(unmapped, lines.len() - 1, "prefix of {count} statements");
+        }
+        assert_eq!(whole.len(), 2, "three statements cover two lines");
+    }
 }
