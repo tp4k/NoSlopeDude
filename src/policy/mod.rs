@@ -6,6 +6,7 @@
 //! Exit-code mapping for the diagnostics this module reports is M5-3's job,
 //! not this one's.
 
+pub mod clones;
 pub mod complexity;
 pub mod coverage;
 pub mod damage;
