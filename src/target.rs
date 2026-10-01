@@ -11,8 +11,6 @@ use anyhow::{bail, Context};
 
 use crate::model::{RemoteTarget, Revision, Target};
 
-/// Stops `git status` rewriting the index, which would run `post-index-change`.
-const GIT_NO_OPTIONAL_LOCKS_ARG: &str = "--no-optional-locks";
 /// Stops a partial-clone checkout fetching blobs through its configured transport.
 const GIT_NO_LAZY_FETCH_ENV: &str = "GIT_NO_LAZY_FETCH";
 /// Keeps a scanned checkout's own `core.fsmonitor` from running as a hook.
@@ -105,6 +103,8 @@ fn resolve_remote(remote: &RemoteTarget) -> anyhow::Result<ResolvedTarget> {
     })
 }
 
+/// Reads `HEAD` only; `dirty` stays `None` because hashing the work tree
+/// would run repository-configured filter drivers.
 fn local_git_revision(root: &Path) -> Revision {
     let is_work_tree = Command::new("git")
         .env(GIT_NO_LAZY_FETCH_ENV, "1")
@@ -127,21 +127,9 @@ fn local_git_revision(root: &Path) -> Revision {
     }
 
     let sha = git_head_sha(root);
-    let dirty = Command::new("git")
-        .arg(GIT_NO_OPTIONAL_LOCKS_ARG)
-        .env(GIT_NO_LAZY_FETCH_ENV, "1")
-        .args(GIT_UNTRUSTED_CONFIG_ARGS)
-        .arg("-C")
-        .arg(root)
-        .args(["status", "--porcelain"])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .map(|output| !output.stdout.is_empty());
-
     Revision {
         sha,
-        dirty,
+        dirty: None,
         unavailable_reason: None,
     }
 }
