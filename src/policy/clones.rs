@@ -391,8 +391,9 @@ impl<'a> MovePool<'a> {
 
 /// Per statement count `1..=max_count` of the run starting at `first`: how
 /// many of its executable lines are in `mapped_lines`, whether any maps
-/// through `base_to_candidate` outside `span`, and how many are absent from
-/// `base_to_candidate`. `statement_lines` holds each
+/// through `base_to_candidate` outside `span`, and how many are unmapped:
+/// absent from `base_to_candidate`, or mapped inside `span` but not in
+/// `mapped_lines`. `statement_lines` holds each
 /// statement's own D11 lines; a line a previous statement of the run already
 /// reached is counted once, as `run_executable_lines` does.
 fn run_tallies(
@@ -415,10 +416,12 @@ fn run_tallies(
                     continue;
                 }
                 last_counted_line = line;
-                overlap += usize::from(mapped_lines.binary_search(&line).is_ok());
+                let is_overlap = mapped_lines.binary_search(&line).is_ok();
+                overlap += usize::from(is_overlap);
                 match base_to_candidate.get(&line) {
-                    Some(mapped) => escapes |= !(span.0..=span.1).contains(mapped),
-                    None => unmapped += 1,
+                    Some(mapped) if !(span.0..=span.1).contains(mapped) => escapes = true,
+                    Some(_) if is_overlap => {}
+                    _ => unmapped += 1,
                 }
             }
             (overlap, escapes, unmapped)
@@ -602,9 +605,10 @@ pub fn evaluate_clones(
             .counterparts
             .get(&subject.view)
             .and_then(|&(base, slot)| {
-                let mut lines: Vec<usize> = facts.candidate_to_base[slot]
-                    .range(subject.run.start_line..=subject.run.end_line)
-                    .map(|(_, &line)| line)
+                let mut lines: Vec<usize> = views[subject.view]
+                    .executable_lines(&subject.run)
+                    .iter()
+                    .filter_map(|line| facts.candidate_to_base[slot].get(line).copied())
                     .collect();
                 lines.sort_unstable();
                 diff_mapped(
