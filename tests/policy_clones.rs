@@ -1507,7 +1507,11 @@ fn test_reindented_tail_of_an_enclosing_method_does_not_inflate_the_base() {
             )],
             "reindent={reindent}: {found:?}"
         );
-        assert_eq!(found[0].base_lines, Some(EXTENSION_BASE_SMALL));
+        // The tied enclosing run of overlap + added lines is the base; V102 still fires.
+        assert_eq!(
+            found[0].base_lines,
+            Some(EXTENSION_BASE_SMALL + ENCLOSING_EXTENSION)
+        );
         assert_eq!(found[0].added_lines, ENCLOSING_EXTENSION);
     }
 }
