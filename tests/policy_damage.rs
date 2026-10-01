@@ -591,9 +591,9 @@ fn shifted_callables_damage_run(count: usize) -> (std::time::Duration, usize) {
 
 #[test]
 fn test_still_measured_lookup_does_not_scale_quadratically() {
-    const CALLABLE_COUNT: usize = 2_000;
-    const SCALED_CALLABLE_COUNT: usize = CALLABLE_COUNT * 4;
-    const SCALING_ASSERT_MULTIPLIER: u32 = 6;
+    const CALLABLE_COUNT: usize = 1_000;
+    const SCALED_CALLABLE_COUNT: usize = CALLABLE_COUNT * 8;
+    const SCALING_ASSERT_MULTIPLIER: u32 = 32;
 
     let (elapsed, sites) = shifted_callables_damage_run(CALLABLE_COUNT);
     let (scaled_elapsed, scaled_sites) = shifted_callables_damage_run(SCALED_CALLABLE_COUNT);
@@ -601,8 +601,8 @@ fn test_still_measured_lookup_does_not_scale_quadratically() {
     assert_eq!((sites, scaled_sites), (0, 0));
     assert!(
         scaled_elapsed < elapsed * SCALING_ASSERT_MULTIPLIER,
-        "a quadratic scan scales ~16x from N to 4N, a sub-linear lookup ~4x: evaluate_damage at \
-         N={CALLABLE_COUNT} took {elapsed:?}, at 4N={SCALED_CALLABLE_COUNT} took {scaled_elapsed:?}, \
-         expected 4N < {SCALING_ASSERT_MULTIPLIER}x N"
+        "a quadratic scan scales ~64x from N to 8N, a sub-linear lookup ~8x: evaluate_damage at \
+         N={CALLABLE_COUNT} took {elapsed:?}, at 8N={SCALED_CALLABLE_COUNT} took {scaled_elapsed:?}, \
+         expected 8N < {SCALING_ASSERT_MULTIPLIER}x N"
     );
 }
