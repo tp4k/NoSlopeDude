@@ -166,8 +166,10 @@ only names the terms.
 - An *extension*: the diff maps some base occurrence B onto it. A base run
   with an executable line that the diff maps outside the occurrence is not
   eligible. Among the rest, most shared executable lines wins; a tie goes to
-  the run with the fewest base lines the diff does not map beyond the
-  occurrence's added lines, then to the larger run. It fires when the
+  the run with the fewest executable base lines the diff does not map
+  beyond the occurrence's added lines (a base line that maps onto a
+  non-executable candidate line, such as a commented-out one, counts as
+  unmapped), then to the larger run. It fires when the
   occurrence's added executable lines exceed `max(1, floor(B.source_lines / 10))`.
 - A *move*: with no such B, it pairs with a deleted base occurrence whose
   whole-token sequence is a contiguous run of its own (tokens are compared
