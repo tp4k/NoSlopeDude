@@ -2,6 +2,7 @@
 //! and, when paired, its base callable. Carries no severity; the exit-code
 //! mapping is M5-3's job.
 
+use crate::analysis::UnanalyzableReason;
 use crate::git::path::RepoPath;
 use crate::model::RuleId;
 
@@ -81,4 +82,16 @@ pub struct DamageDiagnostic {
     pub candidate_path: RepoPath,
     pub candidate_start_line: usize,
     pub candidate_end_line: usize,
+}
+
+/// A required file could not be analyzed: too large, a non-UTF-8 path,
+/// invalid encoding, or no parser (`NSD-A102`).
+pub const CODE_ANALYSIS_UNAVAILABLE: &str = "NSD-A102";
+
+/// One A102 about an included file and why it could not be analyzed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoverageDiagnostic {
+    pub code: &'static str,
+    pub path: RepoPath,
+    pub reason: UnanalyzableReason,
 }

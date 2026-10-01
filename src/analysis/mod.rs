@@ -23,8 +23,9 @@ use crate::rules;
 /// callable body-fingerprint and clone-run domains.
 const FINDING_SYNTAX_FAMILY_PREFIX: &str = "finding-syntax";
 
-/// Why a file could not be analyzed; a later `A102` stream maps it to a code.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Why a file could not be analyzed; `NSD-A102` reports all but
+/// `UnsupportedExtension`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UnanalyzableReason {
     NonUtf8Path,
     UnsupportedExtension,
@@ -33,7 +34,15 @@ pub enum UnanalyzableReason {
     ParserUnavailable,
 }
 
+impl UnanalyzableReason {
+    /// A stable snake_case spelling of this reason.
+    pub fn label(self) -> &'static str {
+        unimplemented!()
+    }
+}
+
 /// One callable's metrics, identity and body fingerprint.
+#[derive(Debug, Clone, PartialEq)]
 pub struct AnalyzedCallable {
     pub metrics: Callable,
     pub identity: CallableIdentity,
@@ -43,6 +52,7 @@ pub struct AnalyzedCallable {
 /// One rule finding with a whitespace- and comment-insensitive digest of the
 /// IR subtrees it flagged, and the index (into `FileAnalysis::callables`) of
 /// its innermost enclosing callable, `None` for file-level code.
+#[derive(Debug, Clone, PartialEq)]
 pub struct AnalyzedFinding {
     pub finding: RuleFinding,
     pub syntax_digest: String,
