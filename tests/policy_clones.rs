@@ -1228,3 +1228,135 @@ fn test_extension_of_a_sub_ten_line_clone_keeps_the_one_line_floor() {
     assert_eq!(found.len(), 1, "{found:?}");
     assert_eq!(found[0].base_lines, Some(SUB_TEN_BASE));
 }
+
+// ---------------------------------------------------------------------
+// Diff mapping grades an extension against the clone, not its enclosure.
+// ---------------------------------------------------------------------
+
+const ENCLOSING_TAIL_STATEMENTS: usize = 190;
+const ENCLOSING_EXTENSION: usize = 15;
+const CUBIC_SMALL_CONTAINER: usize = 100;
+const CUBIC_FACTOR: usize = 4;
+
+/// `A.java` holds a 10-line clone core inside a method of `tail` more
+/// statements; the candidate inserts `added` statements right after the core,
+/// matching `B.java`, which holds the core plus those statements.
+fn extension_inside_larger_method(tail: usize, added: usize) -> Vec<CloneDiagnostic> {
+    let core = statements("a", EXTENSION_BASE_SMALL);
+    let tail_body = statements("f", tail);
+    let extension = statements("e", added);
+    let (_dir, repo) = common::init_repo();
+    let base = commit(
+        &repo,
+        &[
+            ("A.java", java("A", &format!("{core}{tail_body}"))),
+            ("B.java", java("B", &format!("{core}{extension}"))),
+        ],
+    );
+    let candidate = commit(
+        &repo,
+        &[
+            (
+                "A.java",
+                java("A", &format!("{core}{extension}{tail_body}")),
+            ),
+            ("B.java", java("B", &format!("{core}{extension}"))),
+        ],
+    );
+    evaluate(&repo, base, candidate)
+}
+
+#[test]
+fn test_extension_inside_a_larger_method_is_graded_against_the_clone() {
+    let found = extension_inside_larger_method(ENCLOSING_TAIL_STATEMENTS, ENCLOSING_EXTENSION);
+
+    assert_eq!(
+        sites(&found),
+        vec![body_site(
+            "A.java",
+            EXTENSION_BASE_SMALL + ENCLOSING_EXTENSION
+        )],
+        "{found:?}"
+    );
+    assert_eq!(found[0].base_lines, Some(EXTENSION_BASE_SMALL));
+    assert_eq!(found[0].added_lines, ENCLOSING_EXTENSION);
+    assert!(
+        extension_inside_larger_method(ENCLOSING_TAIL_STATEMENTS, 1).is_empty(),
+        "+1 on the 10-line clone is within the threshold"
+    );
+}
+
+/// `A.java` holds filler statements before a 10-line core; `B.java` holds the
+/// core plus the `added` statements the candidate appends to `A.java`.
+fn extension_after_filler(added: usize) -> Vec<CloneDiagnostic> {
+    let filler = statements("f", FILLER_STATEMENTS);
+    let core = statements("a", EXTENSION_BASE_SMALL);
+    let extension = statements("e", added);
+    let (_dir, repo) = common::init_repo();
+    let base = commit(
+        &repo,
+        &[
+            ("A.java", java("A", &format!("{filler}{core}"))),
+            ("B.java", java("B", &format!("{core}{extension}"))),
+        ],
+    );
+    let candidate = commit(
+        &repo,
+        &[
+            ("A.java", java("A", &format!("{filler}{core}{extension}"))),
+            ("B.java", java("B", &format!("{core}{extension}"))),
+        ],
+    );
+    evaluate(&repo, base, candidate)
+}
+
+#[test]
+fn test_extension_of_a_clone_inside_a_longer_method_uses_the_clone_as_base() {
+    assert!(
+        extension_after_filler(1).is_empty(),
+        "+1 on the 10-line clone is within the threshold"
+    );
+    let found = extension_after_filler(2);
+
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].base_lines, Some(EXTENSION_BASE_SMALL));
+    assert_eq!(found[0].added_lines, 2);
+}
+
+fn container_run(statement_count: usize) -> (Duration, usize) {
+    let base_body = statements("a", statement_count);
+    let extended = format!("{base_body}{}", statements("e", 1));
+    let (_dir, repo) = common::init_repo();
+    let base = commit(
+        &repo,
+        &[
+            ("A.java", java("A", &base_body)),
+            ("B.java", java("B", &extended)),
+        ],
+    );
+    let candidate = commit(
+        &repo,
+        &[
+            ("A.java", java("A", &extended)),
+            ("B.java", java("B", &extended)),
+        ],
+    );
+    fastest_evaluation(&load(&repo, base, candidate))
+}
+
+#[test]
+fn test_diff_mapping_does_not_scale_cubically_in_container_size() {
+    let small = container_run(CUBIC_SMALL_CONTAINER);
+    let large = container_run(CUBIC_SMALL_CONTAINER * CUBIC_FACTOR);
+
+    assert_eq!((small.1, large.1), (0, 0), "+1 is within the threshold");
+    assert!(
+        large.0 < small.0 * SCALING_ASSERT_MULTIPLIER,
+        "a cubic pass scales ~64x from s to 4s, a quadratic one ~16x: s={CUBIC_SMALL_CONTAINER} \
+         took {:?}, s={} took {:?}, ratio {:.1}x, expected < {SCALING_ASSERT_MULTIPLIER}x",
+        small.0,
+        CUBIC_SMALL_CONTAINER * CUBIC_FACTOR,
+        large.0,
+        large.0.as_secs_f64() / small.0.as_secs_f64().max(f64::EPSILON)
+    );
+}
