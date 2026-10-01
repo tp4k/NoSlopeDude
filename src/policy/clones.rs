@@ -46,7 +46,7 @@ type PerFileCandidates = Vec<(u128, Candidate)>;
 
 /// Overlap, then the fewest unmapped lines beyond the occurrence's added
 /// lines, then size, then source order (earlier is greater).
-type OverlapRank = (usize, Reverse<usize>, usize, Reverse<usize>, Reverse<usize>);
+type OverlapRank = (isize, Reverse<usize>, usize, Reverse<usize>, Reverse<usize>);
 
 /// A run's tally against one occurrence: executable lines mapped into the
 /// occurrence, whether any maps outside it, and how many have no mapping.
@@ -430,9 +430,9 @@ fn run_tallies(
 }
 
 /// The base occurrence of the counterpart file that shares the most
-/// executable lines with the candidate occurrence through the line map; ties
-/// go to the run with the fewest unmapped lines beyond the subject's added
-/// lines, then the larger one, then source order. A base occurrence with an
+/// executable lines with the candidate occurrence through the line map, less
+/// its unmapped lines beyond the subject's added lines; ties go to the run
+/// with the fewest such lines, then the larger one, then source order. A base occurrence with an
 /// executable line that maps outside the subject's lines is not eligible: it
 /// encloses more than the occurrence.
 fn diff_mapped(
@@ -485,9 +485,10 @@ fn diff_mapped(
             if escapes || overlap == 0 {
                 continue;
             }
+            let excess = unmapped.saturating_sub(added);
             let rank = (
-                overlap,
-                Reverse(unmapped.saturating_sub(added)),
+                overlap as isize - excess as isize,
+                Reverse(excess),
                 run.source_lines,
                 Reverse(run.start_line),
                 Reverse(run.end_line),
