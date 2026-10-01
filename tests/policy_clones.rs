@@ -1376,6 +1376,54 @@ fn test_a_kept_anchor_after_a_commented_tail_does_not_inflate_the_base() {
     assert_eq!(in_a[0].added_lines, ENCLOSING_EXTENSION);
 }
 
+const TIE_TAIL_STATEMENTS: usize = ENCLOSING_EXTENSION + 2;
+
+#[test]
+fn test_a_rank_tie_goes_to_the_run_with_fewer_unmapped_lines() {
+    let core = statements("a", EXTENSION_BASE_SMALL);
+    let tail_body = statements("f", TIE_TAIL_STATEMENTS);
+    let extension = statements("e", ENCLOSING_EXTENSION);
+    let last = TIE_TAIL_STATEMENTS - 1;
+    let anchor = format!("        int f{last} = fCall{last}(x);\n");
+    let commented: String = (0..last)
+        .map(|index| format!("        int f{index} = fCall{index}(x);\n"))
+        .collect();
+    let (_dir, repo) = common::init_repo();
+    let base = commit(
+        &repo,
+        &[
+            ("A.java", java("A", &format!("{core}{tail_body}"))),
+            ("B.java", java("B", &format!("{core}{extension}"))),
+        ],
+    );
+    let candidate = commit(
+        &repo,
+        &[
+            (
+                "A.java",
+                java(
+                    "A",
+                    &format!("{core}{extension}/*\n{commented}*/\n{anchor}"),
+                ),
+            ),
+            ("B.java", java("B", &format!("{core}{extension}{anchor}"))),
+        ],
+    );
+
+    let found = evaluate(&repo, base, candidate);
+
+    let in_a: Vec<&CloneDiagnostic> = found
+        .iter()
+        .filter(|d| d.candidate_path.render() == "A.java")
+        .collect();
+    assert_eq!(in_a.len(), 1, "{found:?}");
+    assert_eq!(
+        in_a[0].base_lines,
+        Some(EXTENSION_BASE_SMALL + ENCLOSING_EXTENSION)
+    );
+    assert_eq!(in_a[0].added_lines, ENCLOSING_EXTENSION);
+}
+
 const MIDDLE_BLOCK_STATEMENTS: usize = 200;
 
 /// `A.java` holds a 10-line core split around a large block; the candidate
