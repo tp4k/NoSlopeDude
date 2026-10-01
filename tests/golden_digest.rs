@@ -734,11 +734,24 @@ fn test_nsd_v1_digest_matches_a_live_scan_of_java_fixture_01() -> Result<()> {
         "the private java-fixture-01 checkout is not at the recorded revision; \
          details withheld (AGENTS.md, Fixture privacy)"
     );
-    let live_dirty = live["scan"]["revision"]["dirty"]
-        .as_bool()
-        .context("live report is missing scan.revision.dirty")?;
     assert!(
-        !live_dirty,
+        live["scan"]["revision"]["dirty"].is_null(),
+        "a local scan must report scan.revision.dirty as null"
+    );
+    let checkout = git2::Repository::open(&recipe.target).unwrap_or_else(|_| {
+        panic!(
+            "opening the private java-fixture-01 checkout failed; details withheld \
+             (AGENTS.md, Fixture privacy)"
+        )
+    });
+    let mut status_options = git2::StatusOptions::new();
+    status_options.include_untracked(true);
+    let checkout_is_clean = checkout
+        .statuses(Some(&mut status_options))
+        .context("reading the private checkout status")?
+        .is_empty();
+    assert!(
+        checkout_is_clean,
         "the private java-fixture-01 checkout is dirty; details withheld \
          (AGENTS.md, Fixture privacy)"
     );

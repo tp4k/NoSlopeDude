@@ -63,19 +63,19 @@ fn test_resolving_an_untrusted_checkout_does_not_run_its_fsmonitor_hook() {
 
     assert!(!marker.exists(), "the checkout's fsmonitor hook ran");
     assert_eq!(revision.sha, Some(sha));
-    assert_eq!(revision.dirty, Some(false));
+    assert_eq!(revision.dirty, None);
 }
 
 #[test]
-fn test_local_revision_still_reports_sha_and_dirty() {
+fn test_local_revision_reports_sha_and_no_dirty_flag() {
     let (dir, _repo, sha) = committed_repo();
 
     let clean = resolved_revision(dir.path());
     fs::write(dir.path().join(UNTRACKED_FILE), "class Untracked {}\n").expect("write a new file");
     let dirty = resolved_revision(dir.path());
 
-    assert_eq!((clean.sha, clean.dirty), (Some(sha.clone()), Some(false)));
-    assert_eq!((dirty.sha, dirty.dirty), (Some(sha), Some(true)));
+    assert_eq!((clean.sha, clean.dirty), (Some(sha.clone()), None));
+    assert_eq!((dirty.sha, dirty.dirty), (Some(sha), None));
 }
 
 const HOOKS_DIR: &str = "hooks";
@@ -173,4 +173,30 @@ fn test_resolving_a_partial_clone_checkout_does_not_run_its_transport() {
 
     assert!(!marker.exists(), "the checkout's transport ran");
     assert_eq!(revision.sha, Some(sha));
+}
+
+const FILTER_MARKER_FILE: &str = "filter-ran.marker";
+const GITATTRIBUTES_FILE: &str = ".gitattributes";
+
+#[cfg(unix)]
+#[test]
+fn test_resolving_an_untrusted_checkout_does_not_run_its_clean_filter() {
+    let (dir, repo, sha) = committed_repo();
+    let outside = TempDir::new().expect("create a temp dir for the marker");
+    let marker = outside.path().join(FILTER_MARKER_FILE);
+    fs::write(dir.path().join(GITATTRIBUTES_FILE), "* filter=x\n").expect("write gitattributes");
+    repo.config()
+        .expect("open the repository config")
+        .set_str(
+            "filter.x.clean",
+            &format!("touch '{}'; cat", marker.display()),
+        )
+        .expect("set filter.x.clean");
+    bump_mtime(&dir.path().join(TRACKED_FILE));
+
+    let revision = resolved_revision(dir.path());
+
+    assert!(!marker.exists(), "the checkout's clean filter ran");
+    assert_eq!(revision.sha, Some(sha));
+    assert_eq!(revision.dirty, None);
 }
