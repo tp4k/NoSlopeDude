@@ -501,3 +501,16 @@ fn test_deleted_line_inside_a_legacy_damaged_top_level_block_raises_a101() {
 
     assert_eq!(evaluation.sites, vec![site("w.tsx", 1, 4)]);
 }
+
+#[test]
+fn test_header_deleted_before_a_line_sharing_legacy_damage_raises_a101() {
+    let base_text = "export function d(x: number) {\n  if (x) { return 1; }\n  return 2;\n} export const c = () => <div>a & b</div>;\nexport function ok() {\n  return 1;\n}\n";
+    let edited = base_text.replacen("export function d(x: number) {\n", "", 1);
+    let (_dir, repo) = common::init_repo();
+    let base = commit(&repo, &[("w.tsx", base_text.to_string())]);
+    let candidate = commit(&repo, &[("w.tsx", edited)]);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    assert_eq!(evaluation.sites, vec![site("w.tsx", 3, 3)]);
+}
