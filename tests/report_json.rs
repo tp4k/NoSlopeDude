@@ -10,11 +10,9 @@ use nsd::model::{RemoteTarget, Revision, ScanSettings, Target, DEFAULT_MIN_CLONE
 use nsd::pipeline::{self, PipelineOutput};
 use nsd::report::{self, ReportInput};
 
-/// A real, on-disk git worktree (system `git` binary, same as
-/// `target::local_git_revision`) for a test that needs `git status` to
-/// observe an actual dirty edit -- unlike `tests/common`'s
-/// `init_repo`/`commit_entries`, which write only to the git2 index (see
-/// `test_dirty_flag_value_tracks_a_real_worktree_edit` below). Kept local to
+/// A real, on-disk git worktree with a committed `HEAD` (system `git` binary,
+/// as `target::local_git_revision` reads it via `rev-parse`), used by
+/// `test_local_git_scan_reports_null_dirty_even_after_an_edit` below. Kept local to
 /// this file rather than `tests/common/mod.rs`: each `tests/*.rs` file is
 /// its own crate for `cargo clippy`'s dead-code lint, and no other test file
 /// calls this helper, so sharing it there would leave it (and `run_git`)
@@ -466,6 +464,16 @@ fn test_terminal_summary_revision_line_has_no_dirty_suffix_for_local_targets() {
         assert!(
             stdout.contains(&format!("  revision: {sha}\n")),
             "stdout carries the bare sha (edited: {edited}): {stdout}"
+        );
+        let html =
+            fs::read_to_string(output_dir.path().join("report.html")).expect("report.html exists");
+        assert!(
+            html.contains(&format!("<li>revision: <code>{sha}</code></li>")),
+            "report.html carries the bare sha (edited: {edited})"
+        );
+        assert!(
+            !html.contains("(dirty:"),
+            "a local git target must not render a dirty suffix in report.html (edited: {edited})"
         );
         assert!(
             !stdout.contains("(dirty:"),

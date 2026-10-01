@@ -748,7 +748,12 @@ fn test_nsd_v1_digest_matches_a_live_scan_of_java_fixture_01() -> Result<()> {
     status_options.include_untracked(true);
     let checkout_is_clean = checkout
         .statuses(Some(&mut status_options))
-        .context("reading the private checkout status")?
+        .unwrap_or_else(|_| {
+            panic!(
+                "reading the private java-fixture-01 checkout status failed; details \
+                 withheld (AGENTS.md, Fixture privacy)"
+            )
+        })
         .is_empty();
     assert!(
         checkout_is_clean,
