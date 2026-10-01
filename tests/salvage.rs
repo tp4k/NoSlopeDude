@@ -880,3 +880,39 @@ fn test_salvage_drops_owner_entries_of_excluded_callables() {
         ir_file.owners
     );
 }
+
+/// A101 reads `IrFile::excluded_callables` to tell a damaged changed callable
+/// from a deleted one: it lists exactly the callables salvage dropped and
+/// none of the measured ones.
+#[test]
+fn test_salvage_records_the_spans_of_excluded_callables() {
+    let path = salvage_fixture_root().join("Mixed.java");
+    let bytes = fs::read(&path).expect("read Mixed.java");
+
+    let analysis = nsd::analysis::analyze_file(Path::new("Mixed.java"), &bytes)
+        .unwrap_or_else(|reason| panic!("Mixed.java must analyze: {reason:?}"));
+
+    let excluded: Vec<(u32, u32)> = analysis
+        .ir
+        .excluded_callables
+        .iter()
+        .map(|span| (span.start_line, span.end_line))
+        .collect();
+    assert_eq!(excluded, vec![(12, 14)], "only `broken` is dropped");
+    assert!(
+        analysis
+            .ir
+            .callables
+            .iter()
+            .all(|callable| callable.span.start_line != 12),
+        "a dropped callable is not also measured"
+    );
+    assert!(
+        analysis
+            .ir
+            .callables
+            .iter()
+            .any(|callable| callable.span.start_line == 5),
+        "`safe` stays measured and is absent from the side table"
+    );
+}
