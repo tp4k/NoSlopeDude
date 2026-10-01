@@ -141,14 +141,17 @@ pub fn apply_suppressions(
             suppressed_lines.insert((&file.path, finding.rule_id, finding.start_line));
             let base_suppressed = base_partner
                 .get(&(&file.path, index))
-                .filter(|pair| !(pair.in_file_context && analyzed.enclosing_callable.is_some()))
                 .and_then(|pair| {
                     let base_ref = &pair.base;
-                    base_files
-                        .get(&base_ref.path)
-                        .map(|(_, state)| state.suppressed.contains(&base_ref.index))
+                    let (base_file, base_state) = base_files.get(&base_ref.path)?;
+                    let base_in_callable = base_file.analysis.findings[base_ref.index]
+                        .enclosing_callable
+                        .is_some();
+                    let carries_over = !(pair.in_file_context
+                        && (analyzed.enclosing_callable.is_some() || base_in_callable));
+                    (carries_over && base_state.suppressed.contains(&base_ref.index)).then_some(())
                 })
-                .unwrap_or(false);
+                .is_some();
             if !base_suppressed {
                 diagnostics.push(SuppressionDiagnostic {
                     code: CODE_NEW_SUPPRESSION,
