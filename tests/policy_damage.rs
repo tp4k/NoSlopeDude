@@ -399,3 +399,16 @@ fn test_new_damage_on_a_later_unchanged_line_raises_a101() {
 
     assert_eq!(evaluation.sites, vec![site("W.java", 10, 10)]);
 }
+
+#[test]
+fn test_damage_growing_from_an_unchanged_start_line_raises_a101() {
+    let base_text = "export const c = <div>a &\n</div>;\nexport const d = 1;\n";
+    let grown_text = "export const c = <div>a &\nb\n</div>;\nexport const d = 1;\n";
+    let (_dir, repo) = common::init_repo();
+    let base = commit(&repo, &[("w.tsx", base_text.to_string())]);
+    let candidate = commit(&repo, &[("w.tsx", grown_text.to_string())]);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    assert_eq!(evaluation.sites, vec![site("w.tsx", 1, 2)]);
+}
