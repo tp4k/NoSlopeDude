@@ -514,3 +514,63 @@ fn test_header_deleted_before_a_line_sharing_legacy_damage_raises_a101() {
 
     assert_eq!(evaluation.sites, vec![site("w.tsx", 3, 3)]);
 }
+
+/// `evaluate_damage` alone (analysis excluded) over a legacy JSX error plus
+/// `count` unchanged functions and one prepended comment line; returns the
+/// minimum of three timings and the A101 count.
+fn shifted_callables_damage_run(count: usize) -> (std::time::Duration, usize) {
+    const SAMPLES: usize = 3;
+    let base_text = (0..count).fold(
+        String::from("export const c = <div>a & b</div>;\n"),
+        |mut text, index| {
+            text.push_str(&format!("export function f{index}() {{ return 1; }}\n"));
+            text
+        },
+    );
+    let candidate_text = format!("// pad\n{base_text}");
+    let path = RepoPath::from_bytes(b"x.tsx".to_vec());
+    let base_analysis = analyze_file(Path::new("x.tsx"), base_text.as_bytes()).expect("base");
+    let candidate_analysis =
+        analyze_file(Path::new("x.tsx"), candidate_text.as_bytes()).expect("candidate");
+    let base_files = [FindingFile {
+        path: path.clone(),
+        source: base_text.as_bytes(),
+        analysis: &base_analysis,
+    }];
+    let candidate_files = [FindingFile {
+        path: path.clone(),
+        source: candidate_text.as_bytes(),
+        analysis: &candidate_analysis,
+    }];
+    let changes = [Change::Modified {
+        path,
+        kind: nsd::git::snapshot::EntryKind::Regular,
+    }];
+    let mut fastest = std::time::Duration::MAX;
+    let mut sites = 0;
+    for _ in 0..SAMPLES {
+        let started = std::time::Instant::now();
+        let found = evaluate_damage(&base_files, &candidate_files, &changes).expect("evaluate");
+        fastest = fastest.min(started.elapsed());
+        sites = found.len();
+    }
+    (fastest, sites)
+}
+
+#[test]
+fn test_still_measured_lookup_does_not_scale_quadratically() {
+    const CALLABLE_COUNT: usize = 2_000;
+    const SCALED_CALLABLE_COUNT: usize = CALLABLE_COUNT * 4;
+    const SCALING_ASSERT_MULTIPLIER: u32 = 6;
+
+    let (elapsed, sites) = shifted_callables_damage_run(CALLABLE_COUNT);
+    let (scaled_elapsed, scaled_sites) = shifted_callables_damage_run(SCALED_CALLABLE_COUNT);
+
+    assert_eq!((sites, scaled_sites), (0, 0));
+    assert!(
+        scaled_elapsed < elapsed * SCALING_ASSERT_MULTIPLIER,
+        "a quadratic scan scales ~16x from N to 4N, a sub-linear lookup ~4x: evaluate_damage at \
+         N={CALLABLE_COUNT} took {elapsed:?}, at 4N={SCALED_CALLABLE_COUNT} took {scaled_elapsed:?}, \
+         expected 4N < {SCALING_ASSERT_MULTIPLIER}x N"
+    );
+}
