@@ -804,6 +804,30 @@ fn test_javadoc_prose_mentioning_nsd_ignore_is_not_a_directive() {
     );
 }
 
+#[test]
+fn test_block_directive_missing_its_bracket_is_invalid() {
+    for lines in [
+        &["/* nsd-ignore: reason */"][..],
+        &["/* nsd-ignore [JAVA-EMPTY-CATCH]: reason */"][..],
+        &["/**", " * nsd-ignore: reason", " */"][..],
+    ] {
+        let mut candidate = lines.to_vec();
+        candidate.push(CATCH);
+        let (output, text) = pair(&["work();"], &candidate);
+
+        assert_eq!(
+            sites(&output),
+            vec![(CODE_INVALID_SUPPRESSION, None, line_of(&text, "nsd-ignore"))],
+            "{lines:?}"
+        );
+        assert_eq!(
+            v101_lines(&output),
+            vec![line_of(&text, CATCH)],
+            "{lines:?}"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------
 // Coverage: JS/TS directives, adjacent block directive, file-level code.
 // ---------------------------------------------------------------------
