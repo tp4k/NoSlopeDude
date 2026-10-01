@@ -44,6 +44,21 @@ fn tolerated_lines(base: Option<&FindingFile<'_>>, line_map: Option<&LineMap>) -
         .collect()
 }
 
+/// Whether some candidate callable range agrees with the image of every
+/// endpoint that maps; an unmapped pair is not still measured.
+fn is_still_measured(
+    (start, end): (Option<&usize>, Option<&usize>),
+    still_measured: &BTreeSet<(usize, usize)>,
+) -> bool {
+    (start.is_some() || end.is_some())
+        && still_measured
+            .iter()
+            .any(|&(candidate_start, candidate_end)| {
+                start.is_none_or(|&mapped| mapped == candidate_start)
+                    && end.is_none_or(|&mapped| mapped == candidate_end)
+            })
+}
+
 /// The candidate lines that the lines of base measured callables no longer
 /// measured in the candidate map to.
 fn measured_lines(
@@ -71,7 +86,7 @@ fn measured_lines(
                 line_map.base_to_candidate.get(&start),
                 line_map.base_to_candidate.get(&end),
             );
-            !matches!(image, (Some(&s), Some(&e)) if still_measured.contains(&(s, e)))
+            !is_still_measured(image, &still_measured)
         })
         .flat_map(|callable| {
             let (start, end) = line_range(callable.span);
