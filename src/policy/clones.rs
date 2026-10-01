@@ -428,20 +428,21 @@ fn run_tallies(
 
 /// The base occurrence of the counterpart file that shares the most
 /// executable lines with the candidate occurrence through the line map; ties
-/// go to the run with the fewest unmapped lines beyond `added` (the
-/// occurrence's added lines), then the larger one, then source order. A base
-/// occurrence with an executable line that maps outside `span` (the candidate
-/// occurrence's lines) is not eligible: it encloses more than the occurrence.
+/// go to the run with the fewest unmapped lines beyond the subject's added
+/// lines, then the larger one, then source order. A base occurrence with an
+/// executable line that maps outside the subject's lines is not eligible: it
+/// encloses more than the occurrence.
 fn diff_mapped(
     base: usize,
     base_view: &FileView<'_>,
     base_by_container: &HashMap<(usize, u32), Vec<Candidate>>,
     statement_lines: &mut HashMap<(usize, u32), Vec<Vec<usize>>>,
     base_to_candidate: &BTreeMap<usize, usize>,
-    span: (usize, usize),
-    added: usize,
+    subject: &Subject<'_>,
     mapped_lines: &[usize],
 ) -> Option<Candidate> {
+    let span = (subject.run.start_line, subject.run.end_line);
+    let added = subject.added;
     let (&lowest, &highest) = (mapped_lines.first()?, mapped_lines.last()?);
     let mut best: Option<(OverlapRank, Candidate)> = None;
     for (container, &(span_start, span_end)) in base_view.spans.iter().enumerate() {
@@ -612,8 +613,7 @@ pub fn evaluate_clones(
                     &base_by_container,
                     &mut statement_lines,
                     &facts.maps[slot].base_to_candidate,
-                    (subject.run.start_line, subject.run.end_line),
-                    subject.added,
+                    subject,
                     &lines,
                 )
             });
