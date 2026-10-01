@@ -50,7 +50,7 @@ repository proves it. "The code exists" is `[~]`, not `[x]`.
 | `feat/m3-policy` | merged into `main` at `17fd3b4` (PR #3) | Was the M3 and M4-1 working branch |
 | `feat/m4-v102` (`~/pet/nsd`) | `a90cb60` (WS-1 code; docs commit follows) | This run's WS-1 (A102 ledger follow-ups) and WS-2 |
 
-No working branch is unmerged. M1–M2 and M0c both forked before the other
+`feat/m4-v102` is this run's unmerged working branch; every other branch above is merged. M1–M2 and M0c both forked before the other
 landed, so `4a36680` is the first commit where they are tested together.
 
 Test state on `main@4a36680`: `cargo test --locked` is green, 300 passed /
