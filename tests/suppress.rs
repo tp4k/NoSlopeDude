@@ -875,3 +875,70 @@ fn test_directive_in_file_level_code_moved_with_its_finding_raises_nothing() {
     assert_eq!(found, vec![]);
     assert_eq!(unmatched, 0);
 }
+
+// ---------------------------------------------------------------------
+// File-context inheritance needs both sides outside every callable.
+// ---------------------------------------------------------------------
+
+#[test]
+fn test_directive_moved_from_a_deleted_function_to_top_level_raises_s101() {
+    let base = format!("function legacy() {{\n  {TS_DIRECTIVE}\n  {TS_CATCH}\n}}\n");
+    let candidate = format!("{TS_DIRECTIVE}\n{TS_CATCH}\n");
+
+    let (found, unmatched) = ts_sites(&base, &candidate);
+
+    assert_eq!(
+        found,
+        vec![(CODE_NEW_SUPPRESSION, Some(rules::JSTS_EMPTY_CATCH), 1)]
+    );
+    assert_eq!(unmatched, 0);
+}
+
+#[test]
+fn test_directive_moved_from_a_deleted_function_into_a_static_block_raises_s101() {
+    let base = format!("function legacy() {{\n  {TS_DIRECTIVE}\n  {TS_CATCH}\n}}\n");
+    let candidate =
+        format!("class Widget {{\n  static {{\n    {TS_DIRECTIVE}\n    {TS_CATCH}\n  }}\n}}\n");
+
+    let (found, unmatched) = ts_sites(&base, &candidate);
+
+    assert_eq!(
+        found,
+        vec![(CODE_NEW_SUPPRESSION, Some(rules::JSTS_EMPTY_CATCH), 3)]
+    );
+    assert_eq!(unmatched, 0);
+}
+
+#[test]
+fn test_directive_moved_from_a_deleted_method_into_an_instance_initializer_raises_s101() {
+    let (_dir, repo) = common::init_repo();
+    let base_text = class(&[method("legacy", &[DIRECTIVE, CATCH])]);
+    let candidate_text =
+        format!("class Widget {{\n    {{\n        {DIRECTIVE}\n        {CATCH}\n    }}\n}}\n");
+    let base = commit(&repo, &base_text);
+    let candidate = commit(&repo, &candidate_text);
+
+    let output = evaluate(&repo, base, candidate);
+
+    assert_eq!(
+        sites(&output),
+        vec![(
+            CODE_NEW_SUPPRESSION,
+            Some(rules::JAVA_EMPTY_CATCH),
+            line_of(&candidate_text, DIRECTIVE)
+        )]
+    );
+    assert!(output.findings.is_empty());
+}
+
+#[test]
+fn test_unchanged_top_level_suppression_raises_nothing_when_the_file_changes_elsewhere() {
+    let level = format!("{TS_DIRECTIVE}\n{TS_CATCH}\n");
+    let base = format!("{level}function run() {{\n  work();\n}}\n");
+    let candidate = format!("{level}function run() {{\n  work();\n  more();\n}}\n");
+
+    let (found, unmatched) = ts_sites(&base, &candidate);
+
+    assert_eq!(found, vec![]);
+    assert_eq!(unmatched, 0);
+}
