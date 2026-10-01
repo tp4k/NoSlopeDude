@@ -707,6 +707,162 @@ fn test_move_credit_does_not_reach_a_second_copy_in_the_same_container() {
 }
 
 #[test]
+fn test_move_of_a_block_whose_suffix_also_occurs_elsewhere_passes() {
+    let long = statements("s", LONG_BLOCK_LINES);
+    let suffix = statement_range("s", BLOCK_LINES, LONG_BLOCK_LINES - 1);
+    let (_dir, repo) = common::init_repo();
+    let base = commit(
+        &repo,
+        &[
+            ("U.java", java("U", &long)),
+            ("S.java", java("S", &long)),
+            ("X.java", java("X", &suffix)),
+        ],
+    );
+    let candidate = |source: &str| {
+        commit(
+            &repo,
+            &[
+                ("U.java", java("U", &long)),
+                ("S.java", java("S", source)),
+                ("X.java", java("X", &suffix)),
+                ("N.java", java("N", &long)),
+            ],
+        )
+    };
+
+    assert!(evaluate(&repo, base, candidate("")).is_empty());
+
+    let found = evaluate(&repo, base, candidate(&long));
+    assert_eq!(
+        sites(&found),
+        vec![
+            body_site("N.java", LONG_BLOCK_LINES),
+            site(
+                "N.java",
+                FIRST_BODY_LINE + BLOCK_LINES,
+                FIRST_BODY_LINE + LONG_BLOCK_LINES - 1
+            ),
+        ]
+    );
+    assert!(found.iter().all(|d| d.base_lines.is_none()));
+}
+
+/// `s0..s11`, then an `if` holding `t0..t11`: the `t` leaves sit in the
+/// body container and in the nested one.
+fn nested_body() -> String {
+    format!(
+        "{}        if (x > 0) {{\n{}        }}\n",
+        statements("s", BLOCK_LINES),
+        statements("t", BLOCK_LINES)
+    )
+}
+
+const NESTED_BODY_LINES: usize = 2 * BLOCK_LINES + 2;
+
+fn nested_base(repo: &Repository) -> Oid {
+    commit(
+        repo,
+        &[
+            ("U.java", java("U", &nested_body())),
+            ("S.java", java("S", &nested_body())),
+            ("X.java", java("X", &statements("t", BLOCK_LINES))),
+        ],
+    )
+}
+
+fn nested_candidate(repo: &Repository, source: &str, added: &[&str]) -> Oid {
+    let mut files = vec![
+        ("U.java", java("U", &nested_body())),
+        ("S.java", java("S", source)),
+        ("X.java", java("X", &statements("t", BLOCK_LINES))),
+    ];
+    for &name in added {
+        files.push((name, java(&name[..1], &nested_body())));
+    }
+    commit(repo, &files)
+}
+
+fn nested_sites(path: &str) -> Vec<Site> {
+    vec![
+        site(
+            path,
+            FIRST_BODY_LINE,
+            FIRST_BODY_LINE + NESTED_BODY_LINES - 1,
+        ),
+        site(
+            path,
+            FIRST_BODY_LINE + BLOCK_LINES + 1,
+            FIRST_BODY_LINE + 2 * BLOCK_LINES,
+        ),
+    ]
+}
+
+#[test]
+fn test_move_of_a_block_whose_nested_block_also_occurs_elsewhere_passes() {
+    let (_dir, repo) = common::init_repo();
+    let base = nested_base(&repo);
+    let moved = nested_candidate(&repo, "", &["N.java"]);
+    let copied = nested_candidate(&repo, &nested_body(), &["N.java"]);
+
+    assert!(evaluate(&repo, base, moved).is_empty());
+
+    let found = evaluate(&repo, base, copied);
+    assert_eq!(sites(&found), nested_sites("N.java"));
+    assert!(found.iter().all(|d| d.base_lines.is_none()));
+}
+
+#[test]
+fn test_move_credit_is_shared_by_base_containers_sharing_a_line() {
+    let shared_line = format!(
+        "        int s{last} = sCall{last}(x); }} void b(int x) {{ {}",
+        (0..3)
+            .map(|index| format!("int s{index} = sCall{index}(x);"))
+            .collect::<Vec<_>>()
+            .join(" "),
+        last = BLOCK_LINES - 1
+    );
+    let two_methods = format!(
+        "class S {{\n    void a(int x) {{\n{}{shared_line}\n{}    }}\n}}\n",
+        statement_range("s", 0, BLOCK_LINES - 2),
+        statement_range("s", 3, LONG_BLOCK_LINES - 1)
+    );
+    let long = statements("s", LONG_BLOCK_LINES);
+    let (_dir, repo) = common::init_repo();
+    let base = commit(
+        &repo,
+        &[
+            ("U.java", java("U", &long)),
+            ("S.java", two_methods),
+            ("X.java", java("X", &statements("s", BLOCK_LINES))),
+        ],
+    );
+    let candidate = commit(
+        &repo,
+        &[
+            ("U.java", java("U", &long)),
+            ("S.java", "class S {\n}\n".to_string()),
+            ("X.java", java("X", &statements("s", BLOCK_LINES))),
+            ("N.java", java("N", &long)),
+        ],
+    );
+
+    assert!(evaluate(&repo, base, candidate).is_empty());
+}
+
+#[test]
+fn test_move_credit_does_not_reach_a_distinct_copy_of_a_block_with_a_nested_block() {
+    let (_dir, repo) = common::init_repo();
+    let base = nested_base(&repo);
+    let candidate = nested_candidate(&repo, "", &["M.java", "N.java"]);
+
+    let found = evaluate(&repo, base, candidate);
+
+    assert_eq!(sites(&found), nested_sites("N.java"));
+    assert!(found.iter().all(|d| d.base_lines.is_none()));
+}
+
+#[test]
 fn test_base_unique_block_edited_in_place_and_copied_raises_only_on_the_copy() {
     let extended = format!("{}{}", block("a"), statements("e", 1));
     let (_dir, repo) = common::init_repo();
