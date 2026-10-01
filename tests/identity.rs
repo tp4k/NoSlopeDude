@@ -1177,3 +1177,27 @@ namespace N {
         assert_eq!(&identity::callable_identity(&ir_file, callable), expected);
     }
 }
+
+fn only_callable_fingerprint(source: &str) -> String {
+    let parsed = parse_inline(source, Grammar::Java, JAVA);
+    let ir = lower::lower_file(&parsed);
+    assert_eq!(ir.callables.len(), 1, "{source}");
+    identity::body_fingerprint(&ir, &ir.callables[0], &parsed.source)
+}
+
+fn boolean_method(expression: &str) -> String {
+    format!("class A {{ boolean m(boolean a, boolean b, boolean c) {{ return {expression}; }} }}")
+}
+
+/// Tier-3 pairing assumes one fingerprint means one CC: bodies that differ
+/// only in an operator that changes CC must not share a fingerprint.
+#[test]
+fn test_body_fingerprint_separates_bodies_that_differ_only_in_a_cc_bearing_operator() {
+    let short_circuit = only_callable_fingerprint(&boolean_method("a && b"));
+    let bitwise = only_callable_fingerprint(&boolean_method("a & b"));
+    let conditional = only_callable_fingerprint(&boolean_method("a ? b : c"));
+    let plain = only_callable_fingerprint(&boolean_method("a + b + c"));
+
+    assert_ne!(short_circuit, bitwise);
+    assert_ne!(conditional, plain);
+}
