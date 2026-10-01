@@ -389,6 +389,18 @@ fn test_output_is_sorted_and_deterministic() {
 }
 
 #[test]
+fn test_measured_callable_swallowed_by_legacy_damage_raises_a101() {
+    let (_dir, repo) = common::init_repo();
+    let base = commit(&repo, &[("W.java", LEGACY.to_string())]);
+    let edited = LEGACY.replace("        a();\n    }\n", "        a();\n");
+    let candidate = commit(&repo, &[("W.java", edited)]);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    assert_eq!(evaluation.sites, vec![site("W.java", 2, 6)]);
+}
+
+#[test]
 fn test_damage_growing_from_an_unchanged_start_line_raises_a101() {
     let base_text = "export const c = <div>a &\n</div>;\nexport const d = 1;\n";
     let grown_text = "export const c = <div>a &\nb\n</div>;\nexport const d = 1;\n";
