@@ -6,6 +6,7 @@ use crate::model::RuleId;
 use crate::rules::ALL_RULE_IDS;
 
 const DIRECTIVE_PREFIX: &str = "nsd-ignore";
+const BLOCK_DIRECTIVE_PREFIX: &str = "nsd-ignore[";
 const LINE_COMMENT_OPENER: &str = "//";
 const BLOCK_COMMENT_OPENER: &str = "/*";
 const BLOCK_DOC_MARK: char = '*';
@@ -66,14 +67,14 @@ fn directive(node: &IrNode, source: &[u8]) -> Option<Directive> {
 }
 
 /// The line offset, within a block comment whose opener is already stripped,
-/// of the first line that begins with `nsd-ignore` after its optional leading
+/// of the first line that begins with `nsd-ignore[` after its optional leading
 /// whitespace and `*`s.
 fn block_directive_offset(body: &str) -> Option<usize> {
     body.lines().position(|line| {
         line.trim_start()
             .trim_start_matches(BLOCK_DOC_MARK)
             .trim_start()
-            .starts_with(DIRECTIVE_PREFIX)
+            .starts_with(BLOCK_DIRECTIVE_PREFIX)
     })
 }
 

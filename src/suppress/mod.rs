@@ -4,8 +4,9 @@
 //! A valid directive suppresses the finding of its rule that starts on the
 //! next line. Suppression is applied after finding matching: S101 is raised
 //! for a suppressed candidate finding unless its matched base finding was
-//! suppressed too, and S102 is delta-based against the base directive the
-//! diff maps each candidate directive to.
+//! suppressed too, and a finding in an unmatched callable inherits nothing
+//! from a base finding paired in file context. S102 is delta-based against
+//! the base directive the diff maps each candidate directive to.
 
 mod directive;
 
@@ -20,7 +21,7 @@ use crate::model::RuleId;
 use crate::policy::diagnostics::{
     FindingDiagnostic, SuppressionDiagnostic, CODE_INVALID_SUPPRESSION, CODE_NEW_SUPPRESSION,
 };
-use crate::policy::findings::{FindingFile, FindingMatchOutput, FindingRef};
+use crate::policy::findings::{FindingFile, FindingMatchOutput, FindingPair};
 
 use directive::{directives, Directive, Form};
 
@@ -125,21 +126,24 @@ pub fn apply_suppressions(
             _ => None,
         })
         .collect();
-    let base_partner: HashMap<(&RepoPath, usize), &FindingRef> = matched
+    let base_partner: HashMap<(&RepoPath, usize), &FindingPair> = matched
         .pairs
         .iter()
-        .map(|pair| ((&pair.candidate.path, pair.candidate.index), &pair.base))
+        .map(|pair| ((&pair.candidate.path, pair.candidate.index), pair))
         .collect();
 
     let mut diagnostics = Vec::new();
     let mut suppressed_lines: HashSet<(&RepoPath, RuleId, usize)> = HashSet::new();
     for (file, state) in candidate.iter().zip(&candidate_states) {
         for &index in &state.suppressed {
-            let finding = &file.analysis.findings[index].finding;
+            let analyzed = &file.analysis.findings[index];
+            let finding = &analyzed.finding;
             suppressed_lines.insert((&file.path, finding.rule_id, finding.start_line));
             let base_suppressed = base_partner
                 .get(&(&file.path, index))
-                .and_then(|base_ref| {
+                .filter(|pair| !(pair.in_file_context && analyzed.enclosing_callable.is_some()))
+                .and_then(|pair| {
+                    let base_ref = &pair.base;
                     base_files
                         .get(&base_ref.path)
                         .map(|(_, state)| state.suppressed.contains(&base_ref.index))

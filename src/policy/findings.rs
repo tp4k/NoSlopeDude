@@ -183,7 +183,8 @@ pub fn match_findings<'a>(
 
     let mut pairs = Vec::new();
     let mut unmatched = Vec::new();
-    for group in groups.values_mut() {
+    for (key, group) in &mut groups {
+        let in_file_context = matches!(key.1, Context::File(_));
         let order = |found: &Occurrence<'a>| (found.path, found.index);
         group.base.sort_by_key(order);
         group.candidate.sort_by_key(order);
@@ -209,7 +210,7 @@ pub fn match_findings<'a>(
                     pairs.push(FindingPair {
                         base: finding_ref(found),
                         candidate: finding_ref(&group.candidate[position]),
-                        in_file_context: false,
+                        in_file_context,
                     });
                 }
                 None => open_base.push(found),
@@ -226,7 +227,7 @@ pub fn match_findings<'a>(
                 pairs.push(FindingPair {
                     base: finding_ref(found),
                     candidate: finding_ref(paired),
-                    in_file_context: false,
+                    in_file_context,
                 });
             }
         }
