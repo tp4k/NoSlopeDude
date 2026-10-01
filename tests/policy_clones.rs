@@ -1197,3 +1197,81 @@ fn test_move_mapping_does_not_scale_quadratically_in_moved_blocks() {
     assert_eq!(one_copied.1, 1, "one block copied, not moved");
     assert_scales_linearly("evaluate_clones over moved blocks", small, large);
 }
+
+/// The largest block count whose eight-fold file stays under the 1 MiB
+/// source ceiling; a larger file is silently skipped by `analyzed`.
+const CEILING_SAFE_BLOCKS: usize = 250;
+
+fn assert_ratio_below_bound(what: &str, small: Duration, large: Duration) {
+    assert!(
+        large < small * SCALING_ASSERT_MULTIPLIER,
+        "{what} at N={CEILING_SAFE_BLOCKS} took {small:?}, at 8N={} took {large:?}, ratio \
+         {:.1}x, expected < {SCALING_ASSERT_MULTIPLIER}x",
+        CEILING_SAFE_BLOCKS * SCALING_FACTOR,
+        large.as_secs_f64() / small.as_secs_f64().max(f64::EPSILON)
+    );
+}
+
+#[test]
+fn test_scaling_fixtures_stay_under_the_source_ceiling() {
+    let largest = blocks_file("D", 0..CEILING_SAFE_BLOCKS * SCALING_FACTOR);
+    assert!(
+        (largest.len() as u64) < nsd::git::snapshot::SOURCE_CEILING_BYTES,
+        "a {} byte fixture is skipped by the analyzer, so the scaling run is vacuous",
+        largest.len()
+    );
+}
+
+#[test]
+fn test_copy_evaluation_scales_linearly_within_the_source_ceiling() {
+    let small = copy_run(CEILING_SAFE_BLOCKS);
+    let large = copy_run(CEILING_SAFE_BLOCKS * SCALING_FACTOR);
+
+    assert_eq!(
+        (small.1, large.1),
+        (CEILING_SAFE_BLOCKS, CEILING_SAFE_BLOCKS * SCALING_FACTOR)
+    );
+    assert_ratio_below_bound("evaluate_clones over copied blocks", small.0, large.0);
+}
+
+#[test]
+fn test_move_mapping_scales_linearly_within_the_source_ceiling() {
+    let small = move_run(CEILING_SAFE_BLOCKS, 0);
+    let large = move_run(CEILING_SAFE_BLOCKS * SCALING_FACTOR, 0);
+    let one_copied = move_run(CEILING_SAFE_BLOCKS, 1);
+
+    assert_eq!((small.1, large.1), (0, 0), "every pair is a move");
+    assert_eq!(one_copied.1, 1, "one block copied, not moved");
+    assert_ratio_below_bound("evaluate_clones over moved blocks", small.0, large.0);
+}
+
+const SUB_TEN_BASE: usize = 5;
+
+#[test]
+fn test_extension_of_a_sub_ten_line_clone_keeps_the_one_line_floor() {
+    let run = |added: usize| {
+        let base_body = statements("a", SUB_TEN_BASE);
+        let extended = format!("{base_body}{}", statements("e", added));
+        let (_dir, repo) = common::init_repo();
+        let base = commit(
+            &repo,
+            &[
+                ("A.java", java("A", &base_body)),
+                ("B.java", java("B", &extended)),
+            ],
+        );
+        let candidate = commit(
+            &repo,
+            &[
+                ("A.java", java("A", &extended)),
+                ("B.java", java("B", &extended)),
+            ],
+        );
+        evaluate_min(&repo, base, candidate, SUB_TEN_BASE as u32)
+    };
+
+    assert!(run(1).is_empty(), "+1 on a 5-line base is max(1, 5 / 10)");
+    let found = run(2);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].base_lines, Some(SUB_TEN_BASE));
+}
