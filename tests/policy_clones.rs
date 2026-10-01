@@ -1511,3 +1511,79 @@ fn test_reindented_tail_of_an_enclosing_method_does_not_inflate_the_base() {
         assert_eq!(found[0].added_lines, ENCLOSING_EXTENSION);
     }
 }
+
+// ---------------------------------------------------------------------
+// A tie between eligible diff-mapped runs goes to the larger base.
+// ---------------------------------------------------------------------
+
+const TIE_CLONE_STATEMENTS: usize = 50;
+const TIE_REPLACED_WITHIN: usize = 5;
+
+/// `A.java` holds a 50-line clone whose last `replaced` lines the candidate
+/// replaces with new ones; the unchanged `B.java` already holds the new form.
+fn replaced_tail(replaced: usize) -> Vec<CloneDiagnostic> {
+    let kept = statement_range("a", 0, TIE_CLONE_STATEMENTS - replaced - 1);
+    let old_tail = statement_range(
+        "a",
+        TIE_CLONE_STATEMENTS - replaced,
+        TIE_CLONE_STATEMENTS - 1,
+    );
+    let new_form = format!("{kept}{}", statements("e", replaced));
+    let (_dir, repo) = common::init_repo();
+    let base = commit(
+        &repo,
+        &[
+            ("A.java", java("A", &format!("{kept}{old_tail}"))),
+            ("B.java", java("B", &new_form)),
+        ],
+    );
+    let candidate = commit(
+        &repo,
+        &[
+            ("A.java", java("A", &new_form)),
+            ("B.java", java("B", &new_form)),
+        ],
+    );
+    evaluate(&repo, base, candidate)
+}
+
+#[test]
+fn test_diff_mapping_tie_between_eligible_runs_goes_to_the_larger_base() {
+    let found = replaced_tail(TIE_REPLACED_WITHIN);
+    assert!(
+        found.is_empty(),
+        "replacing 5 of 50 lines is graded against the 50-line base (threshold 5): {found:?}"
+    );
+
+    let beyond = replaced_tail(TIE_REPLACED_WITHIN + 1);
+    assert_eq!(
+        sites(&beyond),
+        vec![body_site("A.java", TIE_CLONE_STATEMENTS)],
+        "{beyond:?}"
+    );
+    assert_eq!(beyond[0].base_lines, Some(TIE_CLONE_STATEMENTS));
+    assert_eq!(beyond[0].added_lines, TIE_REPLACED_WITHIN + 1);
+}
+
+#[test]
+fn test_unmapped_tail_of_an_enclosing_method_still_raises_on_the_extension() {
+    for reindent in [true, false] {
+        let found = extension_with_unmapped_tail(reindent);
+
+        assert_eq!(
+            sites(&found),
+            vec![body_site(
+                "A.java",
+                EXTENSION_BASE_SMALL + ENCLOSING_EXTENSION
+            )],
+            "reindent={reindent}: {found:?}"
+        );
+        assert_eq!(found[0].added_lines, ENCLOSING_EXTENSION);
+        assert!(
+            found[0]
+                .base_lines
+                .is_some_and(|lines| lines < ENCLOSING_TAIL_STATEMENTS),
+            "the base is never the whole 200-line method: {found:?}"
+        );
+    }
+}
