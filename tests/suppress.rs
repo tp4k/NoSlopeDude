@@ -752,3 +752,246 @@ fn test_directive_suppresses_every_finding_of_its_rule_on_the_next_line() {
     );
     assert_eq!(v101_lines(&output), Vec::<usize>::new());
 }
+
+// ---------------------------------------------------------------------
+// Suppression follow-ups: file-context carry-over and prose in comments.
+// ---------------------------------------------------------------------
+
+#[test]
+fn test_directive_carried_into_an_unmatched_callable_raises_s101() {
+    let (_dir, repo) = common::init_repo();
+    let base_text = class(&[method("legacy", &[DIRECTIVE, CATCH])]);
+    let candidate_text = class(&[method("fresh", &["work();", DIRECTIVE, CATCH])]);
+    let base = commit(&repo, &base_text);
+    let candidate = commit(&repo, &candidate_text);
+
+    let output = evaluate(&repo, base, candidate);
+
+    assert_eq!(
+        sites(&output),
+        vec![(
+            CODE_NEW_SUPPRESSION,
+            Some(rules::JAVA_EMPTY_CATCH),
+            line_of(&candidate_text, DIRECTIVE)
+        )]
+    );
+    assert!(output.findings.is_empty());
+}
+
+#[test]
+fn test_javadoc_prose_mentioning_nsd_ignore_is_not_a_directive() {
+    let (output, text) = pair(
+        &["work();"],
+        &[
+            "/**",
+            " * nsd-ignore directives are documented here",
+            " */",
+            "work();",
+            "/**",
+            " * nsd-ignore[JAVA-EMPTY-CATCH]: reason",
+            " */",
+            "work();",
+        ],
+    );
+
+    assert_eq!(
+        sites(&output),
+        vec![(
+            CODE_INVALID_SUPPRESSION,
+            None,
+            line_of(&text, "nsd-ignore[")
+        )]
+    );
+}
+
+#[test]
+fn test_block_directive_missing_its_bracket_is_invalid() {
+    for lines in [
+        &["/* nsd-ignore: reason */"][..],
+        &["/* nsd-ignore [JAVA-EMPTY-CATCH]: reason */"][..],
+        &["/**", " * nsd-ignore: reason", " */"][..],
+    ] {
+        let mut candidate = lines.to_vec();
+        candidate.push(CATCH);
+        let (output, text) = pair(&["work();"], &candidate);
+
+        assert_eq!(
+            sites(&output),
+            vec![(CODE_INVALID_SUPPRESSION, None, line_of(&text, "nsd-ignore"))],
+            "{lines:?}"
+        );
+        assert_eq!(
+            v101_lines(&output),
+            vec![line_of(&text, CATCH)],
+            "{lines:?}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------
+// Coverage: JS/TS directives, adjacent block directive, file-level code.
+// ---------------------------------------------------------------------
+
+const TS_FILE: &str = "widget.ts";
+const TS_DIRECTIVE: &str = "// nsd-ignore[JSTS-EMPTY-CATCH]: legacy API";
+const TS_CATCH: &str = "try { work(); } catch (e) { }";
+
+fn ts_sites(base_text: &str, candidate_text: &str) -> (Vec<Site>, usize) {
+    let (_dir, repo) = common::init_repo();
+    let entry = |text: &str| {
+        vec![(
+            TS_FILE.as_bytes().to_vec(),
+            MODE_REGULAR,
+            text.as_bytes().to_vec(),
+        )]
+    };
+    let base = common::commit_entries(&repo, &entry(base_text));
+    let candidate = common::commit_entries(&repo, &entry(candidate_text));
+    let output = evaluate(&repo, base, candidate);
+    let found = output
+        .diagnostics
+        .iter()
+        .map(|d| (d.code, d.rule_id, d.directive_line))
+        .collect();
+    (found, output.findings.len())
+}
+
+#[test]
+fn test_jsts_directive_suppresses_new_and_flags_unused() {
+    let base = "function run() {\n  work();\n}\n";
+    let candidate = format!(
+        "function run() {{\n  work();\n  {TS_DIRECTIVE}\n  {TS_CATCH}\n  {TS_DIRECTIVE}\n  work();\n}}\n"
+    );
+
+    let (found, unmatched) = ts_sites(base, &candidate);
+
+    assert_eq!(
+        found,
+        vec![
+            (CODE_NEW_SUPPRESSION, Some(rules::JSTS_EMPTY_CATCH), 3),
+            (CODE_INVALID_SUPPRESSION, Some(rules::JSTS_EMPTY_CATCH), 5),
+        ]
+    );
+    assert_eq!(unmatched, 0);
+}
+
+#[test]
+fn test_block_directive_directly_above_a_finding_suppresses_nothing() {
+    let (output, text) = pair(
+        &["work();"],
+        &["/* nsd-ignore[JAVA-EMPTY-CATCH]: reason */", CATCH],
+    );
+
+    assert_eq!(
+        sites(&output),
+        vec![(CODE_INVALID_SUPPRESSION, None, line_of(&text, "nsd-ignore"))]
+    );
+    assert_eq!(v101_lines(&output), vec![line_of(&text, CATCH)]);
+}
+
+#[test]
+fn test_directive_in_file_level_code_moved_with_its_finding_raises_nothing() {
+    let level = format!("{TS_DIRECTIVE}\n{TS_CATCH}\n");
+    let moved = format!("// pad\n// pad\n{level}");
+
+    let (found, unmatched) = ts_sites(&level, &moved);
+
+    assert_eq!(found, vec![]);
+    assert_eq!(unmatched, 0);
+}
+
+// ---------------------------------------------------------------------
+// File-context inheritance needs both sides outside every callable.
+// ---------------------------------------------------------------------
+
+#[test]
+fn test_directive_moved_from_a_deleted_function_to_top_level_raises_s101() {
+    let base = format!("function legacy() {{\n  {TS_DIRECTIVE}\n  {TS_CATCH}\n}}\n");
+    let candidate = format!("{TS_DIRECTIVE}\n{TS_CATCH}\n");
+
+    let (found, unmatched) = ts_sites(&base, &candidate);
+
+    assert_eq!(
+        found,
+        vec![(CODE_NEW_SUPPRESSION, Some(rules::JSTS_EMPTY_CATCH), 1)]
+    );
+    assert_eq!(unmatched, 0);
+}
+
+#[test]
+fn test_directive_moved_from_a_deleted_function_into_a_static_block_raises_s101() {
+    let base = format!("function legacy() {{\n  {TS_DIRECTIVE}\n  {TS_CATCH}\n}}\n");
+    let candidate =
+        format!("class Widget {{\n  static {{\n    {TS_DIRECTIVE}\n    {TS_CATCH}\n  }}\n}}\n");
+
+    let (found, unmatched) = ts_sites(&base, &candidate);
+
+    assert_eq!(
+        found,
+        vec![(CODE_NEW_SUPPRESSION, Some(rules::JSTS_EMPTY_CATCH), 3)]
+    );
+    assert_eq!(unmatched, 0);
+}
+
+#[test]
+fn test_directive_moved_from_a_deleted_method_into_an_instance_initializer_raises_s101() {
+    let (_dir, repo) = common::init_repo();
+    let base_text = class(&[method("legacy", &[DIRECTIVE, CATCH])]);
+    let candidate_text =
+        format!("class Widget {{\n    {{\n        {DIRECTIVE}\n        {CATCH}\n    }}\n}}\n");
+    let base = commit(&repo, &base_text);
+    let candidate = commit(&repo, &candidate_text);
+
+    let output = evaluate(&repo, base, candidate);
+
+    assert_eq!(
+        sites(&output),
+        vec![(
+            CODE_NEW_SUPPRESSION,
+            Some(rules::JAVA_EMPTY_CATCH),
+            line_of(&candidate_text, DIRECTIVE)
+        )]
+    );
+    assert!(output.findings.is_empty());
+}
+
+#[test]
+fn test_unchanged_top_level_suppression_raises_nothing_when_the_file_changes_elsewhere() {
+    let level = format!("{TS_DIRECTIVE}\n{TS_CATCH}\n");
+    let base = format!("{level}function run() {{\n  work();\n}}\n");
+    let candidate = format!("{level}function run() {{\n  work();\n  more();\n}}\n");
+
+    let (found, unmatched) = ts_sites(&base, &candidate);
+
+    assert_eq!(found, vec![]);
+    assert_eq!(unmatched, 0);
+}
+
+#[test]
+fn test_directive_moved_from_top_level_into_a_new_function_raises_s101() {
+    let base = format!("{TS_DIRECTIVE}\n{TS_CATCH}\n");
+    let candidate = format!("function fresh() {{\n  work();\n  {TS_DIRECTIVE}\n  {TS_CATCH}\n}}\n");
+
+    let (found, unmatched) = ts_sites(&base, &candidate);
+
+    assert_eq!(
+        found,
+        vec![(CODE_NEW_SUPPRESSION, Some(rules::JSTS_EMPTY_CATCH), 3)]
+    );
+    assert_eq!(unmatched, 0);
+}
+
+#[test]
+fn test_base_side_check_reads_the_paired_base_finding() {
+    let other = "try { other(); } catch (e) { }";
+    let base = format!("{other}\nfunction legacy() {{\n  {TS_DIRECTIVE}\n  {TS_CATCH}\n}}\n");
+    let candidate = format!("{TS_DIRECTIVE}\n{TS_CATCH}\n{other}\n");
+
+    let (found, unmatched) = ts_sites(&base, &candidate);
+
+    assert_eq!(
+        found,
+        vec![(CODE_NEW_SUPPRESSION, Some(rules::JSTS_EMPTY_CATCH), 1)]
+    );
+    assert_eq!(unmatched, 0);
+}

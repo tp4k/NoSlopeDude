@@ -10,11 +10,9 @@ use nsd::model::{RemoteTarget, Revision, ScanSettings, Target, DEFAULT_MIN_CLONE
 use nsd::pipeline::{self, PipelineOutput};
 use nsd::report::{self, ReportInput};
 
-/// A real, on-disk git worktree (system `git` binary, same as
-/// `target::local_git_revision`) for a test that needs `git status` to
-/// observe an actual dirty edit -- unlike `tests/common`'s
-/// `init_repo`/`commit_entries`, which write only to the git2 index (see
-/// `test_dirty_flag_value_tracks_a_real_worktree_edit` below). Kept local to
+/// A real, on-disk git worktree with a committed `HEAD` (system `git` binary,
+/// as `target::local_git_revision` reads it via `rev-parse`), used by
+/// `test_local_git_scan_reports_null_dirty_even_after_an_edit` below. Kept local to
 /// this file rather than `tests/common/mod.rs`: each `tests/*.rs` file is
 /// its own crate for `cargo clippy`'s dead-code lint, and no other test file
 /// calls this helper, so sharing it there would leave it (and `run_git`)
@@ -191,8 +189,8 @@ fn test_json_report_contains_every_required_section() {
     assert!(value["scan"]["min_clone_lines"].is_number());
     assert!(value["scan"]["revision"].is_object());
     assert!(
-        value["scan"]["revision"]["dirty"].is_boolean(),
-        "a scan inside a git work tree publishes the D6 dirty flag"
+        value["scan"]["revision"]["dirty"].is_null(),
+        "a scan inside a local git work tree publishes dirty as null"
     );
 
     // Skipped files: `Broken.java` salvage-parses, and is listed with a
@@ -311,13 +309,7 @@ fn test_scan_settings_round_trip() {
 }
 
 #[test]
-fn test_dirty_flag_value_tracks_a_real_worktree_edit() {
-    // Unlike `test_scan_settings_round_trip` above (git2-index-only via
-    // `common::init_repo`/`commit_entries`), this pins the D6 `dirty`
-    // flag's actual *value* against a real on-disk edit `git status` can
-    // see, so a mutant that hardcodes `dirty: Some(false)`
-    // (`src/report/mod.rs:260`) survives the type-level coverage but not
-    // this test.
+fn test_local_git_scan_reports_null_dirty_even_after_an_edit() {
     let repo_dir = tempfile::tempdir().expect("tempdir");
     init_git_worktree(repo_dir.path());
     fs::write(repo_dir.path().join("A.java"), "public class A {}\n").expect("write A.java");
@@ -325,11 +317,11 @@ fn test_dirty_flag_value_tracks_a_real_worktree_edit() {
 
     let (_dir, output) = run_scan(repo_dir.path(), |_| {});
     assert_eq!(
-        output.report.scan.revision.dirty,
-        Some(false),
-        "a freshly committed worktree should not be dirty: {:?}",
+        output.report.scan.revision.dirty, None,
+        "a local git scan computes no dirty flag: {:?}",
         output.report.scan.revision
     );
+    assert!(output.report.scan.revision.sha.is_some());
 
     fs::write(
         repo_dir.path().join("A.java"),
@@ -339,11 +331,11 @@ fn test_dirty_flag_value_tracks_a_real_worktree_edit() {
 
     let (_dir2, output2) = run_scan(repo_dir.path(), |_| {});
     assert_eq!(
-        output2.report.scan.revision.dirty,
-        Some(true),
-        "an edited worktree file should be observed as dirty: {:?}",
+        output2.report.scan.revision.dirty, None,
+        "an edited local git scan still computes no dirty flag: {:?}",
         output2.report.scan.revision
     );
+    assert!(output2.report.scan.revision.sha.is_some());
 }
 
 #[test]
@@ -433,88 +425,61 @@ fn test_terminal_summary_carries_the_scores() {
 }
 
 #[test]
-fn test_terminal_summary_revision_line_carries_the_dirty_flag() {
-    // B9: report.json/report.html already carry the D6 dirty flag; the
-    // terminal summary's `revision:` line did not. Spawn the real binary
-    // (same pattern as test_terminal_summary_carries_the_scores above)
-    // against a real dirty git worktree, then against a non-git directory,
-    // so both the `Some` (dirty) and `None` (unavailable_reason) arms of
-    // the revision's `dirty: Option<bool>` are exercised through stdout.
+fn test_terminal_summary_revision_line_has_no_dirty_suffix_for_local_targets() {
+    // A local git work tree, clean or edited, prints `  revision: <sha>`
+    // with no "(dirty: ...)" suffix; `dirty` is null in report.json.
     let repo_dir = tempfile::tempdir().expect("tempdir");
     init_git_worktree(repo_dir.path());
     fs::write(repo_dir.path().join("A.java"), "public class A {}\n").expect("write A.java");
     git_commit_all(repo_dir.path(), "initial commit");
-    fs::write(
-        repo_dir.path().join("A.java"),
-        "public class A { void x() {} }\n",
-    )
-    .expect("edit A.java (uncommitted, so the worktree is dirty)");
 
-    let dirty_output_dir = tempfile::tempdir().expect("tempdir");
-    let dirty_command_output = std::process::Command::new(env!("CARGO_BIN_EXE_nsd"))
-        .args(["scan", repo_dir.path().to_str().unwrap(), "--output"])
-        .arg(dirty_output_dir.path())
-        .output()
-        .expect("spawn nsd");
-    assert!(dirty_command_output.status.success());
-    let dirty_stdout =
-        String::from_utf8(dirty_command_output.stdout).expect("stdout is valid UTF-8");
+    for edited in [false, true] {
+        if edited {
+            fs::write(
+                repo_dir.path().join("A.java"),
+                "public class A { void x() {} }\n",
+            )
+            .expect("edit A.java (uncommitted)");
+        }
+        let output_dir = tempfile::tempdir().expect("tempdir");
+        let command_output = std::process::Command::new(env!("CARGO_BIN_EXE_nsd"))
+            .args(["scan", repo_dir.path().to_str().unwrap(), "--output"])
+            .arg(output_dir.path())
+            .output()
+            .expect("spawn nsd");
+        assert!(command_output.status.success());
+        let stdout = String::from_utf8(command_output.stdout).expect("stdout is valid UTF-8");
 
-    let json_text = fs::read_to_string(dirty_output_dir.path().join("report.json"))
-        .expect("report.json exists");
-    let value: serde_json::Value = serde_json::from_str(&json_text).expect("valid JSON");
-    let sha = value["scan"]["revision"]["sha"]
-        .as_str()
-        .expect("a git worktree scan publishes a sha")
-        .to_string();
-    assert_eq!(
-        value["scan"]["revision"]["dirty"].as_bool(),
-        Some(true),
-        "the fixture's uncommitted edit should be observed as dirty: {value}"
-    );
-
-    assert!(
-        dirty_stdout.contains(&format!("  revision: {sha} (dirty: true)\n")),
-        "stdout should carry the sha and the dirty flag on the same line: {dirty_stdout}"
-    );
-
-    // Clean repo: `dirty` is `Some(false)`, the common case (every clean
-    // local repo, and every remote scan -- docs/report-format.md:92). This
-    // kills the mutant that prints the "(dirty: ...)" suffix only when
-    // `dirty == Some(true)`.
-    let clean_repo_dir = tempfile::tempdir().expect("tempdir");
-    init_git_worktree(clean_repo_dir.path());
-    fs::write(clean_repo_dir.path().join("A.java"), "public class A {}\n").expect("write A.java");
-    git_commit_all(clean_repo_dir.path(), "initial commit");
-
-    let clean_output_dir = tempfile::tempdir().expect("tempdir");
-    let clean_command_output = std::process::Command::new(env!("CARGO_BIN_EXE_nsd"))
-        .args(["scan", clean_repo_dir.path().to_str().unwrap(), "--output"])
-        .arg(clean_output_dir.path())
-        .output()
-        .expect("spawn nsd");
-    assert!(clean_command_output.status.success());
-    let clean_stdout =
-        String::from_utf8(clean_command_output.stdout).expect("stdout is valid UTF-8");
-
-    let clean_json_text = fs::read_to_string(clean_output_dir.path().join("report.json"))
-        .expect("report.json exists");
-    let clean_value: serde_json::Value =
-        serde_json::from_str(&clean_json_text).expect("valid JSON");
-    let clean_sha = clean_value["scan"]["revision"]["sha"]
-        .as_str()
-        .expect("a git worktree scan publishes a sha")
-        .to_string();
-    assert_eq!(
-        clean_value["scan"]["revision"]["dirty"].as_bool(),
-        Some(false),
-        "a fixture with no uncommitted edit should be observed as clean: {clean_value}"
-    );
-
-    assert!(
-        clean_stdout.contains(&format!("  revision: {clean_sha} (dirty: false)\n")),
-        "stdout should carry the sha and the clean dirty flag on the same line: {clean_stdout}"
-    );
+        let json_text =
+            fs::read_to_string(output_dir.path().join("report.json")).expect("report.json exists");
+        let value: serde_json::Value = serde_json::from_str(&json_text).expect("valid JSON");
+        let sha = value["scan"]["revision"]["sha"]
+            .as_str()
+            .expect("a git worktree scan publishes a sha")
+            .to_string();
+        assert!(
+            value["scan"]["revision"]["dirty"].is_null(),
+            "dirty is null (edited: {edited}): {value}"
+        );
+        assert!(
+            stdout.contains(&format!("  revision: {sha}\n")),
+            "stdout carries the bare sha (edited: {edited}): {stdout}"
+        );
+        let html =
+            fs::read_to_string(output_dir.path().join("report.html")).expect("report.html exists");
+        assert!(
+            html.contains(&format!("<li>revision: <code>{sha}</code></li>")),
+            "report.html carries the bare sha (edited: {edited})"
+        );
+        assert!(
+            !html.contains("(dirty:"),
+            "a local git target must not render a dirty suffix in report.html (edited: {edited})"
+        );
+        assert!(
+            !stdout.contains("(dirty:"),
+            "a local git target must not print a dirty suffix (edited: {edited}): {stdout}"
+        );
+    }
 
     // Non-git target: the revision line must render exactly as before --
     // no "(dirty: ...)" suffix at all, since `dirty` is `None` there.

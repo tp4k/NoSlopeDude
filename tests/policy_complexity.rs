@@ -964,3 +964,132 @@ fn test_displacement_is_order_independent_for_non_one_to_one_buckets() {
     let twin = both_orders(&twin_base, &[]);
     assert_eq!(codes(&twin.0), codes(&twin.1), "two unmatched y bases");
 }
+
+// ---------------------------------------------------------------------
+// A ref the metrics do not cover is a caller bug (debug builds only).
+// ---------------------------------------------------------------------
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "FileMetrics")]
+fn test_missing_callable_ref_panics_in_debug_builds() {
+    let (base_callables, _) = sides(&[("A.java", vec![spec("m", "before", 5, 5)])]);
+    let (candidate_callables, candidate_metrics) =
+        sides(&[("A.java", vec![spec("m", "after", 15, 5)])]);
+    let matched = match_callables(&base_callables, &candidate_callables, &[]);
+
+    classify(&[], &candidate_metrics, &matched, &default_policy());
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "FileMetrics")]
+fn test_missing_candidate_ref_panics_in_debug_builds() {
+    let (base_callables, base_metrics) = sides(&[("A.java", vec![spec("m", "before", 5, 5)])]);
+    let (candidate_callables, _) = sides(&[("A.java", vec![spec("m", "after", 15, 5)])]);
+    let matched = match_callables(&base_callables, &candidate_callables, &[]);
+
+    classify(&base_metrics, &[], &matched, &default_policy());
+}
+
+fn in_file_a(diagnostics: &[PolicyDiagnostic]) -> Vec<(&'static str, usize)> {
+    diagnostics
+        .iter()
+        .filter(|d| d.candidate_path == path("A.java"))
+        .map(|d| (d.code, d.candidate_start_line))
+        .collect()
+}
+
+/// `A.java` bases `[m b0, m b1]` (cc 15) plus `Gone.java` bases that carry
+/// fingerprint `X`, so a candidate `X` in `A.java` is held in a base-bearing
+/// ambiguity. Returns `A.java`'s diagnostics for the given candidates.
+fn held_x_scenario(candidates: Vec<Spec>) -> Vec<(&'static str, usize)> {
+    in_file_a(&run(
+        &[
+            (
+                "A.java",
+                vec![spec("m", "b0", 15, 5), spec("m", "b1", 15, 5)],
+            ),
+            (
+                "Gone.java",
+                vec![spec("h1", "X", 1, 5), spec("h2", "X", 1, 5)],
+            ),
+        ],
+        &[("A.java", candidates)],
+    ))
+}
+
+#[test]
+fn test_reordered_f2_holds_out_the_surplus_candidate() {
+    let in_a = held_x_scenario(vec![
+        spec("m", "c1", 15, 5),
+        spec("m", "c2", 15, 5),
+        spec("m", "X", 15, 5),
+    ]);
+
+    assert_eq!(in_a, vec![(CODE_COMPLEXITY_ABOVE_THRESHOLD, 3)]);
+}
+
+#[test]
+fn test_sibling_of_a_held_candidate_still_gets_g102_when_candidates_outnumber_bases() {
+    let in_a = held_x_scenario(vec![
+        spec("m", "X", 15, 5),
+        spec("m", "c1", 15, 5),
+        spec("m", "c2", 15, 5),
+        spec("m", "c3", 15, 5),
+    ]);
+
+    assert_eq!(
+        in_a,
+        vec![
+            (CODE_COMPLEXITY_ABOVE_THRESHOLD, 1),
+            (CODE_MATCH_AMBIGUITY, 2),
+            (CODE_MATCH_AMBIGUITY, 3),
+            (CODE_MATCH_AMBIGUITY, 4),
+        ]
+    );
+}
+
+#[test]
+fn test_held_surplus_zero_to_q_candidates_still_raise_e101() {
+    let in_a = in_file_a(&run(
+        &[("A.java", vec![spec("m", "b0", 15, 5)])],
+        &[(
+            "A.java",
+            vec![
+                spec("m", "c0", 15, 5),
+                spec("m", "Y", 15, 5),
+                spec("m", "Y", 15, 5),
+            ],
+        )],
+    ));
+
+    assert_eq!(
+        in_a,
+        vec![
+            (CODE_MATCH_AMBIGUITY, 1),
+            (CODE_COMPLEXITY_ABOVE_THRESHOLD, 2),
+            (CODE_COMPLEXITY_ABOVE_THRESHOLD, 3),
+        ]
+    );
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "FileMetrics")]
+fn test_callable_ref_past_the_end_of_its_file_metrics_panics_in_debug_builds() {
+    let (base_callables, _) = sides(&[(
+        "A.java",
+        vec![spec("m", "before", 5, 5), spec("n", "x", 5, 5)],
+    )]);
+    let (_, base_metrics) = sides(&[("A.java", vec![spec("m", "before", 5, 5)])]);
+    let (candidate_callables, candidate_metrics) = sides(&[("A.java", vec![spec("n", "x", 5, 5)])]);
+    let matched = match_callables(&base_callables, &candidate_callables, &[]);
+
+    classify(
+        &base_metrics,
+        &candidate_metrics,
+        &matched,
+        &default_policy(),
+    );
+}

@@ -7,6 +7,8 @@
 //! not this one's.
 
 pub mod complexity;
+pub mod coverage;
+pub mod damage;
 pub mod diagnostics;
 pub mod findings;
 

@@ -78,6 +78,14 @@ pub struct IrFile {
     /// `IrCallable::owner` are then remapped to index the compacted table,
     /// not the pre-pruning one.
     pub owners: Vec<OwnerEntry>,
+    /// The spans of the callables salvage excluded, which are therefore
+    /// absent from `callables`. A101 reads this to tell a damaged changed
+    /// callable apart from a deleted one.
+    pub excluded_callables: Vec<Span>,
+    /// The spans of the blocks salvage excluded, which are therefore absent
+    /// from `blocks`. A101 reads this for an edit inside an excluded block
+    /// that no excluded callable contains.
+    pub excluded_blocks: Vec<Span>,
 }
 
 /// WS-9 (C1): total number of `lower_file` calls made so far in this
@@ -186,14 +194,20 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
     }
 
     let mut kept_callables = Vec::with_capacity(callables.len());
+    let mut excluded_callables = Vec::new();
     for (index, callable) in callables.into_iter().enumerate() {
-        if !exclusions.callables[index] {
+        if exclusions.callables[index] {
+            excluded_callables.push(callable.span);
+        } else {
             kept_callables.push(callable);
         }
     }
     let mut kept_blocks = Vec::with_capacity(blocks.len());
+    let mut excluded_blocks = Vec::new();
     for (index, block) in blocks.into_iter().enumerate() {
-        if !exclusions.blocks[index] {
+        if exclusions.blocks[index] {
+            excluded_blocks.push(block.span);
+        } else {
             kept_blocks.push(block);
         }
     }
@@ -236,6 +250,8 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
         callables: kept_callables,
         blocks: kept_blocks,
         owners: kept_owners,
+        excluded_callables,
+        excluded_blocks,
     }
 }
 

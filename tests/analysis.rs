@@ -300,17 +300,19 @@ fn test_bodies_without_an_ir_subtree_share_one_fingerprint() {
     assert_ne!(past_source, analysis.callables[0].body_fingerprint);
 }
 
-fn unreachable_method(second_statement: &str) -> String {
+fn unreachable_method(first_statement: &str, second_statement: &str) -> String {
     format!(
-        "class C {{\n    int m() {{\n        return 1;\n        a();\n        {second_statement}\n    }}\n}}\n"
+        "class C {{\n    int m() {{\n        return 1;\n        {first_statement}\n        {second_statement}\n    }}\n}}\n"
     )
 }
 
 #[test]
 fn test_finding_syntax_covers_every_flagged_statement() {
-    let original = only_finding_digest(&unreachable_method("b();"));
-    let edited = only_finding_digest(&unreachable_method("c();"));
-    assert_ne!(original, edited);
+    let original = only_finding_digest(&unreachable_method("a();", "b();"));
+    let last_edited = only_finding_digest(&unreachable_method("a();", "c();"));
+    let first_edited = only_finding_digest(&unreachable_method("d();", "b();"));
+    assert_ne!(original, last_edited);
+    assert_ne!(original, first_edited);
 }
 
 #[test]
@@ -352,4 +354,49 @@ try { e(); } catch (e) {}
             (12, None)
         ]
     );
+}
+
+#[test]
+fn test_unanalyzable_reason_labels_are_distinct_and_stable() {
+    let labels: Vec<&str> = [
+        UnanalyzableReason::NonUtf8Path,
+        UnanalyzableReason::UnsupportedExtension,
+        UnanalyzableReason::TooLarge,
+        UnanalyzableReason::InvalidEncoding,
+        UnanalyzableReason::ParserUnavailable,
+    ]
+    .into_iter()
+    .map(UnanalyzableReason::label)
+    .collect();
+    assert_eq!(
+        labels,
+        vec![
+            "non_utf8_path",
+            "unsupported_extension",
+            "too_large",
+            "invalid_encoding",
+            "parser_unavailable"
+        ]
+    );
+}
+
+#[test]
+fn test_row_79_derives_are_present() {
+    let reasons = [
+        UnanalyzableReason::NonUtf8Path,
+        UnanalyzableReason::UnsupportedExtension,
+        UnanalyzableReason::TooLarge,
+        UnanalyzableReason::InvalidEncoding,
+        UnanalyzableReason::ParserUnavailable,
+    ];
+    let distinct: std::collections::HashSet<UnanalyzableReason> = reasons.into_iter().collect();
+    assert_eq!(distinct.len(), reasons.len());
+
+    let analysis = analyze_text("C.java", EMPTY_CATCH_COMPACT);
+    let callable = analysis.callables.first().expect("one callable");
+    let finding = analysis.findings.first().expect("one finding");
+    assert_eq!(&callable.clone(), callable);
+    assert_eq!(&finding.clone(), finding);
+    assert!(!format!("{callable:?}").is_empty());
+    assert!(!format!("{finding:?}").is_empty());
 }

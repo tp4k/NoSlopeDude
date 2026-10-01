@@ -144,7 +144,9 @@ fn test_version_constants_are_exported() {
     // consumer (WS-1's own `identity` module) reads off it. Both lowering
     // versions are unchanged: neither lowering's own classification of a
     // node changed, only what `IrCallable` additionally records about one.
-    assert_eq!(nsd::ir::IR_VERSION, 4);
+    // M3-4: `IR_VERSION` bumped 4 -> 5 -- `IrFile` gains `excluded_callables`,
+    // which A101 reads off the lowering.
+    assert_eq!(nsd::ir::IR_VERSION, 5);
     assert_eq!(lower::JAVA_LOWERING_VERSION, 3);
     assert_eq!(lower::JSTS_LOWERING_VERSION, 2);
 }

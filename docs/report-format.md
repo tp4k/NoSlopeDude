@@ -16,7 +16,7 @@ SLOC, mass, erosion), `docs/clone-detection.md` (clone groups), and
     "target": "<the CLI target argument, verbatim>",
     "revision": {
       "sha": "<git HEAD sha, or null>",
-      "dirty": true,
+      "dirty": null,
       "unavailable_reason": "not_a_git_repository"
     },
     "include_tests": false,
@@ -87,8 +87,10 @@ is a display normalization, not a change to any nonzero score).
 
 `sha`/`dirty` are `null` and `unavailable_reason` is `"not_a_git_repository"`
 for a local target that is not inside a git work tree. For a local git work
-tree, `sha` and `dirty` are populated from `git rev-parse HEAD` /
-`git status --porcelain` and `unavailable_reason` is `null`. For a remote
+tree, `sha` is populated from `git rev-parse HEAD`, `dirty` is `null` and
+`unavailable_reason` is `null`. `dirty` is `null` because no `git` command
+that hashes the working tree runs on a scanned checkout: a
+repository-configured filter driver would execute. For a remote
 (GitHub URL) target, `sha` is the shallow clone's `HEAD`, `dirty` is always
 `false` (a fresh clone), and `unavailable_reason` is `null`.
 
