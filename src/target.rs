@@ -11,6 +11,10 @@ use anyhow::{bail, Context};
 
 use crate::model::{RemoteTarget, Revision, Target};
 
+/// Stops `git status` rewriting the index, which would run `post-index-change`.
+const GIT_NO_OPTIONAL_LOCKS_ARG: &str = "--no-optional-locks";
+/// Stops a partial-clone checkout fetching blobs through its configured transport.
+const GIT_NO_LAZY_FETCH_ENV: &str = "GIT_NO_LAZY_FETCH";
 /// Keeps a scanned checkout's own `core.fsmonitor` from running as a hook.
 const GIT_UNTRUSTED_CONFIG_ARGS: [&str; 2] = ["-c", "core.fsmonitor=false"];
 const GITHUB_URL_PREFIXES: [&str; 2] = ["https://github.com/", "http://github.com/"];
@@ -103,6 +107,7 @@ fn resolve_remote(remote: &RemoteTarget) -> anyhow::Result<ResolvedTarget> {
 
 fn local_git_revision(root: &Path) -> Revision {
     let is_work_tree = Command::new("git")
+        .env(GIT_NO_LAZY_FETCH_ENV, "1")
         .args(GIT_UNTRUSTED_CONFIG_ARGS)
         .arg("-C")
         .arg(root)
@@ -123,6 +128,8 @@ fn local_git_revision(root: &Path) -> Revision {
 
     let sha = git_head_sha(root);
     let dirty = Command::new("git")
+        .arg(GIT_NO_OPTIONAL_LOCKS_ARG)
+        .env(GIT_NO_LAZY_FETCH_ENV, "1")
         .args(GIT_UNTRUSTED_CONFIG_ARGS)
         .arg("-C")
         .arg(root)
@@ -141,6 +148,7 @@ fn local_git_revision(root: &Path) -> Revision {
 
 fn git_head_sha(root: &Path) -> Option<String> {
     Command::new("git")
+        .env(GIT_NO_LAZY_FETCH_ENV, "1")
         .args(GIT_UNTRUSTED_CONFIG_ARGS)
         .arg("-C")
         .arg(root)
