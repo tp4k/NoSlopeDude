@@ -173,9 +173,12 @@ only names the terms.
   to the larger run. The graded base is the chosen run's effective size,
   `overlap + min(unmapped, added)`, not its `source_lines`. It counts only
   base lines the diff accounts for, so it never exceeds the occurrence's
-  own size whichever run wins, and the hiding it allows is at most about
-  `overlap / 9` added lines. It fires when the occurrence's added executable
-  lines exceed `max(1, floor(effective / 10))`.
+  own size whichever run wins, and the hiding it allows is at most
+  `max(1, floor(overlap / 9))` added lines. It fires when the occurrence's
+  added executable lines exceed `max(1, floor(effective / 10))`. The
+  effective size can only lower the threshold against `floor(source_lines /
+  10)`: a 100-line clone with 50 lines deleted and 6 added has effective
+  size 56, threshold 5, and fires.
 - A *move*: with no such B, it pairs with a deleted base occurrence whose
   whole-token sequence is a contiguous run of its own (tokens are compared
   one by one, never through the joined digest string) and which is at most
@@ -189,3 +192,7 @@ only names the terms.
   fires.
 - A *new occurrence* is an unpaired one. It fires with `base_lines: None`,
   and `matched_*` names the first other group member in path order.
+- Accepted limitation (user decision 2026-10-01): lines are D11
+  `source_lines`, so statements joined onto one line count as one line.
+  Fifty statements on one line are one line for both the extension and the
+  move thresholds.
