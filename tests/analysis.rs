@@ -377,3 +377,24 @@ fn test_unanalyzable_reason_labels_are_distinct_and_stable() {
         ]
     );
 }
+
+#[test]
+fn test_row_79_derives_are_present() {
+    let reasons = [
+        UnanalyzableReason::NonUtf8Path,
+        UnanalyzableReason::UnsupportedExtension,
+        UnanalyzableReason::TooLarge,
+        UnanalyzableReason::InvalidEncoding,
+        UnanalyzableReason::ParserUnavailable,
+    ];
+    let distinct: std::collections::HashSet<UnanalyzableReason> = reasons.into_iter().collect();
+    assert_eq!(distinct.len(), reasons.len());
+
+    let analysis = analyze_text("C.java", EMPTY_CATCH_COMPACT);
+    let callable = analysis.callables.first().expect("one callable");
+    let finding = analysis.findings.first().expect("one finding");
+    assert_eq!(&callable.clone(), callable);
+    assert_eq!(&finding.clone(), finding);
+    assert!(!format!("{callable:?}").is_empty());
+    assert!(!format!("{finding:?}").is_empty());
+}
