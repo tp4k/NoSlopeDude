@@ -761,7 +761,7 @@ fn test_directive_suppresses_every_finding_of_its_rule_on_the_next_line() {
 fn test_directive_carried_into_an_unmatched_callable_raises_s101() {
     let (_dir, repo) = common::init_repo();
     let base_text = class(&[method("legacy", &[DIRECTIVE, CATCH])]);
-    let candidate_text = class(&[method("fresh", &[DIRECTIVE, CATCH])]);
+    let candidate_text = class(&[method("fresh", &["work();", DIRECTIVE, CATCH])]);
     let base = commit(&repo, &base_text);
     let candidate = commit(&repo, &candidate_text);
 

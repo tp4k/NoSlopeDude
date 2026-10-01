@@ -851,7 +851,10 @@ fn test_pairs_record_whether_they_matched_in_file_context() {
     );
     let candidate = commit(
         &repo,
-        &[("Widget.java", class("Widget", &[method("fresh", &[CATCH])]))],
+        &[(
+            "Widget.java",
+            class("Widget", &[method("fresh", &["work();", CATCH])]),
+        )],
     );
     let in_file = evaluate(&repo, base, candidate);
 
