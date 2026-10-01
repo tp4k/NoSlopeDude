@@ -107,19 +107,20 @@ impl<'a> FileView<'a> {
     }
 }
 
-/// A token's identity: the address of its leaf node, unique across files and
-/// the same in every container stream that holds the leaf (an inner block's leaves are also in
-/// the enclosing container's stream).
-type LeafId = usize;
+/// A token's identity: its file view's index paired with the address of its
+/// leaf node. It is the same in every container stream of that view that
+/// holds the leaf (an inner block's leaves are also in the enclosing
+/// container's stream). Views sharing one analysis still get distinct ids.
+type LeafId = (usize, usize);
 
 /// The leaves `statement_leaf_tokens` yields, in the same order.
-fn statement_leaf_ids(statement: &IrNode) -> Vec<LeafId> {
+fn statement_leaf_ids(file: usize, statement: &IrNode) -> Vec<LeafId> {
     let mut leaves = Vec::new();
     let mut stack = vec![statement];
     while let Some(node) = stack.pop() {
         if node.children.is_empty() {
             if !node.is_comment {
-                leaves.push(node as *const IrNode as LeafId);
+                leaves.push((file, node as *const IrNode as usize));
             }
         } else {
             stack.extend(node.children.iter().rev());
@@ -145,13 +146,13 @@ struct ContainerTokens<'a> {
 }
 
 impl<'a> ContainerTokens<'a> {
-    fn new(view: &FileView<'a>, container: u32) -> Self {
+    fn new(view: &FileView<'a>, file: usize, container: u32) -> Self {
         let mut tokens = Vec::new();
         let mut leaves = Vec::new();
         let mut bounds = vec![0];
         for statement in &view.containers[container as usize] {
             tokens.extend(statement_leaf_tokens(statement, view.source));
-            leaves.extend(statement_leaf_ids(statement));
+            leaves.extend(statement_leaf_ids(file, statement));
             bounds.push(tokens.len());
         }
         debug_assert_eq!(tokens.len(), leaves.len());
@@ -339,7 +340,7 @@ impl<'a> MovePool<'a> {
             let view = &base_views[base];
             let tokens = base_tokens
                 .entry((base, run.container))
-                .or_insert_with(|| ContainerTokens::new(view, run.container));
+                .or_insert_with(|| ContainerTokens::new(view, base, run.container));
             let (start, end) = tokens.run_range(&run);
             let key = (view.language, end - start, tokens.window_hash(start, end));
             index.entry(key).or_default().push(entries.len());
@@ -676,7 +677,7 @@ pub fn evaluate_clones(
             let view = &views[subject.view];
             let tokens = candidate_tokens
                 .entry((subject.view, subject.run.container))
-                .or_insert_with(|| ContainerTokens::new(view, subject.run.container));
+                .or_insert_with(|| ContainerTokens::new(view, subject.view, subject.run.container));
             if !pool.take_move(view.language, tokens, &subject.run) {
                 firing.push((subject, None));
             }
