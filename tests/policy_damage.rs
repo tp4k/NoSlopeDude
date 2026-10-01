@@ -264,6 +264,7 @@ fn test_new_damage_on_unchanged_lines_raises_a101() {
         evaluation.sites[0].1, LEGACY_DAMAGE_LINE,
         "the legacy span is tolerated; the raise is the new one"
     );
+    assert_eq!(evaluation.sites, vec![site("W.java", 10, 10)]);
 }
 
 #[test]
@@ -411,4 +412,51 @@ fn test_damage_growing_from_an_unchanged_start_line_raises_a101() {
     let evaluation = evaluate(&repo, base, candidate);
 
     assert_eq!(evaluation.sites, vec![site("w.tsx", 1, 2)]);
+}
+
+#[test]
+fn test_callable_sharing_a_line_with_legacy_damage_is_not_swallowed_by_a_shift() {
+    let text = "export const c = () => <div>a & b</div>; export const d = (x: number) => { if (x) { return 1; } return 2; };\nexport function ok() {\n  return 1;\n}\n";
+    let (_dir, repo) = common::init_repo();
+    let base = commit(&repo, &[("w.tsx", text.to_string())]);
+    let candidate = commit(&repo, &[("w.tsx", format!("{}{text}", padding()))]);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    assert_eq!(evaluation.changes.len(), 1);
+    assert!(evaluation.sites.is_empty(), "{:?}", evaluation.sites);
+}
+
+#[test]
+fn test_deleted_line_inside_a_legacy_damaged_callable_raises_a101() {
+    let (_dir, repo) = common::init_repo();
+    let base = commit(
+        &repo,
+        &[(
+            "W.java",
+            LEGACY.replace("        return;\n", "        w();\n        return;\n"),
+        )],
+    );
+    let candidate = commit(&repo, &[("W.java", LEGACY.to_string())]);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    assert_eq!(
+        evaluation.sites,
+        vec![site("W.java", LEGACY_DAMAGE_LINE, LEGACY_DAMAGE_LINE + 2)]
+    );
+}
+
+#[test]
+fn test_edit_inside_a_legacy_damaged_top_level_block_raises_a101() {
+    let base_text = "if (flag) {\n  const c = <div>a & b</div>;\n  g();\n}\n";
+    let edited =
+        "if (flag) {\n  const c = <div>a & b</div>;\n  try { h(); } catch (e) {}\n  g();\n}\n";
+    let (_dir, repo) = common::init_repo();
+    let base = commit(&repo, &[("w.tsx", base_text.to_string())]);
+    let candidate = commit(&repo, &[("w.tsx", edited.to_string())]);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    assert_eq!(evaluation.sites, vec![site("w.tsx", 1, 5)]);
 }

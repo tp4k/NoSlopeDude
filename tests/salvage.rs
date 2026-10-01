@@ -916,3 +916,29 @@ fn test_salvage_records_the_spans_of_excluded_callables() {
         "`safe` stays measured and is absent from the side table"
     );
 }
+
+/// A101 also reads `IrFile::excluded_blocks`: a dirty block is listed, a
+/// clean one is not.
+#[test]
+fn test_salvage_records_the_spans_of_excluded_blocks() {
+    let source = "if (flag) {\n  const c = <div>a & b</div>;\n  g();\n}\nif (ok) {\n  h();\n}\n";
+
+    let analysis = nsd::analysis::analyze_file(Path::new("w.tsx"), source.as_bytes())
+        .unwrap_or_else(|reason| panic!("w.tsx must analyze: {reason:?}"));
+
+    let excluded: Vec<(u32, u32)> = analysis
+        .ir
+        .excluded_blocks
+        .iter()
+        .map(|span| (span.start_line, span.end_line))
+        .collect();
+    assert_eq!(excluded, vec![(1, 4)], "only the damaged block is dropped");
+    assert!(
+        analysis
+            .ir
+            .blocks
+            .iter()
+            .any(|block| block.span.start_line == 5),
+        "the clean block stays in `blocks` and out of the side table"
+    );
+}
