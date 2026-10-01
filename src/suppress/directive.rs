@@ -6,7 +6,6 @@ use crate::model::RuleId;
 use crate::rules::ALL_RULE_IDS;
 
 const DIRECTIVE_PREFIX: &str = "nsd-ignore";
-const BLOCK_DIRECTIVE_PREFIX: &str = "nsd-ignore[";
 const LINE_COMMENT_OPENER: &str = "//";
 const BLOCK_COMMENT_OPENER: &str = "/*";
 const BLOCK_DOC_MARK: char = '*';
@@ -67,14 +66,19 @@ fn directive(node: &IrNode, source: &[u8]) -> Option<Directive> {
 }
 
 /// The line offset, within a block comment whose opener is already stripped,
-/// of the first line that begins with `nsd-ignore[` after its optional leading
-/// whitespace and `*`s.
+/// of the first line that begins with `nsd-ignore` followed, after optional
+/// whitespace, by `[` or `:`. Leading whitespace and `*`s are skipped first.
+/// The `:` arm catches a directive missing its bracket, so the typo raises
+/// S102 as it does in a `//` comment; prose such as `nsd-ignore directives
+/// are…` matches neither and is not a directive.
 fn block_directive_offset(body: &str) -> Option<usize> {
     body.lines().position(|line| {
         line.trim_start()
             .trim_start_matches(BLOCK_DOC_MARK)
             .trim_start()
-            .starts_with(BLOCK_DIRECTIVE_PREFIX)
+            .strip_prefix(DIRECTIVE_PREFIX)
+            .and_then(|rest| rest.trim_start().chars().next())
+            .is_some_and(|next| next == RULE_OPEN || next == REASON_SEPARATOR)
     })
 }
 
