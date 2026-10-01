@@ -1360,3 +1360,98 @@ fn test_diff_mapping_does_not_scale_cubically_in_container_size() {
         large.0.as_secs_f64() / small.0.as_secs_f64().max(f64::EPSILON)
     );
 }
+
+// ---------------------------------------------------------------------
+// Move pairing order and occurrences without an added line.
+// ---------------------------------------------------------------------
+
+const PAIRING_STATEMENTS: usize = 20;
+const PAIRING_HALF_LINES: usize = 11;
+
+/// One-line statements `tag{first}..tag{last}`, inclusive.
+fn statement_range(tag: &str, first: usize, last: usize) -> String {
+    (first..=last)
+        .map(|index| format!("        int {tag}{index} = {tag}Call{index}(x);\n"))
+        .collect()
+}
+
+#[test]
+fn test_move_pairs_the_largest_deleted_occurrence_first() {
+    let whole = statements("s", PAIRING_STATEMENTS);
+    let (_dir, repo) = common::init_repo();
+    let base = commit(
+        &repo,
+        &[("U.java", java("U", &whole)), ("S.java", java("S", &whole))],
+    );
+    let candidate = commit(
+        &repo,
+        &[
+            ("U.java", java("U", &whole)),
+            ("S.java", java("S", "")),
+            (
+                "N1.java",
+                java("N1", &statement_range("s", 0, PAIRING_HALF_LINES - 1)),
+            ),
+            (
+                "N2.java",
+                java(
+                    "N2",
+                    &statement_range(
+                        "s",
+                        PAIRING_STATEMENTS - PAIRING_HALF_LINES,
+                        PAIRING_STATEMENTS - 1,
+                    ),
+                ),
+            ),
+        ],
+    );
+
+    let found = evaluate(&repo, base, candidate);
+
+    assert_eq!(
+        sites(&found),
+        vec![body_site("N2.java", PAIRING_HALF_LINES)],
+        "N1 takes the 11-line deleted run, so N2 has no unconsumed run left: {found:?}"
+    );
+}
+
+const MERGED_METHOD_HALF: usize = 5;
+
+/// `A.java` holds two adjacent methods whose statements equal the method of
+/// the unchanged `U.java`; the candidate merges them into one method, adding
+/// no executable line. `copied` adds a third copy in `N.java`.
+fn merged_methods(copied: bool) -> Vec<CloneDiagnostic> {
+    let whole = statements("a", 2 * MERGED_METHOD_HALF);
+    let split = format!(
+        "    void m1(int x) {{\n{}    }}\n    void m2(int x) {{\n{}    }}\n",
+        statement_range("a", 0, MERGED_METHOD_HALF - 1),
+        statement_range("a", MERGED_METHOD_HALF, 2 * MERGED_METHOD_HALF - 1),
+    );
+    let (_dir, repo) = common::init_repo();
+    let base = commit(
+        &repo,
+        &[
+            ("U.java", java("U", &whole)),
+            ("A.java", format!("class A {{\n{split}}}\n")),
+        ],
+    );
+    let mut files = vec![("U.java", java("U", &whole)), ("A.java", java("A", &whole))];
+    if copied {
+        files.push(("N.java", java("N", &whole)));
+    }
+    let candidate = commit(&repo, &files);
+    evaluate(&repo, base, candidate)
+}
+
+#[test]
+fn test_merging_two_methods_into_an_existing_clone_without_new_lines_raises_nothing() {
+    let found = merged_methods(false);
+    assert!(found.is_empty(), "{found:?}");
+
+    let copied = merged_methods(true);
+    assert_eq!(
+        sites(&copied),
+        vec![body_site("N.java", 2 * MERGED_METHOD_HALF)],
+        "the same merge plus a new copy raises on the copy only: {copied:?}"
+    );
+}
