@@ -11,7 +11,10 @@ Every agent that finishes a piece of work updates its rows here in the same
 round; see *How to update this file* at the bottom and the matching rule in
 [`AGENTS.md`](../AGENTS.md).
 
-Last updated: 2026-09-30, from `main@8088781` (M1–M2 merged) plus
+Last updated: 2026-10-01 (Codex follow-up run: WS-2 M3-3 follow-up at `4a94f6a`
+`9a307e7` `d4c9b71` `2f54eac` `bfed84b` `63c2b83`; WS-3 M3-4 follow-up at
+`8544b3c` `1bd66b2` `714570f` `e73be5d` `b77f026` `d69adb1`; WS-1 local dirty
+probe dropped at `f8f1588` `b49ad42`), earlier from `main@8088781` (M1–M2 merged) plus
 `feat/m3-policy` (M3 work in progress; WS-1 hygiene landed at `ce9a1ee`, WS-2
 per-file analysis primitive landed at `5d09448`, WS-3 M3-1 E101/E102 + G102
 landed at `03ff948`, WS-4 M3-2 V101 finding matching landed at `ba6e471`, WS-5

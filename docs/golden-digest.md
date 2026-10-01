@@ -143,9 +143,18 @@ re-scans the archive's own recorded target with its own
 recorded settings (`include_tests`, `exclude`, `min_clone_lines`), exactly
 as the retired M0b-8c strict leg did, and asserts the result equals this
 file. It first asserts the live report's `scan.revision.sha` equals the
-M0b digest's `revision_sha`, `scan.revision.dirty` is `false`, and
+M0b digest's `revision_sha`, `scan.revision.dirty` is `null` (a local scan
+computes no dirty flag), the archive checkout itself is clean per
+`git2::Repository::statuses` with untracked files included (that checkout is
+the user's own trusted archive, and git2 runs no filter driver), and
 top-level `incomplete` is `false` -- so a re-capture against the wrong or
-a dirty checkout fails loudly instead of silently drifting. The archive
+a dirty checkout fails loudly instead of silently drifting.
+
+The committed `nsd-v1` digest predates the local `scan.revision.dirty`
+`false` to `null` change, which alters the live digest's `body_blake3`. The
+archive-backed live arm must therefore be re-captured against the private
+archive (`NSD_ARCHIVED_REPORT=... NSD_GOLDEN_CAPTURE=1`) before it can pass
+again; until then it fails its digest comparison when the archive is set. The archive
 path is read only from `NSD_ARCHIVED_REPORT` at invocation time, exactly
 like the M0b check; without it the test prints a PENDING notice, same as
 above.
