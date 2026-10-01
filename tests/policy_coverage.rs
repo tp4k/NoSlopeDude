@@ -296,3 +296,22 @@ fn test_output_is_sorted_by_path() {
         .collect();
     assert_eq!(paths, vec!["a/Big.java", "b/Big.java", "c/Big.java"]);
 }
+
+#[test]
+fn test_config_exclude_removes_an_oversized_unchanged_file_from_a102() {
+    let big = padded_java(SOURCE_CEILING_BYTES + 1);
+    let files: &[(&[u8], Vec<u8>)] = &[
+        (b"legacy/Big.java", big),
+        (b"Small.java", SMALL.as_bytes().to_vec()),
+    ];
+    let excluded = config("version: 1\nexclude: [\"legacy/**\"]\n");
+    let inputs = inputs_for(files, files, &excluded);
+    assert_eq!(inputs.len(), 1);
+    assert!(evaluate_coverage(&inputs, &policy_with("deny")).is_empty());
+
+    let kept = inputs_for(files, files, &Config::default());
+    assert_eq!(
+        named(&evaluate_coverage(&kept, &policy_with("deny"))),
+        vec![("legacy/Big.java".to_string(), UnanalyzableReason::TooLarge)]
+    );
+}
