@@ -2,7 +2,8 @@
 //!
 //! Damage is tolerated line by line only when it is the `LineMap` image of
 //! base damage lines. Separately, a callable salvage excluded that contains an
-//! added line is an unmeasured changed entity.
+//! added line, or one that now swallows a previously measured callable's
+//! lines, is an unmeasured changed entity.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -43,6 +44,23 @@ fn tolerated_lines(base: Option<&FindingFile<'_>>, line_map: Option<&LineMap>) -
         .collect()
 }
 
+/// The candidate lines that base measured-callable lines map to.
+fn measured_lines(base: Option<&FindingFile<'_>>, line_map: Option<&LineMap>) -> BTreeSet<usize> {
+    let (Some(base), Some(line_map)) = (base, line_map) else {
+        return BTreeSet::new();
+    };
+    base.analysis
+        .ir
+        .callables
+        .iter()
+        .flat_map(|callable| {
+            let (start, end) = line_range(callable.span);
+            line_map.base_to_candidate.range(start..=end)
+        })
+        .map(|(_, &line)| line)
+        .collect()
+}
+
 fn covers(lines: &BTreeSet<usize>, (start, end): (usize, usize)) -> bool {
     lines.range(start..=end).count() == end - start + 1
 }
@@ -59,6 +77,7 @@ fn file_diagnostics(
         .map(|base| map_lines(base.source, candidate.source))
         .transpose()?;
     let tolerated = tolerated_lines(base, line_map.as_ref());
+    let measured = measured_lines(base, line_map.as_ref());
 
     let mut raised: Vec<(usize, usize)> = ir
         .damage
@@ -77,10 +96,11 @@ fn file_diagnostics(
                 .is_some(),
             None => true,
         };
+        let swallows_measured = measured.range(start..=end).next().is_some();
         let already_reported = damage_raised
             .iter()
             .any(|&(damage_start, damage_end)| damage_start <= end && start <= damage_end);
-        if has_added_line && !already_reported {
+        if (has_added_line || swallows_measured) && !already_reported {
             raised.push((start, end));
         }
     }
@@ -92,7 +112,7 @@ fn file_diagnostics(
 
 /// Raises A101 for every changed candidate file whose parse damage does not
 /// map through unchanged source, and for every excluded callable that
-/// contains an added line. Output is sorted by (path bytes, start line, end
+/// contains an added line or swallows a previously measured callable. Output is sorted by (path bytes, start line, end
 /// line), exact duplicates collapsed.
 pub fn evaluate_damage(
     base: &[FindingFile<'_>],
