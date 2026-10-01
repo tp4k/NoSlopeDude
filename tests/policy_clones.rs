@@ -682,6 +682,53 @@ fn test_move_credit_does_not_reach_a_distinct_copy_of_a_block_with_a_shared_pref
 }
 
 #[test]
+fn test_move_credit_does_not_reach_a_copy_sharing_the_analysis_of_the_moved_one() {
+    let (_dir, repo) = common::init_repo();
+    let base = shared_prefix_base(&repo);
+    let candidate = shared_prefix_candidate(&repo, "", &["M.java", "N.java"]);
+    let sides = load(&repo, base, candidate);
+    let moved = sides
+        .candidate
+        .iter()
+        .find(|file| file.path.render() == "M.java")
+        .expect("M.java is a candidate file");
+    let candidate_files: Vec<FindingFile<'_>> = sides
+        .candidate
+        .iter()
+        .map(|file| {
+            let source = if file.path.render() == "N.java" {
+                moved
+            } else {
+                file
+            };
+            FindingFile {
+                path: file.path.clone(),
+                source: &source.source,
+                analysis: &source.analysis,
+            }
+        })
+        .collect();
+
+    let found = evaluate_clones(
+        &finding_files(&sides.base),
+        &candidate_files,
+        &finding_files(&sides.unchanged),
+        &sides.changes,
+        DEFAULT_MIN_CLONE_LINES,
+        &policy_with(Severity::Deny),
+    )
+    .expect("evaluate clones");
+
+    assert_eq!(
+        sites(&found),
+        vec![
+            site("N.java", FIRST_BODY_LINE, FIRST_BODY_LINE + BLOCK_LINES - 1),
+            body_site("N.java", LONG_BLOCK_LINES),
+        ]
+    );
+}
+
+#[test]
 fn test_move_credit_does_not_reach_a_second_copy_in_the_same_container() {
     let (_dir, repo) = common::init_repo();
     let base = commit(&repo, &[("S.java", java("S", &block("a")))]);
