@@ -100,9 +100,10 @@ pub struct CoverageDiagnostic {
 /// with a qualifying match elsewhere (`NSD-V102`).
 pub const CODE_CLONE_REGRESSION: &str = "NSD-V102";
 
-/// One V102 about a candidate clone occurrence. `base_lines` is the diff-mapped
-/// base occurrence's `source_lines` for an extension and `None` for a new
-/// occurrence; the `matched_*` fields name the first other member of the
+/// One V102 about a candidate clone occurrence. `base_lines` is the effective
+/// size of the diff-mapped base occurrence (its lines shared with the
+/// occurrence plus its unmapped lines up to the added lines) for an extension
+/// and `None` for a new occurrence; the `matched_*` fields name the first other member of the
 /// occurrence's maximal group in canonical order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CloneDiagnostic {

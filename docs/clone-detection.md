@@ -166,13 +166,16 @@ only names the terms.
 - An *extension*: the diff maps some base occurrence B onto it. A base run
   with an executable line that the diff maps outside the occurrence is not
   eligible. Among the rest, the highest rank wins: shared executable lines
-  less the executable base lines the diff does not map beyond the
-  occurrence's added lines (a base line that maps onto a non-executable
-  candidate line, such as a commented-out one, counts as unmapped); a tie
-  goes to the run with fewer such unmapped lines, then to the larger run.
-  The chosen base is therefore at most `2 * overlap + added` lines, so a
-  kept anchor line cannot make an enclosing run inflate the base. It fires when the
-  occurrence's added executable lines exceed `max(1, floor(B.source_lines / 10))`.
+  (`overlap`) less the executable base lines the diff does not map
+  (`unmapped`) beyond the occurrence's added lines (a base line that maps
+  onto a non-executable candidate line, such as a commented-out one, counts
+  as unmapped); a tie goes to the run with fewer such unmapped lines, then
+  to the larger run. The graded base is the chosen run's effective size,
+  `overlap + min(unmapped, added)`, not its `source_lines`. It counts only
+  base lines the diff accounts for, so it never exceeds the occurrence's
+  own size whichever run wins, and the hiding it allows is at most about
+  `overlap / 9` added lines. It fires when the occurrence's added executable
+  lines exceed `max(1, floor(effective / 10))`.
 - A *move*: with no such B, it pairs with a deleted base occurrence whose
   whole-token sequence is a contiguous run of its own (tokens are compared
   one by one, never through the joined digest string) and which is at most

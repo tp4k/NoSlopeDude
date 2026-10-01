@@ -44,8 +44,8 @@ fn threshold(base_lines: usize) -> usize {
 
 type PerFileCandidates = Vec<(u128, Candidate)>;
 
-/// Overlap, then the fewest unmapped lines beyond the occurrence's added
-/// lines, then size, then source order (earlier is greater).
+/// Overlap less unmapped lines beyond the occurrence's added lines, then
+/// the fewest such lines, then size, then source order (earlier is greater).
 type OverlapRank = (isize, Reverse<usize>, usize, Reverse<usize>, Reverse<usize>);
 
 /// A run's tally against one occurrence: executable lines mapped into the
@@ -429,12 +429,14 @@ fn run_tallies(
         .collect()
 }
 
-/// The base occurrence of the counterpart file that shares the most
-/// executable lines with the candidate occurrence through the line map, less
-/// its unmapped lines beyond the subject's added lines; ties go to the run
-/// with the fewest such lines, then the larger one, then source order. A base occurrence with an
-/// executable line that maps outside the subject's lines is not eligible: it
-/// encloses more than the occurrence.
+/// The effective base size of the counterpart file's base occurrence that
+/// shares the most executable lines with the candidate occurrence through
+/// the line map, less its unmapped lines beyond the subject's added lines;
+/// ties go to the run with the fewest such lines, then the larger one, then
+/// source order. A base occurrence with an executable line that maps outside
+/// the subject's lines is not eligible: it encloses more than the occurrence.
+/// The size is `overlap + min(unmapped, added)` of the chosen run, never its
+/// `source_lines`, so it cannot exceed the occurrence's own size.
 fn diff_mapped(
     base: usize,
     base_view: &FileView<'_>,
@@ -443,11 +445,11 @@ fn diff_mapped(
     base_to_candidate: &BTreeMap<usize, usize>,
     subject: &Subject<'_>,
     mapped_lines: &[usize],
-) -> Option<Candidate> {
+) -> Option<usize> {
     let span = (subject.run.start_line, subject.run.end_line);
     let added = subject.added;
     let (&lowest, &highest) = (mapped_lines.first()?, mapped_lines.last()?);
-    let mut best: Option<(OverlapRank, Candidate)> = None;
+    let mut best: Option<(OverlapRank, usize)> = None;
     for (container, &(span_start, span_end)) in base_view.spans.iter().enumerate() {
         if span_start > highest || span_end < lowest {
             continue;
@@ -494,11 +496,11 @@ fn diff_mapped(
                 Reverse(run.end_line),
             );
             if best.as_ref().is_none_or(|(current, _)| rank > *current) {
-                best = Some((rank, *run));
+                best = Some((rank, overlap + unmapped.min(added)));
             }
         }
     }
-    best.map(|(_, run)| run)
+    best.map(|(_, effective)| effective)
 }
 
 /// Raises V102 for every changed candidate clone occurrence that is new or
@@ -623,9 +625,9 @@ pub fn evaluate_clones(
                 )
             });
         match mapped {
-            Some(base_run) => {
-                if subject.added > threshold(base_run.source_lines) {
-                    firing.push((subject, Some(base_run.source_lines)));
+            Some(effective) => {
+                if subject.added > threshold(effective) {
+                    firing.push((subject, Some(effective)));
                 }
             }
             None => added_subjects.push(subject),
