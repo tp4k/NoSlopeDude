@@ -488,3 +488,16 @@ fn test_start_line_edit_of_a_line_sharing_clean_callable_is_not_swallowed() {
     assert_eq!(evaluation.changes.len(), 1);
     assert!(evaluation.sites.is_empty(), "{:?}", evaluation.sites);
 }
+
+#[test]
+fn test_deleted_line_inside_a_legacy_damaged_top_level_block_raises_a101() {
+    let base_text = "if (flag) {\n  const c = <div>a & b</div>;\n  w();\n  g();\n}\n";
+    let edited = "if (flag) {\n  const c = <div>a & b</div>;\n  g();\n}\n";
+    let (_dir, repo) = common::init_repo();
+    let base = commit(&repo, &[("w.tsx", base_text.to_string())]);
+    let candidate = commit(&repo, &[("w.tsx", edited.to_string())]);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    assert_eq!(evaluation.sites, vec![site("w.tsx", 1, 4)]);
+}
