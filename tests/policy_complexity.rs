@@ -964,3 +964,30 @@ fn test_displacement_is_order_independent_for_non_one_to_one_buckets() {
     let twin = both_orders(&twin_base, &[]);
     assert_eq!(codes(&twin.0), codes(&twin.1), "two unmatched y bases");
 }
+
+// ---------------------------------------------------------------------
+// A ref the metrics do not cover is a caller bug (debug builds only).
+// ---------------------------------------------------------------------
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "FileMetrics")]
+fn test_missing_callable_ref_panics_in_debug_builds() {
+    let (base_callables, _) = sides(&[("A.java", vec![spec("m", "before", 5, 5)])]);
+    let (candidate_callables, candidate_metrics) =
+        sides(&[("A.java", vec![spec("m", "after", 15, 5)])]);
+    let matched = match_callables(&base_callables, &candidate_callables, &[]);
+
+    classify(&[], &candidate_metrics, &matched, &default_policy());
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "FileMetrics")]
+fn test_missing_candidate_ref_panics_in_debug_builds() {
+    let (base_callables, base_metrics) = sides(&[("A.java", vec![spec("m", "before", 5, 5)])]);
+    let (candidate_callables, _) = sides(&[("A.java", vec![spec("m", "after", 15, 5)])]);
+    let matched = match_callables(&base_callables, &candidate_callables, &[]);
+
+    classify(&base_metrics, &[], &matched, &default_policy());
+}
