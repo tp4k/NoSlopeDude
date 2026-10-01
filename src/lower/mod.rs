@@ -203,8 +203,11 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
         }
     }
     let mut kept_blocks = Vec::with_capacity(blocks.len());
+    let mut excluded_blocks = Vec::new();
     for (index, block) in blocks.into_iter().enumerate() {
-        if !exclusions.blocks[index] {
+        if exclusions.blocks[index] {
+            excluded_blocks.push(block.span);
+        } else {
             kept_blocks.push(block);
         }
     }
@@ -248,7 +251,7 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
         blocks: kept_blocks,
         owners: kept_owners,
         excluded_callables,
-        excluded_blocks: Vec::new(),
+        excluded_blocks,
     }
 }
 
