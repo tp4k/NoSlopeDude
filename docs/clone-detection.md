@@ -180,12 +180,12 @@ only names the terms.
   whole-token sequence is a contiguous run of its own (tokens are compared
   one by one, never through the joined digest string) and which is at most
   that same threshold shorter. Pairs are taken in source order, largest
-  deleted occurrence first. A move aligns the deleted occurrence's base
-  container tokens onto the candidate container at one token offset. A base
-  line is credited to one physical move: it may be shared by pairs that
-  align the same base container onto the same candidate file and container at
-  the same offset (a prefix and the block enclosing it), and a line credited
-  under any other alignment is spent, so a distinct copy never reuses it. A
-  move never fires.
+  deleted occurrence first. A move maps each base token of the deleted
+  occurrence onto one candidate token. Each base token is credited to the
+  one candidate token it was moved onto: pairs that put a shared base token
+  on the same candidate token agree and share its credit (a prefix, a suffix
+  or a nested block of the same move), and a token credited to another
+  candidate token is spent, so a distinct copy never reuses it. A move never
+  fires.
 - A *new occurrence* is an unpaired one. It fires with `base_lines: None`,
   and `matched_*` names the first other group member in path order.
