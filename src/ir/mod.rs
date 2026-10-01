@@ -21,8 +21,10 @@ use tree_sitter::Node;
 /// downstream consumer -- WS-1's own `identity` module -- reads off it. The
 /// round-2 owner-storage change is a memory-safety fix to the same
 /// `IrCallable` shape this bump already covers, not a further shape bump of
-/// its own.
-pub const IR_VERSION: u32 = 4;
+/// its own. Bumped 4 -> 5 for M3-4 (A101): `lower::IrFile` gains
+/// `excluded_callables`, the spans of the callables salvage dropped, which the
+/// parse-damage policy reads.
+pub const IR_VERSION: u32 = 5;
 
 /// A byte-and-line span back into the original source text a `ParsedFile`
 /// holds (D11/SLOC's requirement on the IR): both a byte range, for exact

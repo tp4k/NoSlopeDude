@@ -89,7 +89,7 @@ grammars or the `tree-sitter` runtime that nobody remembers to mirror into
 `PROFILE_NAME` names the measurement algorithm as a whole (see above), not
 any one fingerprint value. When one of the nine inputs moves — for example
 M1-7 bumping `ir::IR_VERSION` for `IrCallable`'s new identity-bearing
-fields — only the frozen hex literal in
+fields, or M3-4 bumping it again for `IrFile::excluded_callables` — only the frozen hex literal in
 `tests/profile.rs::test_nsd_v1_fingerprint_is_frozen` changes; the profile
 keeps being called `nsd-v1`, because it is still the same algorithm being
 re-measured, not a new one.

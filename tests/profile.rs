@@ -182,6 +182,9 @@ fn test_each_input_changes_the_fingerprint() {
 /// recorded reason), rather than silently drift.
 #[test]
 fn test_nsd_v1_fingerprint_is_frozen() {
+    // Re-pinned for M3-4: `ir::IR_VERSION` moved 4 -> 5 (`IrFile` gains
+    // `excluded_callables` for A101); the name stays `nsd-v1` for the same
+    // reason as below.
     // Re-pinned for M1-7: `ir::IR_VERSION` moved 3 -> 4 (`IrCallable` gains
     // `kind`/`is_anonymous`/`signature`/`owner_chain`), which is one of the
     // nine hashed inputs (`MeasurementProfileInputs::ir_version`). The name
@@ -190,7 +193,7 @@ fn test_nsd_v1_fingerprint_is_frozen() {
     // generation, not any one literal); only the hash moves.
     let fingerprint = profile::fingerprint(&MeasurementProfileInputs::current());
     assert_eq!(
-        fingerprint, "blake3:539bfba3a29d159bb0f3f7239931bdc8",
+        fingerprint, "blake3:43340e59d6e269babeb275808dda9960",
         "nsd-v1's frozen fingerprint moved — bump this literal deliberately, with a reason, \
          if the input that moved it is an intentional profile change"
     );

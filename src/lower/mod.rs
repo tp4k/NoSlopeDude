@@ -190,8 +190,11 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
     }
 
     let mut kept_callables = Vec::with_capacity(callables.len());
+    let mut excluded_callables = Vec::new();
     for (index, callable) in callables.into_iter().enumerate() {
-        if !exclusions.callables[index] {
+        if exclusions.callables[index] {
+            excluded_callables.push(callable.span);
+        } else {
             kept_callables.push(callable);
         }
     }
@@ -240,7 +243,7 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
         callables: kept_callables,
         blocks: kept_blocks,
         owners: kept_owners,
-        excluded_callables: Vec::new(),
+        excluded_callables,
     }
 }
 
