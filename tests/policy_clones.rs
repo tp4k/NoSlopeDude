@@ -22,6 +22,7 @@ use nsd::policy::findings::FindingFile;
 
 const MODE_REGULAR: i32 = 0o100644;
 const BLOCK_LINES: usize = 12;
+const LONG_BLOCK_LINES: usize = 24;
 const FIRST_BODY_LINE: usize = 3;
 const TS_FIRST_BODY_LINE: usize = 2;
 const EXTENSION_BASE_SMALL: usize = 10;
@@ -618,6 +619,66 @@ fn test_base_unique_block_moved_and_copied_raises_one_v102_on_the_copy() {
 
     assert_eq!(sites(&found), vec![body_site("C.java", BLOCK_LINES)]);
     assert_eq!(found[0].matched_path.render(), "B.java");
+}
+
+/// `U.java` and `S.java` hold the long block; `X.java` holds only its prefix.
+fn shared_prefix_base(repo: &Repository) -> Oid {
+    commit(
+        repo,
+        &[
+            ("U.java", java("U", &statements("s", LONG_BLOCK_LINES))),
+            ("S.java", java("S", &statements("s", LONG_BLOCK_LINES))),
+            ("X.java", java("X", &statements("s", BLOCK_LINES))),
+        ],
+    )
+}
+
+fn shared_prefix_candidate(repo: &Repository, source: &str, added: &[&str]) -> Oid {
+    let mut files = vec![
+        ("U.java", java("U", &statements("s", LONG_BLOCK_LINES))),
+        ("S.java", java("S", source)),
+        ("X.java", java("X", &statements("s", BLOCK_LINES))),
+    ];
+    for &name in added {
+        files.push((name, java(&name[..1], &statements("s", LONG_BLOCK_LINES))));
+    }
+    commit(repo, &files)
+}
+
+#[test]
+fn test_move_of_a_block_whose_prefix_also_occurs_elsewhere_passes() {
+    let (_dir, repo) = common::init_repo();
+    let base = shared_prefix_base(&repo);
+    let moved = shared_prefix_candidate(&repo, "", &["N.java"]);
+    let copied = shared_prefix_candidate(&repo, &statements("s", LONG_BLOCK_LINES), &["N.java"]);
+
+    assert!(evaluate(&repo, base, moved).is_empty());
+
+    let found = evaluate(&repo, base, copied);
+    let long = found
+        .iter()
+        .find(|d| d.candidate_end_line == FIRST_BODY_LINE + LONG_BLOCK_LINES - 1)
+        .expect("the copy raises on the whole block");
+    assert_eq!(long.candidate_path.render(), "N.java");
+    assert_eq!(long.base_lines, None);
+}
+
+#[test]
+fn test_move_credit_does_not_reach_a_distinct_copy_of_a_block_with_a_shared_prefix() {
+    let (_dir, repo) = common::init_repo();
+    let base = shared_prefix_base(&repo);
+    let candidate = shared_prefix_candidate(&repo, "", &["M.java", "N.java"]);
+
+    let found = evaluate(&repo, base, candidate);
+
+    assert_eq!(
+        sites(&found),
+        vec![
+            site("N.java", FIRST_BODY_LINE, FIRST_BODY_LINE + BLOCK_LINES - 1),
+            body_site("N.java", LONG_BLOCK_LINES),
+        ]
+    );
+    assert!(found.iter().all(|d| d.base_lines.is_none()));
 }
 
 #[test]
