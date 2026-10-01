@@ -44,19 +44,45 @@ fn tolerated_lines(base: Option<&FindingFile<'_>>, line_map: Option<&LineMap>) -
         .collect()
 }
 
+/// The candidate callable ranges, with their start and end lines indexed
+/// for the one-endpoint lookups.
+struct CandidateCallables {
+    ranges: BTreeSet<(usize, usize)>,
+    starts: BTreeSet<usize>,
+    ends: BTreeSet<usize>,
+}
+
+impl CandidateCallables {
+    fn new(candidate: &FindingFile<'_>) -> Self {
+        let ranges: BTreeSet<(usize, usize)> = candidate
+            .analysis
+            .ir
+            .callables
+            .iter()
+            .map(|callable| line_range(callable.span))
+            .collect();
+        let starts = ranges.iter().map(|&(start, _)| start).collect();
+        let ends = ranges.iter().map(|&(_, end)| end).collect();
+        Self {
+            ranges,
+            starts,
+            ends,
+        }
+    }
+}
+
 /// Whether some candidate callable range agrees with the image of every
 /// endpoint that maps; an unmapped pair is not still measured.
 fn is_still_measured(
     (start, end): (Option<&usize>, Option<&usize>),
-    still_measured: &BTreeSet<(usize, usize)>,
+    candidates: &CandidateCallables,
 ) -> bool {
-    (start.is_some() || end.is_some())
-        && still_measured
-            .iter()
-            .any(|&(candidate_start, candidate_end)| {
-                start.is_none_or(|&mapped| mapped == candidate_start)
-                    && end.is_none_or(|&mapped| mapped == candidate_end)
-            })
+    match (start, end) {
+        (Some(&start), Some(&end)) => candidates.ranges.contains(&(start, end)),
+        (Some(start), None) => candidates.starts.contains(start),
+        (None, Some(end)) => candidates.ends.contains(end),
+        (None, None) => false,
+    }
 }
 
 /// The candidate lines that the lines of base measured callables no longer
@@ -69,13 +95,7 @@ fn measured_lines(
     let (Some(base), Some(line_map)) = (base, line_map) else {
         return BTreeSet::new();
     };
-    let still_measured: BTreeSet<(usize, usize)> = candidate
-        .analysis
-        .ir
-        .callables
-        .iter()
-        .map(|callable| line_range(callable.span))
-        .collect();
+    let still_measured = CandidateCallables::new(candidate);
     base.analysis
         .ir
         .callables
