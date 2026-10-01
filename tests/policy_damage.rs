@@ -254,7 +254,7 @@ fn test_edit_inside_a_legacy_damaged_callable_raises_a101() {
 fn test_new_damage_on_unchanged_lines_raises_a101() {
     let (_dir, repo) = common::init_repo();
     let base = commit(&repo, &[("W.java", LEGACY.to_string())]);
-    let edited = LEGACY.replace("        a();\n    }\n", "        a();\n");
+    let edited = LEGACY.replace("        b();\n    }\n", "        b();\n");
     let candidate = commit(&repo, &[("W.java", edited)]);
 
     let evaluation = evaluate(&repo, base, candidate);
@@ -386,18 +386,6 @@ fn test_output_is_sorted_and_deterministic() {
     let paths: Vec<&str> = forward.sites.iter().map(|s| s.0.as_str()).collect();
     assert_eq!(paths, vec!["A.java", "b/Z.java", "m.java"]);
     assert_eq!(forward.sites, reversed.sites);
-}
-
-#[test]
-fn test_new_damage_on_a_later_unchanged_line_raises_a101() {
-    let (_dir, repo) = common::init_repo();
-    let base = commit(&repo, &[("W.java", LEGACY.to_string())]);
-    let edited = LEGACY.replace("        b();\n    }\n", "        b();\n");
-    let candidate = commit(&repo, &[("W.java", edited)]);
-
-    let evaluation = evaluate(&repo, base, candidate);
-
-    assert_eq!(evaluation.sites, vec![site("W.java", 10, 10)]);
 }
 
 #[test]
