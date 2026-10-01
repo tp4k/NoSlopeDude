@@ -10,7 +10,7 @@
 use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::hash::{Hash, Hasher};
 
 use rayon::prelude::*;
@@ -263,13 +263,23 @@ struct Subject<'a> {
     matched: (&'a RepoPath, usize, usize),
 }
 
+/// How a base container's tokens sit inside a candidate container: the base
+/// container, the candidate file and container, and the signed token offset.
+/// Pairs with equal alignments describe one physical move.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Alignment {
+    base: (usize, u32),
+    candidate: (usize, u32),
+    offset: isize,
+}
+
 /// The deleted base occurrences, indexed by token length and window hash.
 struct MovePool<'a> {
     entries: Vec<(usize, Candidate, (usize, usize))>,
     index: HashMap<(LanguageFamily, usize, u64), Vec<usize>>,
     lengths: BTreeSet<usize>,
     base_tokens: HashMap<(usize, u32), ContainerTokens<'a>>,
-    consumed: HashSet<(usize, usize)>,
+    consumed: HashMap<(usize, usize), Alignment>,
 }
 
 impl<'a> MovePool<'a> {
@@ -323,22 +333,26 @@ impl<'a> MovePool<'a> {
             index,
             lengths,
             base_tokens,
-            consumed: HashSet::new(),
+            consumed: HashMap::new(),
         }
     }
 
     /// Pairs `run` with the largest eligible unconsumed deleted occurrence
     /// whose token sequence is contiguous inside it, and consumes that
-    /// occurrence's lines. Returns whether `run` is a move.
+    /// occurrence's lines under its alignment. A deleted line consumed under
+    /// another alignment is spent; one consumed under the same alignment is
+    /// shared by the overlapping occurrences of that one move. Returns
+    /// whether `run` is a move.
     fn take_move(
         &mut self,
         base_views: &[FileView<'_>],
         language: LanguageFamily,
         tokens: &ContainerTokens<'_>,
+        container: (usize, u32),
         run: &Candidate,
     ) -> bool {
         let (from, to) = tokens.run_range(run);
-        let mut best: Option<usize> = None;
+        let mut best: Option<(usize, Alignment)> = None;
         for &length in &self.lengths {
             if length > to - from {
                 break;
@@ -353,7 +367,7 @@ impl<'a> MovePool<'a> {
                     if run.source_lines > base_run.source_lines + threshold(base_run.source_lines) {
                         continue;
                     }
-                    let beats_best = best.is_none_or(|current| {
+                    let beats_best = best.is_none_or(|(current, _)| {
                         let current_lines = self.entries[current].1.source_lines;
                         (Reverse(base_run.source_lines), slot) < (Reverse(current_lines), current)
                     });
@@ -367,23 +381,30 @@ impl<'a> MovePool<'a> {
                             base_tokens.window(*base_from, *base_to)
                                 == tokens.window(start, start + length)
                         });
+                    let alignment = Alignment {
+                        base: (*base, base_run.container),
+                        candidate: container,
+                        offset: start as isize - *base_from as isize,
+                    };
                     let lines = base_views[*base].executable_lines(base_run);
                     if same_tokens
-                        && lines
-                            .iter()
-                            .all(|&line| !self.consumed.contains(&(*base, line)))
+                        && lines.iter().all(|&line| {
+                            self.consumed
+                                .get(&(*base, line))
+                                .is_none_or(|spent| *spent == alignment)
+                        })
                     {
-                        best = Some(slot);
+                        best = Some((slot, alignment));
                     }
                 }
             }
         }
-        let Some(slot) = best else {
+        let Some((slot, alignment)) = best else {
             return false;
         };
         let (base, base_run, _) = self.entries[slot];
         for line in base_views[base].executable_lines(&base_run) {
-            self.consumed.insert((base, line));
+            self.consumed.insert((base, line), alignment);
         }
         true
     }
@@ -642,7 +663,13 @@ pub fn evaluate_clones(
             let tokens = candidate_tokens
                 .entry((subject.view, subject.run.container))
                 .or_insert_with(|| ContainerTokens::new(view, subject.run.container));
-            if !pool.take_move(&base_views, view.language, tokens, &subject.run) {
+            if !pool.take_move(
+                &base_views,
+                view.language,
+                tokens,
+                (subject.view, subject.run.container),
+                &subject.run,
+            ) {
                 firing.push((subject, None));
             }
         }
