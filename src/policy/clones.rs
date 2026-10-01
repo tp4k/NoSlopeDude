@@ -107,6 +107,27 @@ impl<'a> FileView<'a> {
     }
 }
 
+/// A token's identity: the address of its leaf node, the same in every
+/// container stream that holds the leaf (an inner block's leaves are also in
+/// the enclosing container's stream).
+type LeafId = usize;
+
+/// The leaves `statement_leaf_tokens` yields, in the same order.
+fn statement_leaf_ids(statement: &IrNode) -> Vec<LeafId> {
+    let mut leaves = Vec::new();
+    let mut stack = vec![statement];
+    while let Some(node) = stack.pop() {
+        if node.children.is_empty() {
+            if !node.is_comment {
+                leaves.push(node as *const IrNode as LeafId);
+            }
+        } else {
+            stack.extend(node.children.iter().rev());
+        }
+    }
+    leaves
+}
+
 fn token_hash(token: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
     token.hash(&mut hasher);
@@ -118,6 +139,7 @@ fn token_hash(token: &str) -> u64 {
 /// verified by comparing whole tokens (D10), never the joined digest string.
 struct ContainerTokens<'a> {
     tokens: Vec<Cow<'a, str>>,
+    leaves: Vec<LeafId>,
     bounds: Vec<usize>,
     prefix: Vec<u64>,
 }
@@ -125,11 +147,14 @@ struct ContainerTokens<'a> {
 impl<'a> ContainerTokens<'a> {
     fn new(view: &FileView<'a>, container: u32) -> Self {
         let mut tokens = Vec::new();
+        let mut leaves = Vec::new();
         let mut bounds = vec![0];
         for statement in &view.containers[container as usize] {
             tokens.extend(statement_leaf_tokens(statement, view.source));
+            leaves.extend(statement_leaf_ids(statement));
             bounds.push(tokens.len());
         }
+        debug_assert_eq!(tokens.len(), leaves.len());
         let mut prefix = Vec::with_capacity(tokens.len() + 1);
         prefix.push(0u64);
         let mut running = 0u64;
@@ -141,6 +166,7 @@ impl<'a> ContainerTokens<'a> {
         }
         ContainerTokens {
             tokens,
+            leaves,
             bounds,
             prefix,
         }
@@ -263,23 +289,15 @@ struct Subject<'a> {
     matched: (&'a RepoPath, usize, usize),
 }
 
-/// How a base container's tokens sit inside a candidate container: the base
-/// container, the candidate file and container, and the signed token offset.
-/// Pairs with equal alignments describe one physical move.
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct Alignment {
-    base: (usize, u32),
-    candidate: (usize, u32),
-    offset: isize,
-}
-
 /// The deleted base occurrences, indexed by token length and window hash.
 struct MovePool<'a> {
     entries: Vec<(usize, Candidate, (usize, usize))>,
     index: HashMap<(LanguageFamily, usize, u64), Vec<usize>>,
     lengths: BTreeSet<usize>,
     base_tokens: HashMap<(usize, u32), ContainerTokens<'a>>,
-    consumed: HashMap<(usize, usize), Alignment>,
+    /// Each credited base token (base file, leaf) with the one candidate
+    /// token (candidate file, leaf) it was moved onto.
+    consumed: HashMap<(usize, LeafId), (usize, LeafId)>,
 }
 
 impl<'a> MovePool<'a> {
@@ -338,21 +356,20 @@ impl<'a> MovePool<'a> {
     }
 
     /// Pairs `run` with the largest eligible unconsumed deleted occurrence
-    /// whose token sequence is contiguous inside it, and consumes that
-    /// occurrence's lines under its alignment. A deleted line consumed under
-    /// another alignment is spent; one consumed under the same alignment is
-    /// shared by the overlapping occurrences of that one move. Returns
-    /// whether `run` is a move.
+    /// whose token sequence is contiguous inside it, and credits each of that
+    /// occurrence's tokens to the candidate token it lands on. A base token
+    /// credited to another candidate token is spent; one credited to the same
+    /// candidate token is shared by the overlapping occurrences of that one
+    /// move. Returns whether `run` is a move.
     fn take_move(
         &mut self,
-        base_views: &[FileView<'_>],
         language: LanguageFamily,
         tokens: &ContainerTokens<'_>,
-        container: (usize, u32),
+        file: usize,
         run: &Candidate,
     ) -> bool {
         let (from, to) = tokens.run_range(run);
-        let mut best: Option<(usize, Alignment)> = None;
+        let mut best: Option<(usize, usize)> = None;
         for &length in &self.lengths {
             if length > to - from {
                 break;
@@ -374,37 +391,35 @@ impl<'a> MovePool<'a> {
                     if !beats_best {
                         continue;
                     }
-                    let same_tokens = self
-                        .base_tokens
-                        .get(&(*base, base_run.container))
-                        .is_some_and(|base_tokens| {
-                            base_tokens.window(*base_from, *base_to)
-                                == tokens.window(start, start + length)
-                        });
-                    let alignment = Alignment {
-                        base: (*base, base_run.container),
-                        candidate: container,
-                        offset: start as isize - *base_from as isize,
+                    let Some(base_tokens) = self.base_tokens.get(&(*base, base_run.container))
+                    else {
+                        continue;
                     };
-                    let lines = base_views[*base].executable_lines(base_run);
+                    let same_tokens = base_tokens.window(*base_from, *base_to)
+                        == tokens.window(start, start + length);
                     if same_tokens
-                        && lines.iter().all(|&line| {
+                        && (0..length).all(|offset| {
                             self.consumed
-                                .get(&(*base, line))
-                                .is_none_or(|spent| *spent == alignment)
+                                .get(&(*base, base_tokens.leaves[base_from + offset]))
+                                .is_none_or(|&spent| spent == (file, tokens.leaves[start + offset]))
                         })
                     {
-                        best = Some((slot, alignment));
+                        best = Some((slot, start));
                     }
                 }
             }
         }
-        let Some((slot, alignment)) = best else {
+        let Some((slot, start)) = best else {
             return false;
         };
-        let (base, base_run, _) = self.entries[slot];
-        for line in base_views[base].executable_lines(&base_run) {
-            self.consumed.insert((base, line), alignment);
+        let (base, base_run, (base_from, base_to)) = self.entries[slot];
+        if let Some(base_tokens) = self.base_tokens.get(&(base, base_run.container)) {
+            for offset in 0..base_to - base_from {
+                self.consumed.insert(
+                    (base, base_tokens.leaves[base_from + offset]),
+                    (file, tokens.leaves[start + offset]),
+                );
+            }
         }
         true
     }
@@ -663,13 +678,7 @@ pub fn evaluate_clones(
             let tokens = candidate_tokens
                 .entry((subject.view, subject.run.container))
                 .or_insert_with(|| ContainerTokens::new(view, subject.run.container));
-            if !pool.take_move(
-                &base_views,
-                view.language,
-                tokens,
-                (subject.view, subject.run.container),
-                &subject.run,
-            ) {
+            if !pool.take_move(view.language, tokens, subject.view, &subject.run) {
                 firing.push((subject, None));
             }
         }
