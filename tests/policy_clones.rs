@@ -863,6 +863,87 @@ fn test_move_credit_does_not_reach_a_distinct_copy_of_a_block_with_a_nested_bloc
 }
 
 #[test]
+fn test_move_credit_does_not_reach_a_distinct_copy_of_a_block_deleted_after_other_base_code() {
+    let long = statements("s", LONG_BLOCK_LINES);
+    let suffix = statement_range("s", BLOCK_LINES, LONG_BLOCK_LINES - 1);
+    let preceded = format!("{}{long}", statements("q", BLOCK_LINES));
+    let (_dir, repo) = common::init_repo();
+    let base = commit(
+        &repo,
+        &[
+            ("U.java", java("U", &long)),
+            ("S.java", java("S", &preceded)),
+            ("X.java", java("X", &suffix)),
+        ],
+    );
+    let candidate = commit(
+        &repo,
+        &[
+            ("U.java", java("U", &long)),
+            ("S.java", java("S", "")),
+            ("X.java", java("X", &suffix)),
+            ("M.java", java("M", &long)),
+            ("N.java", java("N", &long)),
+        ],
+    );
+
+    let found = evaluate(&repo, base, candidate);
+
+    assert_eq!(
+        sites(&found),
+        vec![
+            body_site("N.java", LONG_BLOCK_LINES),
+            site(
+                "N.java",
+                FIRST_BODY_LINE + BLOCK_LINES,
+                FIRST_BODY_LINE + LONG_BLOCK_LINES - 1
+            ),
+        ]
+    );
+    assert!(found.iter().all(|d| d.base_lines.is_none()));
+}
+
+#[test]
+fn test_move_after_new_code_whose_suffix_also_occurs_elsewhere_passes() {
+    let long = statements("s", LONG_BLOCK_LINES);
+    let suffix = statement_range("s", BLOCK_LINES, LONG_BLOCK_LINES - 1);
+    let preceded = format!("{}{long}", statements("p", BLOCK_LINES));
+    let (_dir, repo) = common::init_repo();
+    let base = commit(
+        &repo,
+        &[
+            ("U.java", java("U", &long)),
+            ("S.java", java("S", &long)),
+            ("X.java", java("X", &suffix)),
+        ],
+    );
+    let candidate = |source: &str| {
+        commit(
+            &repo,
+            &[
+                ("U.java", java("U", &long)),
+                ("S.java", java("S", source)),
+                ("X.java", java("X", &suffix)),
+                ("N.java", java("N", &preceded)),
+            ],
+        )
+    };
+
+    assert!(evaluate(&repo, base, candidate("")).is_empty());
+
+    let found = evaluate(&repo, base, candidate(&long));
+    let first = FIRST_BODY_LINE + BLOCK_LINES;
+    let end = first + LONG_BLOCK_LINES - 1;
+    assert_eq!(
+        sites(&found),
+        vec![
+            site("N.java", first, end),
+            site("N.java", first + BLOCK_LINES, end)
+        ]
+    );
+}
+
+#[test]
 fn test_base_unique_block_edited_in_place_and_copied_raises_only_on_the_copy() {
     let extended = format!("{}{}", block("a"), statements("e", 1));
     let (_dir, repo) = common::init_repo();
