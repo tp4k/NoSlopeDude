@@ -1376,6 +1376,67 @@ fn test_a_kept_anchor_after_a_commented_tail_does_not_inflate_the_base() {
     assert_eq!(in_a[0].added_lines, ENCLOSING_EXTENSION);
 }
 
+const MIDDLE_BLOCK_STATEMENTS: usize = 200;
+
+/// `A.java` holds a 10-line core split around a large block; the candidate
+/// replaces the block with `middle` and appends a 15-line extension that
+/// `B.java` also holds.
+fn block_between_overlap_lines(middle: &str) -> Vec<CloneDiagnostic> {
+    let core = statements("a", EXTENSION_BASE_SMALL);
+    let half = EXTENSION_BASE_SMALL / 2;
+    let first: String = core.lines().take(half).map(|l| format!("{l}\n")).collect();
+    let second: String = core.lines().skip(half).map(|l| format!("{l}\n")).collect();
+    let block = format!(
+        "        if (x > 0) {{\n{}        }}\n",
+        statements("h", MIDDLE_BLOCK_STATEMENTS)
+    );
+    let extension = statements("e", ENCLOSING_EXTENSION);
+    let (_dir, repo) = common::init_repo();
+    let base = commit(
+        &repo,
+        &[
+            ("A.java", java("A", &format!("{first}{block}{second}"))),
+            ("B.java", java("B", &format!("{core}{extension}"))),
+        ],
+    );
+    let middle = middle.replace("<block>", &block);
+    let candidate = commit(
+        &repo,
+        &[
+            (
+                "A.java",
+                java("A", &format!("{first}{middle}{second}{extension}")),
+            ),
+            ("B.java", java("B", &format!("{core}{extension}"))),
+        ],
+    );
+    evaluate(&repo, base, candidate)
+}
+
+fn assert_block_between_overlap_lines_is_graded_on_the_effective_base(middle: &str) {
+    let found = block_between_overlap_lines(middle);
+    let in_a: Vec<&CloneDiagnostic> = found
+        .iter()
+        .filter(|d| d.candidate_path.render() == "A.java")
+        .collect();
+    assert_eq!(in_a.len(), 1, "{found:?}");
+    assert_eq!(in_a[0].added_lines, ENCLOSING_EXTENSION);
+    assert_eq!(
+        in_a[0].base_lines,
+        Some(EXTENSION_BASE_SMALL + ENCLOSING_EXTENSION)
+    );
+}
+
+#[test]
+fn test_a_deleted_block_between_overlap_lines_does_not_inflate_the_base() {
+    assert_block_between_overlap_lines_is_graded_on_the_effective_base("");
+}
+
+#[test]
+fn test_a_commented_out_block_between_overlap_lines_does_not_inflate_the_base() {
+    assert_block_between_overlap_lines_is_graded_on_the_effective_base("/*\n<block>*/\n");
+}
+
 /// `A.java` holds filler statements before a 10-line core; `B.java` holds the
 /// core plus the `added` statements the candidate appends to `A.java`.
 fn extension_after_filler(added: usize) -> Vec<CloneDiagnostic> {
