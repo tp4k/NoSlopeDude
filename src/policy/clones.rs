@@ -107,8 +107,8 @@ impl<'a> FileView<'a> {
     }
 }
 
-/// A token's identity: the address of its leaf node, the same in every
-/// container stream that holds the leaf (an inner block's leaves are also in
+/// A token's identity: the address of its leaf node, unique across files and
+/// the same in every container stream that holds the leaf (an inner block's leaves are also in
 /// the enclosing container's stream).
 type LeafId = usize;
 
@@ -295,9 +295,9 @@ struct MovePool<'a> {
     index: HashMap<(LanguageFamily, usize, u64), Vec<usize>>,
     lengths: BTreeSet<usize>,
     base_tokens: HashMap<(usize, u32), ContainerTokens<'a>>,
-    /// Each credited base token (base file, leaf) with the one candidate
-    /// token (candidate file, leaf) it was moved onto.
-    consumed: HashMap<(usize, LeafId), (usize, LeafId)>,
+    /// Each credited base token with the one candidate token it was moved
+    /// onto.
+    consumed: HashMap<LeafId, LeafId>,
 }
 
 impl<'a> MovePool<'a> {
@@ -365,7 +365,6 @@ impl<'a> MovePool<'a> {
         &mut self,
         language: LanguageFamily,
         tokens: &ContainerTokens<'_>,
-        file: usize,
         run: &Candidate,
     ) -> bool {
         let (from, to) = tokens.run_range(run);
@@ -400,8 +399,8 @@ impl<'a> MovePool<'a> {
                     if same_tokens
                         && (0..length).all(|offset| {
                             self.consumed
-                                .get(&(*base, base_tokens.leaves[base_from + offset]))
-                                .is_none_or(|&spent| spent == (file, tokens.leaves[start + offset]))
+                                .get(&base_tokens.leaves[base_from + offset])
+                                .is_none_or(|&spent| spent == tokens.leaves[start + offset])
                         })
                     {
                         best = Some((slot, start));
@@ -416,8 +415,8 @@ impl<'a> MovePool<'a> {
         if let Some(base_tokens) = self.base_tokens.get(&(base, base_run.container)) {
             for offset in 0..base_to - base_from {
                 self.consumed.insert(
-                    (base, base_tokens.leaves[base_from + offset]),
-                    (file, tokens.leaves[start + offset]),
+                    base_tokens.leaves[base_from + offset],
+                    tokens.leaves[start + offset],
                 );
             }
         }
@@ -678,7 +677,7 @@ pub fn evaluate_clones(
             let tokens = candidate_tokens
                 .entry((subject.view, subject.run.container))
                 .or_insert_with(|| ContainerTokens::new(view, subject.run.container));
-            if !pool.take_move(view.language, tokens, subject.view, &subject.run) {
+            if !pool.take_move(view.language, tokens, &subject.run) {
                 firing.push((subject, None));
             }
         }
