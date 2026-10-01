@@ -32,7 +32,8 @@ const SLOC_GROWTH_DIVISOR: usize = 10;
 
 /// One file's callable metrics from one snapshot, index-aligned with the
 /// `FileCallables` the matcher saw for the same path. A ref into a path or
-/// index missing here is skipped.
+/// index missing here is a caller bug: it panics in debug builds and is
+/// skipped in release builds.
 #[derive(Debug, Clone)]
 pub struct FileMetrics {
     pub path: RepoPath,
@@ -179,13 +180,27 @@ struct Classifier<'a> {
 
 impl<'a> Classifier<'a> {
     fn base_callable(&self, callable_ref: &CallableRef) -> Option<&'a Callable> {
-        self.base.get(&callable_ref.path)?.get(callable_ref.index)
+        let found = self
+            .base
+            .get(&callable_ref.path)
+            .and_then(|callables| callables.get(callable_ref.index));
+        debug_assert!(
+            found.is_some(),
+            "base ref {callable_ref:?} is missing from its FileMetrics"
+        );
+        found
     }
 
     fn candidate_callable(&self, callable_ref: &'a CallableRef) -> Option<&'a Callable> {
-        self.candidate
-            .get(&callable_ref.path)?
-            .get(callable_ref.index)
+        let found = self
+            .candidate
+            .get(&callable_ref.path)
+            .and_then(|callables| callables.get(callable_ref.index));
+        debug_assert!(
+            found.is_some(),
+            "candidate ref {callable_ref:?} is missing from its FileMetrics"
+        );
+        found
     }
 
     fn base_set<'r>(&self, members: impl Iterator<Item = &'r CallableRef>) -> BaseSet {

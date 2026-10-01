@@ -11,6 +11,8 @@ use anyhow::{bail, Context};
 
 use crate::model::{RemoteTarget, Revision, Target};
 
+/// Keeps a scanned checkout's own `core.fsmonitor` from running as a hook.
+const GIT_UNTRUSTED_CONFIG_ARGS: [&str; 2] = ["-c", "core.fsmonitor=false"];
 const GITHUB_URL_PREFIXES: [&str; 2] = ["https://github.com/", "http://github.com/"];
 
 /// A target resolved to a concrete, readable root on disk.
@@ -101,7 +103,8 @@ fn resolve_remote(remote: &RemoteTarget) -> anyhow::Result<ResolvedTarget> {
 
 fn local_git_revision(root: &Path) -> Revision {
     let is_work_tree = Command::new("git")
-        .args(["-C"])
+        .args(GIT_UNTRUSTED_CONFIG_ARGS)
+        .arg("-C")
         .arg(root)
         .args(["rev-parse", "--is-inside-work-tree"])
         .output()
@@ -120,7 +123,8 @@ fn local_git_revision(root: &Path) -> Revision {
 
     let sha = git_head_sha(root);
     let dirty = Command::new("git")
-        .args(["-C"])
+        .args(GIT_UNTRUSTED_CONFIG_ARGS)
+        .arg("-C")
         .arg(root)
         .args(["status", "--porcelain"])
         .output()
@@ -137,7 +141,8 @@ fn local_git_revision(root: &Path) -> Revision {
 
 fn git_head_sha(root: &Path) -> Option<String> {
     Command::new("git")
-        .args(["-C"])
+        .args(GIT_UNTRUSTED_CONFIG_ARGS)
+        .arg("-C")
         .arg(root)
         .args(["rev-parse", "HEAD"])
         .output()
