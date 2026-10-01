@@ -803,3 +803,75 @@ fn test_javadoc_prose_mentioning_nsd_ignore_is_not_a_directive() {
         )]
     );
 }
+
+// ---------------------------------------------------------------------
+// Coverage: JS/TS directives, adjacent block directive, file-level code.
+// ---------------------------------------------------------------------
+
+const TS_FILE: &str = "widget.ts";
+const TS_DIRECTIVE: &str = "// nsd-ignore[JSTS-EMPTY-CATCH]: legacy API";
+const TS_CATCH: &str = "try { work(); } catch (e) { }";
+
+fn ts_sites(base_text: &str, candidate_text: &str) -> (Vec<Site>, usize) {
+    let (_dir, repo) = common::init_repo();
+    let entry = |text: &str| {
+        vec![(
+            TS_FILE.as_bytes().to_vec(),
+            MODE_REGULAR,
+            text.as_bytes().to_vec(),
+        )]
+    };
+    let base = common::commit_entries(&repo, &entry(base_text));
+    let candidate = common::commit_entries(&repo, &entry(candidate_text));
+    let output = evaluate(&repo, base, candidate);
+    let found = output
+        .diagnostics
+        .iter()
+        .map(|d| (d.code, d.rule_id, d.directive_line))
+        .collect();
+    (found, output.findings.len())
+}
+
+#[test]
+fn test_jsts_directive_suppresses_new_and_flags_unused() {
+    let base = "function run() {\n  work();\n}\n";
+    let candidate = format!(
+        "function run() {{\n  work();\n  {TS_DIRECTIVE}\n  {TS_CATCH}\n  {TS_DIRECTIVE}\n  work();\n}}\n"
+    );
+
+    let (found, unmatched) = ts_sites(base, &candidate);
+
+    assert_eq!(
+        found,
+        vec![
+            (CODE_NEW_SUPPRESSION, Some(rules::JSTS_EMPTY_CATCH), 3),
+            (CODE_INVALID_SUPPRESSION, Some(rules::JSTS_EMPTY_CATCH), 5),
+        ]
+    );
+    assert_eq!(unmatched, 0);
+}
+
+#[test]
+fn test_block_directive_directly_above_a_finding_suppresses_nothing() {
+    let (output, text) = pair(
+        &["work();"],
+        &["/* nsd-ignore[JAVA-EMPTY-CATCH]: reason */", CATCH],
+    );
+
+    assert_eq!(
+        sites(&output),
+        vec![(CODE_INVALID_SUPPRESSION, None, line_of(&text, "nsd-ignore"))]
+    );
+    assert_eq!(v101_lines(&output), vec![line_of(&text, CATCH)]);
+}
+
+#[test]
+fn test_directive_in_file_level_code_moved_with_its_finding_raises_nothing() {
+    let level = format!("{TS_DIRECTIVE}\n{TS_CATCH}\n");
+    let moved = format!("// pad\n// pad\n{level}");
+
+    let (found, unmatched) = ts_sites(&level, &moved);
+
+    assert_eq!(found, vec![]);
+    assert_eq!(unmatched, 0);
+}
