@@ -28,7 +28,7 @@ const EXTENSION_BASE_SMALL: usize = 10;
 const EXTENSION_BASE_LARGE: usize = 100;
 const LARGE_THRESHOLD: usize = 10;
 const SCALING_BLOCK_STATEMENTS: usize = 10;
-const SCALING_BLOCKS: usize = 400;
+const SCALING_BLOCKS: usize = 250;
 const SCALING_FACTOR: usize = 8;
 const SCALING_SAMPLES: usize = 3;
 const SCALING_ASSERT_MULTIPLIER: u32 = 32;
@@ -111,12 +111,12 @@ fn analyzed(
 ) -> Vec<Analyzed> {
     let mut out = Vec::new();
     for entry in snapshot.entries.iter().filter(|e| wanted(&e.path)) {
-        let Some(bytes) = snapshot.read(repo, entry).expect("read blob") else {
-            continue;
-        };
-        let Ok(analysis) = analyze_file(Path::new(&entry.path.render()), &bytes) else {
-            continue;
-        };
+        let bytes = snapshot
+            .read(repo, entry)
+            .expect("read blob")
+            .unwrap_or_else(|| panic!("{} was not readable", entry.path.render()));
+        let analysis = analyze_file(Path::new(&entry.path.render()), &bytes)
+            .unwrap_or_else(|error| panic!("{} was not analyzed: {error:?}", entry.path.render()));
         out.push(Analyzed {
             path: entry.path.clone(),
             source: bytes,
@@ -642,7 +642,7 @@ fn test_base_unique_block_edited_in_place_and_copied_raises_only_on_the_copy() {
 
 #[test]
 fn test_token_containment_respects_token_boundaries() {
-    let forged = format!("x = \"\u{1}foo\u{1};\u{1}bar\u{1};\";\ny = 1;\n");
+    let forged = "x = \"\u{1}foo\u{1};\u{1}bar\u{1};\";\ny = 1;\n".to_string();
     let genuine = "foo;\nbar;\n".to_string();
     let min_lines = 2;
     let (_dir, repo) = common::init_repo();
@@ -1196,53 +1196,6 @@ fn test_move_mapping_does_not_scale_quadratically_in_moved_blocks() {
     assert_eq!((small.1, large.1), (0, 0), "every pair is a move");
     assert_eq!(one_copied.1, 1, "one block copied, not moved");
     assert_scales_linearly("evaluate_clones over moved blocks", small, large);
-}
-
-/// The largest block count whose eight-fold file stays under the 1 MiB
-/// source ceiling; a larger file is silently skipped by `analyzed`.
-const CEILING_SAFE_BLOCKS: usize = 250;
-
-fn assert_ratio_below_bound(what: &str, small: Duration, large: Duration) {
-    assert!(
-        large < small * SCALING_ASSERT_MULTIPLIER,
-        "{what} at N={CEILING_SAFE_BLOCKS} took {small:?}, at 8N={} took {large:?}, ratio \
-         {:.1}x, expected < {SCALING_ASSERT_MULTIPLIER}x",
-        CEILING_SAFE_BLOCKS * SCALING_FACTOR,
-        large.as_secs_f64() / small.as_secs_f64().max(f64::EPSILON)
-    );
-}
-
-#[test]
-fn test_scaling_fixtures_stay_under_the_source_ceiling() {
-    let largest = blocks_file("D", 0..CEILING_SAFE_BLOCKS * SCALING_FACTOR);
-    assert!(
-        (largest.len() as u64) < nsd::git::snapshot::SOURCE_CEILING_BYTES,
-        "a {} byte fixture is skipped by the analyzer, so the scaling run is vacuous",
-        largest.len()
-    );
-}
-
-#[test]
-fn test_copy_evaluation_scales_linearly_within_the_source_ceiling() {
-    let small = copy_run(CEILING_SAFE_BLOCKS);
-    let large = copy_run(CEILING_SAFE_BLOCKS * SCALING_FACTOR);
-
-    assert_eq!(
-        (small.1, large.1),
-        (CEILING_SAFE_BLOCKS, CEILING_SAFE_BLOCKS * SCALING_FACTOR)
-    );
-    assert_ratio_below_bound("evaluate_clones over copied blocks", small.0, large.0);
-}
-
-#[test]
-fn test_move_mapping_scales_linearly_within_the_source_ceiling() {
-    let small = move_run(CEILING_SAFE_BLOCKS, 0);
-    let large = move_run(CEILING_SAFE_BLOCKS * SCALING_FACTOR, 0);
-    let one_copied = move_run(CEILING_SAFE_BLOCKS, 1);
-
-    assert_eq!((small.1, large.1), (0, 0), "every pair is a move");
-    assert_eq!(one_copied.1, 1, "one block copied, not moved");
-    assert_ratio_below_bound("evaluate_clones over moved blocks", small.0, large.0);
 }
 
 const SUB_TEN_BASE: usize = 5;
