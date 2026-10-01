@@ -82,6 +82,10 @@ pub struct IrFile {
     /// absent from `callables`. A101 reads this to tell a damaged changed
     /// callable apart from a deleted one.
     pub excluded_callables: Vec<Span>,
+    /// The spans of the blocks salvage excluded, which are therefore absent
+    /// from `blocks`. A101 reads this for an edit inside an excluded block
+    /// that no excluded callable contains.
+    pub excluded_blocks: Vec<Span>,
 }
 
 /// WS-9 (C1): total number of `lower_file` calls made so far in this
@@ -244,6 +248,7 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
         blocks: kept_blocks,
         owners: kept_owners,
         excluded_callables,
+        excluded_blocks: Vec::new(),
     }
 }
 
