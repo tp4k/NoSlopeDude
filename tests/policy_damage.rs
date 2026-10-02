@@ -123,6 +123,56 @@ fn finding_files(files: &[Analyzed]) -> Vec<FindingFile<'_>> {
 
 type Site = (String, usize, usize);
 
+/// `evaluate_damage` alone over an added file of `count` broken methods;
+/// returns the minimum of three timings and the A101 count.
+fn added_damaged_methods_run(count: usize) -> (std::time::Duration, usize) {
+    const SAMPLES: usize = 3;
+    let text = (0..count).fold(String::from("class W {\n"), |mut text, index| {
+        text.push_str(&format!(
+            "    void broken{index}(int a {{\n        return;\n    }}\n"
+        ));
+        text
+    }) + "}\n";
+    let path = RepoPath::from_bytes(b"W.java".to_vec());
+    let analysis = analyze_file(Path::new("W.java"), text.as_bytes()).expect("candidate");
+    let candidate_files = [FindingFile {
+        path: path.clone(),
+        source: text.as_bytes(),
+        analysis: &analysis,
+    }];
+    let changes = [Change::Added {
+        path,
+        kind: nsd::git::snapshot::EntryKind::Regular,
+    }];
+    let mut fastest = std::time::Duration::MAX;
+    let mut sites = 0;
+    for _ in 0..SAMPLES {
+        let started = std::time::Instant::now();
+        let found = evaluate_damage(&[], &candidate_files, &changes).expect("evaluate");
+        fastest = fastest.min(started.elapsed());
+        sites = found.len();
+    }
+    (fastest, sites)
+}
+
+#[test]
+fn test_overlap_lookups_do_not_scale_quadratically_in_damage_sites() {
+    const METHOD_COUNT: usize = 1_000;
+    const SCALED_METHOD_COUNT: usize = METHOD_COUNT * 8;
+    const SCALING_ASSERT_MULTIPLIER: u32 = 32;
+
+    let (elapsed, sites) = added_damaged_methods_run(METHOD_COUNT);
+    let (scaled_elapsed, scaled_sites) = added_damaged_methods_run(SCALED_METHOD_COUNT);
+
+    assert_eq!((sites, scaled_sites), (METHOD_COUNT, SCALED_METHOD_COUNT));
+    assert!(
+        scaled_elapsed < elapsed * SCALING_ASSERT_MULTIPLIER,
+        "a quadratic overlap scan scales ~64x from N to 8N, an indexed lookup ~8x: evaluate_damage \
+         at N={METHOD_COUNT} took {elapsed:?}, at 8N={SCALED_METHOD_COUNT} took {scaled_elapsed:?}, \
+         expected 8N < {SCALING_ASSERT_MULTIPLIER}x N"
+    );
+}
+
 struct Evaluation {
     sites: Vec<Site>,
     changes: Vec<Change>,
