@@ -145,7 +145,10 @@ pub fn apply_suppressions(
                 .and_then(|pair| {
                     let base_ref = &pair.base;
                     let (base_file, base_state) = base_files.get(&base_ref.path)?;
-                    let base_in_callable = base_file.analysis.findings[base_ref.index]
+                    let base_in_callable = base_file
+                        .analysis
+                        .findings
+                        .get(base_ref.index)?
                         .enclosing_callable
                         .is_some();
                     let carries_over = !(pair.in_file_context

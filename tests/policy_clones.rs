@@ -1959,7 +1959,7 @@ fn test_extension_of_a_clone_inside_a_longer_method_uses_the_clone_as_base() {
 
 const CUBIC_THRESHOLD_DIVISOR: usize = 10;
 
-fn container_run(statement_count: usize, added: usize) -> (Duration, Vec<CloneDiagnostic>) {
+fn container_sides(statement_count: usize, added: usize) -> Sides {
     let base_body = statements("a", statement_count);
     let extended = format!("{base_body}{}", statements("e", added));
     let (_dir, repo) = common::init_repo();
@@ -1977,15 +1977,22 @@ fn container_run(statement_count: usize, added: usize) -> (Duration, Vec<CloneDi
             ("B.java", java("B", &extended)),
         ],
     );
-    let sides = load(&repo, base, candidate);
-    let (fastest, _) = fastest_evaluation(&sides);
-    let found = evaluate_sides(
-        &sides,
+    load(&repo, base, candidate)
+}
+
+fn container_found(sides: &Sides) -> Vec<CloneDiagnostic> {
+    evaluate_sides(
+        sides,
         DEFAULT_MIN_CLONE_LINES,
         &policy_with(Severity::Deny),
         false,
-    );
-    (fastest, found)
+    )
+}
+
+fn container_run(statement_count: usize, added: usize) -> (Duration, Vec<CloneDiagnostic>) {
+    let sides = container_sides(statement_count, added);
+    let (fastest, _) = fastest_evaluation(&sides);
+    (fastest, container_found(&sides))
 }
 
 #[test]
@@ -2011,7 +2018,7 @@ fn test_diff_mapping_does_not_scale_cubically_in_container_size() {
 
     for container in [CUBIC_SMALL_CONTAINER, large_container] {
         let added = container / CUBIC_THRESHOLD_DIVISOR + 1;
-        let found = container_run(container, added).1;
+        let found = container_found(&container_sides(container, added));
         assert_eq!(found.len(), 1, "s={container}, +{added}: {found:?}");
         assert_eq!(found[0].base_lines, Some(container), "{found:?}");
         assert_eq!(found[0].added_lines, added, "{found:?}");

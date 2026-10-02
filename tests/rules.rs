@@ -449,6 +449,26 @@ fn test_redundant_else_fires_on_a_multi_statement_returning_branch() {
     assert_eq!(hit.flagged_lines, vec![7], "{hit:?}");
 }
 
+/// Ledger row 40: `find_redundant_else` reads the `if`'s branches by
+/// position. A damage child sits between the branches in the raw syntax
+/// tree, but salvage prunes it from the IR, so the positions still name
+/// the real `else`.
+#[test]
+fn test_redundant_else_on_a_salvaged_damaged_if_flags_only_the_else_branch() {
+    let source = "if (x) {\n  throw 1;\n} ) else {\n  other();\n}\n";
+    let file = parse_inline_jsts(source);
+    let ir = lower::lower_file(&file);
+    assert_eq!(ir.damage.len(), 1, "the stray `)` is salvaged damage");
+
+    let findings = rules::find_findings(&[file]);
+
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    let hit = &findings[0];
+    assert_eq!(hit.rule_id, rules::JSTS_REDUNDANT_ELSE_AFTER_RETURN);
+    assert_eq!((hit.start_line, hit.end_line), (3, 5), "{hit:?}");
+    assert_eq!(hit.flagged_lines, vec![4], "{hit:?}");
+}
+
 #[test]
 fn test_clean_fixture_produces_no_findings() {
     let files = parsed_files(&[

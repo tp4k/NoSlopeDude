@@ -19,6 +19,7 @@ use std::path::Path;
 use git2::{ObjectType, Oid, Repository};
 
 use crate::config::{self, Config, ConfigError, CODE_CONFIG_CHANGED, CODE_INVALID_CONFIG};
+use crate::git::diff::worktree_symlink_oid;
 use crate::git::snapshot::{CommitSnapshot, EntryKind, IndexSnapshot, WorktreeSnapshot};
 
 /// Where the effective `Config` in a `Resolution` came from (Settled
@@ -186,7 +187,20 @@ fn diagnostics_for_candidate(
                         None,
                     )
                 }
-                Candidate::Worktree(_) => {
+                Candidate::Worktree(snapshot) => {
+                    // An unchanged symlink never reaches the read below, which
+                    // rejects a non-regular entry: compare its target-bytes oid
+                    // with the base's, as the commit/index arms do. A failed
+                    // hash falls through to that read's own diagnostics.
+                    let unchanged_symlink = config::find_root_entry(&snapshot.entries)
+                        .filter(|entry| entry.kind == EntryKind::Symlink)
+                        .and_then(|entry| worktree_symlink_oid(repo, snapshot, entry).ok())
+                        .is_some_and(|oid| {
+                            base_oid == Some(oid) && base_kind == Some(EntryKind::Symlink)
+                        });
+                    if unchanged_symlink {
+                        return Ok(Vec::new());
+                    }
                     let bytes = match fetch_candidate_bytes(repo, &candidate) {
                         Ok(bytes) => bytes,
                         Err(err) if err.code() == CODE_INVALID_CONFIG => {

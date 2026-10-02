@@ -36,7 +36,8 @@ fn reason_of(input: &CoverageInput) -> Option<UnanalyzableReason> {
 }
 
 /// Raises A102 for every changed input that could not be analyzed, and for
-/// every unchanged one when `V102` is `deny` or `warn`. Sorted by path bytes.
+/// every unchanged one when `V102` is `deny` or `warn`, except an unchanged
+/// `UnsupportedExtension`, which raises nothing. Sorted by path bytes.
 pub fn evaluate_coverage(
     inputs: &[CoverageInput],
     policy: &PolicyConfig,
@@ -47,7 +48,8 @@ pub fn evaluate_coverage(
         .filter(|input| input.changed || unchanged_required)
         .filter_map(|input| {
             let reason = reason_of(input)?;
-            (reason != UnanalyzableReason::UnsupportedExtension).then(|| CoverageDiagnostic {
+            let tolerated = !input.changed && reason == UnanalyzableReason::UnsupportedExtension;
+            (!tolerated).then(|| CoverageDiagnostic {
                 code: CODE_ANALYSIS_UNAVAILABLE,
                 path: input.entry.path.clone(),
                 reason,
