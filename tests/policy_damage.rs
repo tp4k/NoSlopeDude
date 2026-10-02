@@ -705,3 +705,16 @@ fn test_still_measured_lookup_does_not_scale_quadratically() {
          expected 8N < {SCALING_ASSERT_MULTIPLIER}x N"
     );
 }
+
+#[test]
+fn test_block_after_a_nested_callable_stays_inside_its_outer_callable() {
+    let base_text = "function outer() {\n  function inner() {\n    return 1;\n  }\n  if (x) {\n    g();\n  }\n}\n";
+    let edited = "function outer() {\n  function inner() {\n    return <b>a & c</b>;\n  }\n  if (x) {\n    h();\n    g();\n  }\n}\n";
+    let (_dir, repo) = common::init_repo();
+    let base = commit(&repo, &[("w.tsx", base_text.to_string())]);
+    let candidate = commit(&repo, &[("w.tsx", edited.to_string())]);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    assert_eq!(evaluation.sites, vec![site("w.tsx", 3, 3)]);
+}
