@@ -557,3 +557,28 @@ fn test_corpus_copy_is_outside_any_git_work_tree() {
         Value::String("not_a_git_repository".to_string())
     );
 }
+
+#[test]
+fn test_capture_selection_is_per_corpus() {
+    let only = |selected: Corpus| {
+        let name = capture_var(selected);
+        move |queried: &str| (queried == name).then(|| std::ffi::OsString::from("1"))
+    };
+    let unset = |_: &str| None;
+    let legacy_shared = |queried: &str| {
+        (queried == NEUTRALITY_CAPTURE_ENV_VAR).then(|| std::ffi::OsString::from("1"))
+    };
+
+    assert_ne!(capture_var(Corpus::Clean), capture_var(Corpus::Malformed));
+    assert!(capture_selected(Corpus::Clean, only(Corpus::Clean)));
+    assert!(!capture_selected(Corpus::Malformed, only(Corpus::Clean)));
+    assert!(capture_selected(Corpus::Malformed, only(Corpus::Malformed)));
+    assert!(!capture_selected(Corpus::Clean, only(Corpus::Malformed)));
+    assert!(!capture_selected(Corpus::Clean, unset));
+    assert!(!capture_selected(Corpus::Malformed, unset));
+    assert!(!capture_selected(Corpus::Clean, legacy_shared));
+    assert!(!capture_selected(Corpus::Malformed, legacy_shared));
+    let empty =
+        |queried: &str| (queried == capture_var(Corpus::Clean)).then(std::ffi::OsString::new);
+    assert!(!capture_selected(Corpus::Clean, empty));
+}
