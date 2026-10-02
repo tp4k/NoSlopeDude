@@ -475,3 +475,79 @@ fn test_render_lists_every_diagnostic_uncapped() {
         assert!(line.contains(&expected), "line {position}: {line}");
     }
 }
+
+#[test]
+fn test_check_staged_with_worktree_is_a_usage_error() {
+    let fx = Fixture::staged_regression();
+
+    let output = fx.nsd(&["check", "--staged", "--worktree"]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_ERROR));
+    assert_eq!(stdout(&output), "");
+}
+
+#[test]
+fn test_check_base_worktree_judges_the_working_tree_and_plain_base_judges_head() {
+    let fx = fixture();
+    fx.commit(&[("Foo.java", java_class("Foo", LOW_CC_IFS).as_bytes())]);
+    fs::write(
+        fx.root().join("Foo.java"),
+        java_class("Foo", HIGH_CC_IFS).as_bytes(),
+    )
+    .expect("edit the worktree file");
+
+    let overlay = fx.nsd(&["check", "--base", "HEAD", "--worktree"]);
+    let committed = fx.nsd(&["check", "--base", "HEAD"]);
+
+    assert_eq!(exit_code(&overlay), Some(EXIT_REGRESSION));
+    assert!(stdout(&overlay).contains(E101), "{}", stdout(&overlay));
+    assert_eq!(exit_code(&committed), Some(EXIT_PASS));
+    assert_eq!(stdout(&committed), "");
+}
+
+#[test]
+fn test_check_unwritable_stdout_exits_2_not_1() {
+    let fx = Fixture::staged_regression();
+    let (reader, writer) = std::io::pipe().expect("create a pipe");
+    drop(reader);
+
+    let status = Command::new(env!("CARGO_BIN_EXE_nsd"))
+        .args(["check", "--staged"])
+        .current_dir(fx.root())
+        .stdout(writer)
+        .status()
+        .expect("run the nsd binary");
+
+    assert_eq!(status.code(), Some(EXIT_ERROR));
+}
+
+#[test]
+fn test_check_config_dotdot_path_resolving_inside_the_checkout_is_refused() {
+    let fx = Fixture::staged_regression();
+    write_config(fx.root(), "trusted.yml", WARN_E101);
+
+    let output = fx.nsd(&["check", "--staged", "--config", "missing/../trusted.yml"]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_ERROR));
+    assert!(stdout(&output).contains(C102), "{}", stdout(&output));
+}
+
+#[test]
+fn test_check_config_dotdot_path_leaving_the_checkout_is_used() {
+    let parent = TempDir::new().expect("create a parent directory");
+    let root = parent.path().join("repo");
+    fs::create_dir_all(root.join("sub")).expect("create the checkout directory");
+    let repo = Repository::init(&root).expect("init the repository");
+    let fx = Fixture { dir: parent, repo };
+    write_config(fx.dir.path(), "trusted.yml", WARN_E101);
+    fx.commit(&[("Foo.java", java_class("Foo", LOW_CC_IFS).as_bytes())]);
+    fx.stage("Foo.java", java_class("Foo", HIGH_CC_IFS).as_bytes());
+
+    let output = nsd_in(
+        &root,
+        &["check", "--staged", "--config", "sub/../../trusted.yml"],
+    );
+
+    assert_eq!(exit_code(&output), Some(EXIT_PASS));
+    assert!(stdout(&output).contains(E101), "{}", stdout(&output));
+}
