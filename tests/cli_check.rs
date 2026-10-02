@@ -551,3 +551,65 @@ fn test_check_config_dotdot_path_leaving_the_checkout_is_used() {
     assert_eq!(exit_code(&output), Some(EXIT_PASS));
     assert!(stdout(&output).contains(E101), "{}", stdout(&output));
 }
+
+#[test]
+fn test_check_config_outside_symlink_then_dotdot_resolving_inside_is_refused() {
+    let fx = Fixture::staged_regression();
+    write_config(fx.root(), "trusted.yml", WARN_E101);
+    fs::create_dir_all(fx.root().join("sub")).expect("create a directory in the checkout");
+    let outside = TempDir::new().expect("create a directory outside the checkout");
+    let link = outside.path().join("l");
+    symlink(fx.root().join("sub"), &link).expect("link an outside path to a checkout directory");
+    let given = link.join("..").join("trusted.yml");
+
+    let output = fx.nsd(&["check", "--staged", "--config", path_str(&given)]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_ERROR));
+    let listing = stdout(&output);
+    assert!(listing.contains(C102), "{listing}");
+    assert!(!listing.contains(E101), "{listing}");
+}
+
+#[test]
+fn test_check_missing_config_outside_symlink_then_dotdot_inside_is_refused() {
+    let fx = Fixture::staged_regression();
+    fs::create_dir_all(fx.root().join("sub")).expect("create a directory in the checkout");
+    let outside = TempDir::new().expect("create a directory outside the checkout");
+    let link = outside.path().join("l");
+    symlink(fx.root().join("sub"), &link).expect("link an outside path to a checkout directory");
+    let given = link.join("..").join("absent.yml");
+
+    let output = fx.nsd(&["check", "--staged", "--config", path_str(&given)]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_ERROR));
+    let listing = stdout(&output);
+    assert!(listing.contains(C102), "{listing}");
+    assert!(
+        listing.contains("inside the candidate checkout"),
+        "{listing}"
+    );
+}
+
+#[test]
+fn test_check_config_symlink_reached_through_symlink_dotdot_is_refused() {
+    let parent = TempDir::new().expect("create a parent directory");
+    let root = parent.path().join("repo");
+    fs::create_dir_all(root.join("sub")).expect("create the checkout directory");
+    let repo = Repository::init(&root).expect("init the repository");
+    let fx = Fixture { dir: parent, repo };
+    let target = write_config(&root, "trusted.yml", WARN_E101);
+    fx.commit(&[("Foo.java", java_class("Foo", LOW_CC_IFS).as_bytes())]);
+    fx.stage("Foo.java", java_class("Foo", HIGH_CC_IFS).as_bytes());
+    symlink(&target, fx.dir.path().join("ln")).expect("link a path beside the checkout into it");
+    let outside = TempDir::new().expect("create a directory outside the checkout");
+    let link = outside.path().join("l");
+    symlink(root.join("sub"), &link).expect("link an outside path to a checkout directory");
+    let given = link.join("..").join("..").join("ln");
+
+    let output = nsd_in(&root, &["check", "--staged", "--config", path_str(&given)]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_ERROR));
+    let listing = stdout(&output);
+    assert!(listing.contains(C102), "{listing}");
+    assert!(!listing.contains(E101), "{listing}");
+}

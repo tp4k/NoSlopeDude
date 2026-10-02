@@ -102,8 +102,9 @@ fn refused_config(config: &Path) -> (Vec<CheckDiagnostic>, u8) {
 
 /// Whether `config` lies under the work tree of the repository at
 /// `repository` (`.git/` included), either as given with its directory
-/// resolved, or with its own symlinks resolved too. A directory that is not
-/// a work tree has no inside; `run_check` reports it as G101.
+/// resolved, with its own symlinks resolved too, or resolved on disk from the
+/// raw path (so `..` after a symlink is followed as the OS does). A directory
+/// that is not a work tree has no inside; `run_check` reports it as G101.
 fn config_is_inside_checkout(repository: &Path, config: &Path) -> anyhow::Result<bool> {
     let Some(workdir) = Repository::open(repository)
         .ok()
@@ -116,6 +117,15 @@ fn config_is_inside_checkout(repository: &Path, config: &Path) -> anyhow::Result
     let mut forms = vec![canonical_even_if_missing(&absolute)?];
     if let (Some(parent), Some(name)) = (absolute.parent(), absolute.file_name()) {
         forms.push(canonical_even_if_missing(parent)?.join(name));
+    }
+    let raw = repository.join(config);
+    if let Ok(resolved) = std::fs::canonicalize(&raw) {
+        forms.push(resolved);
+    }
+    if let (Some(parent), Some(name)) = (raw.parent(), raw.file_name()) {
+        if let Ok(resolved) = std::fs::canonicalize(parent) {
+            forms.push(resolved.join(name));
+        }
     }
     Ok(forms.iter().any(|form| form.starts_with(&root)))
 }
