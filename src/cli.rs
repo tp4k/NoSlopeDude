@@ -33,7 +33,7 @@ pub struct CheckArgs {
     pub base: Option<String>,
 
     /// Check the working tree instead of `HEAD` (requires --base).
-    #[arg(long, requires = "base")]
+    #[arg(long, conflicts_with = "staged")]
     pub worktree: bool,
 
     /// Trusted configuration file outside the checkout, replacing nsd.yml.
