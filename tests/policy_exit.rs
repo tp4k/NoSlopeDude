@@ -103,6 +103,8 @@ fn test_allow_new_suppressions_neutralises_only_s101() {
     assert_eq!(exit_status([S101, E102], &policy, true), 1);
     assert_eq!(exit_status([S101, A102], &policy, true), 2);
     assert_eq!(exit_status([S101, E101, A102], &policy, true), 3);
+    assert_eq!(exit_status([S101, V101], &policy, true), 1);
+    assert_eq!(exit_status([V101], &policy, true), 1);
 }
 
 #[test]
