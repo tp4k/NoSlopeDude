@@ -19,7 +19,7 @@ use nsd::identity::matching::{match_callables, FileCallables};
 use nsd::policy::diagnostics::{
     CODE_INVALID_SUPPRESSION, CODE_NEW_SUPPRESSION, CODE_UNMATCHED_FINDING,
 };
-use nsd::policy::findings::{match_findings, FindingFile};
+use nsd::policy::findings::{match_findings, FindingFile, FindingMatchOutput};
 use nsd::rules;
 use nsd::suppress::{apply_suppressions, scan_suppressions, SuppressionOutput};
 
@@ -160,6 +160,18 @@ fn evaluate_with(
     candidate: Oid,
     policy: &PolicyConfig,
 ) -> SuppressionOutput {
+    evaluate_forging(repo, base, candidate, policy, |_| {})
+}
+
+/// Like `evaluate_with`, but lets the caller rewrite the matched findings
+/// before suppressions are applied.
+fn evaluate_forging(
+    repo: &Repository,
+    base: Oid,
+    candidate: Oid,
+    policy: &PolicyConfig,
+    forge: impl FnOnce(&mut FindingMatchOutput),
+) -> SuppressionOutput {
     let changes = diff_commit_to_commit(repo, Some(base), candidate).expect("diff commits");
     let (base_paths, candidate_paths) = changed_paths(&changes);
     let base_snapshot = CommitSnapshot::at(repo, base).expect("base snapshot");
@@ -173,7 +185,7 @@ fn evaluate_with(
     );
     let base_findings = finding_files(&base_files);
     let candidate_findings = finding_files(&candidate_files);
-    let findings = match_findings(
+    let mut findings = match_findings(
         &base_findings,
         &candidate_findings,
         &matched,
@@ -181,6 +193,7 @@ fn evaluate_with(
         policy,
     )
     .expect("match findings");
+    forge(&mut findings);
     apply_suppressions(
         &base_findings,
         &candidate_findings,
@@ -321,6 +334,48 @@ fn test_transferring_a_directive_to_an_unmatched_finding_raises_s101() {
         )]
     );
     assert!(output.findings.is_empty());
+}
+
+/// Ledger row 123: a base pair index past the base file's findings must
+/// fail closed (S101), not panic and not inherit the base suppression.
+#[test]
+fn test_out_of_range_base_pair_index_inherits_no_suppression() {
+    let (_dir, repo) = common::init_repo();
+    let text = run_with(&[DIRECTIVE, CATCH]);
+    let base = commit(&repo, &text);
+    let candidate = commit(&repo, &format!("{text}\n"));
+
+    let honest = evaluate(&repo, base, candidate);
+    assert_eq!(
+        sites(&honest),
+        vec![],
+        "the unforged pair inherits the suppression"
+    );
+
+    let output = evaluate_forging(
+        &repo,
+        base,
+        candidate,
+        &Config::default().policy,
+        |matched| {
+            assert!(
+                !matched.pairs.is_empty(),
+                "the fixture must pair the finding"
+            );
+            for pair in &mut matched.pairs {
+                pair.base.index = usize::MAX;
+            }
+        },
+    );
+
+    assert_eq!(
+        sites(&output),
+        vec![(
+            CODE_NEW_SUPPRESSION,
+            Some(rules::JAVA_EMPTY_CATCH),
+            line_of(&text, DIRECTIVE)
+        )]
+    );
 }
 
 #[test]

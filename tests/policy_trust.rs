@@ -712,6 +712,44 @@ fn test_trusted_mode_unchanged_symlink_base_reports_nothing() {
     );
 }
 
+/// Ledger row 62: the worktree candidate's early return must also see an
+/// unchanged symlink `nsd.yml` (a worktree entry carries no oid, so the
+/// commit/index comparison alone never matches it).
+#[test]
+fn test_trusted_mode_unchanged_symlink_base_with_worktree_candidate_reports_nothing() {
+    let (dir, repo) = common::init_repo();
+    let target = b"version: 1\n";
+    let commit_oid = common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_SYMLINK, target.to_vec())],
+    );
+    sync_index_to_commit(&repo, commit_oid);
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+    std::os::unix::fs::symlink(
+        std::str::from_utf8(target).expect("utf-8 target"),
+        dir.path().join("nsd.yml"),
+    )
+    .expect("create the worktree symlink");
+    let worktree_snapshot = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+
+    let trusted_dir = tempfile::TempDir::new().expect("create a temp dir for the trusted config");
+    let trusted_path = trusted_dir.path().join("trusted.yml");
+    std::fs::write(&trusted_path, b"version: 1\n").expect("write trusted config");
+
+    let resolution = policy::resolve(
+        &repo,
+        Some(trusted_path.as_path()),
+        &base,
+        Candidate::Worktree(&worktree_snapshot),
+    )
+    .expect("a trusted config resolves even when the base is a symlink");
+
+    assert!(
+        resolution.diagnostics.is_empty(),
+        "an unchanged symlink nsd.yml in the worktree must not report a change"
+    );
+}
+
 /// triage-ws1-r2.md row 2: the candidate-side half of the kind gate. A
 /// regular base whose bytes are unreadable (over-ceiling), compared
 /// against a candidate whose `nsd.yml` is a symlink with byte-identical
