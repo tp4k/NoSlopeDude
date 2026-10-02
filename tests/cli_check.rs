@@ -569,3 +569,38 @@ fn test_check_config_outside_symlink_then_dotdot_resolving_inside_is_refused() {
     assert!(listing.contains(C102), "{listing}");
     assert!(!listing.contains(E101), "{listing}");
 }
+
+#[test]
+fn test_check_missing_config_outside_symlink_then_dotdot_inside_is_refused() {
+    let fx = Fixture::staged_regression();
+    fs::create_dir_all(fx.root().join("sub")).expect("create a directory in the checkout");
+    let outside = TempDir::new().expect("create a directory outside the checkout");
+    let link = outside.path().join("l");
+    symlink(fx.root().join("sub"), &link).expect("link an outside path to a checkout directory");
+    let given = link.join("..").join("absent.yml");
+
+    let output = fx.nsd(&["check", "--staged", "--config", path_str(&given)]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_ERROR));
+    assert!(stdout(&output).contains(C102), "{}", stdout(&output));
+}
+
+#[test]
+fn test_check_config_symlink_reached_through_symlink_dotdot_is_refused() {
+    let fx = Fixture::staged_regression();
+    let target = write_config(fx.root(), "trusted.yml", WARN_E101);
+    fs::create_dir_all(fx.root().join("sub")).expect("create a directory in the checkout");
+    let beside = fx.root().parent().expect("the checkout has a parent");
+    symlink(&target, beside.join("ln")).expect("link a path beside the checkout into it");
+    let outside = TempDir::new().expect("create a directory outside the checkout");
+    let link = outside.path().join("l");
+    symlink(fx.root().join("sub"), &link).expect("link an outside path to a checkout directory");
+    let given = link.join("..").join("..").join("ln");
+
+    let output = fx.nsd(&["check", "--staged", "--config", path_str(&given)]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_ERROR));
+    let listing = stdout(&output);
+    assert!(listing.contains(C102), "{listing}");
+    assert!(!listing.contains(E101), "{listing}");
+}
