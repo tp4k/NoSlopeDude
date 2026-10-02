@@ -334,4 +334,23 @@ mod tests {
         };
         assert!(!is_still_measured((None, None), &candidates));
     }
+
+    #[test]
+    fn contain_index_counts_a_range_sharing_the_widest_end() {
+        let index = ContainIndex::new(&[(5, 9), (1, 3)]);
+        assert!(index.contains((5, 9)));
+        assert!(index.contains((6, 9)));
+        assert!(!index.contains((6, 10)));
+        assert!(!index.contains((4, 4)));
+    }
+
+    #[test]
+    fn overlap_index_keeps_a_nested_range_inside_its_run() {
+        let mut index = OverlapIndex::default();
+        index.insert((1, 10));
+        index.insert((2, 3));
+        assert!(index.overlaps((5, 6)));
+        assert!(index.overlaps((10, 12)));
+        assert!(!index.overlaps((11, 12)));
+    }
 }

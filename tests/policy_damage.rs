@@ -123,6 +123,35 @@ fn finding_files(files: &[Analyzed]) -> Vec<FindingFile<'_>> {
 
 type Site = (String, usize, usize);
 
+#[test]
+fn test_block_overlapping_a_raised_callable_is_not_raised_again() {
+    let base_text = "if (flag) {\n  const c = <div>a & b</div>;\n  function f() {\n    return <i>a & b</i>;\n  }\n  g();\n}\n";
+    let edited = "if (flag) {\n  const c = <div>a & b</div>;\n  function f() {\n    h();\n    return <i>a & b</i>;\n  }\n  g();\n}\n";
+    let (_dir, repo) = common::init_repo();
+    let base = commit(&repo, &[("w.tsx", base_text.to_string())]);
+    let candidate = commit(&repo, &[("w.tsx", edited.to_string())]);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    assert_eq!(evaluation.sites, vec![site("w.tsx", 3, 6)]);
+}
+
+#[test]
+fn test_nested_excluded_callables_are_each_raised() {
+    let base_text = "function outer() {\n  const c = <div>a & b</div>;\n  function inner() {\n    return <i>a & b</i>;\n  }\n  return 1;\n}\n";
+    let edited = "function outer() {\n  const c = <div>a & b</div>;\n  function inner() {\n    h();\n    return <i>a & b</i>;\n  }\n  return 1;\n}\n";
+    let (_dir, repo) = common::init_repo();
+    let base = commit(&repo, &[("w.tsx", base_text.to_string())]);
+    let candidate = commit(&repo, &[("w.tsx", edited.to_string())]);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    assert_eq!(
+        evaluation.sites,
+        vec![site("w.tsx", 1, 8), site("w.tsx", 3, 6)]
+    );
+}
+
 /// `evaluate_damage` alone over an added file of `count` broken methods;
 /// returns the minimum of three timings and the A101 count.
 fn added_damaged_methods_run(count: usize) -> (std::time::Duration, usize) {
