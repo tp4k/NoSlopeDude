@@ -48,7 +48,7 @@ Compares a candidate change with its base under the base's own policy and prints
 - `--staged` checks the Git index against `HEAD`; it never reads worktree source.
 - `--base <ref>` checks `HEAD` against `merge-base(HEAD, <ref>)`; with `--worktree` the candidate is the working tree instead of `HEAD`.
 - `--staged` and `--base` are mutually exclusive, one is required, and `--worktree` requires `--base`. A usage error exits `2` and prints nothing to stdout.
-- `--config <path>` replaces the repository policy with a trusted file. A path that resolves inside the checkout (as given, with its directory resolved, or with symlinks resolved; `.git/` included) is refused with `NSD-C102` and exit `2`, and is never read. Use a file outside the checkout.
+- `--config <path>` replaces the repository policy with a trusted file. A path that resolves inside the checkout (as given, with its directory resolved, with symlinks resolved, or the way the OS opens it, so `..` after a symlink counts; `.git/` included) is refused with `NSD-C102` and exit `2`, and is never read. Use a file outside the checkout.
 
 Each line is `<code> <repo-relative path>:<start>-<end> <detail>`. Non-UTF-8 path bytes print as `%XX`, and control characters in any text print as `\u{..}`.
 
