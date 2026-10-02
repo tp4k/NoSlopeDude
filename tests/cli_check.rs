@@ -551,3 +551,21 @@ fn test_check_config_dotdot_path_leaving_the_checkout_is_used() {
     assert_eq!(exit_code(&output), Some(EXIT_PASS));
     assert!(stdout(&output).contains(E101), "{}", stdout(&output));
 }
+
+#[test]
+fn test_check_config_outside_symlink_then_dotdot_resolving_inside_is_refused() {
+    let fx = Fixture::staged_regression();
+    write_config(fx.root(), "trusted.yml", WARN_E101);
+    fs::create_dir_all(fx.root().join("sub")).expect("create a directory in the checkout");
+    let outside = TempDir::new().expect("create a directory outside the checkout");
+    let link = outside.path().join("l");
+    symlink(fx.root().join("sub"), &link).expect("link an outside path to a checkout directory");
+    let given = link.join("..").join("trusted.yml");
+
+    let output = fx.nsd(&["check", "--staged", "--config", path_str(&given)]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_ERROR));
+    let listing = stdout(&output);
+    assert!(listing.contains(C102), "{listing}");
+    assert!(!listing.contains(E101), "{listing}");
+}
