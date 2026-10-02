@@ -182,14 +182,24 @@ only names the terms.
 - A *move*: with no such B, it pairs with a deleted base occurrence whose
   whole-token sequence is a contiguous run of its own (tokens are compared
   one by one, never through the joined digest string) and which is at most
-  that same threshold shorter. Pairs are taken in source order, largest
-  deleted occurrence first. A move maps each base token of the deleted
-  occurrence onto one candidate token. Each base token is credited to the
-  one candidate token it was moved onto: pairs that put a shared base token
-  on the same candidate token agree and share its credit (a prefix, a suffix
-  or a nested block of the same move), and a token credited to another
-  candidate token is spent, so a distinct copy never reuses it. A move never
-  fires.
+  that same threshold shorter. Added occurrences are paired longest token
+  window first (ties in source order, the longer first at an equal start),
+  so an occurrence that encloses another commits its credit before the one
+  inside it. Among the eligible deleted occurrences an added occurrence takes
+  the one with the most base tokens already credited onto exactly its own
+  candidate tokens, then the largest, then the earliest. A move maps each
+  base token of the deleted occurrence onto one candidate token. Each base
+  token is credited to the one candidate token it was moved onto: pairs that
+  put a shared base token on the same candidate token agree and share its
+  credit (a prefix, a suffix or a nested block of the same move), and a token
+  credited to another candidate token is spent, so a distinct copy never
+  reuses it. A move never fires. One exception is accepted: a pairing is
+  never revisited, and an added occurrence with more than one eligible
+  deleted occurrence chooses by the rank above without looking ahead at later
+  added occurrences that share no candidate token with it, so a later
+  unchanged move whose only eligible deleted occurrences were taken that way
+  can still raise V102. An exact assignment would be a backtracking search on
+  a hot path fed by PR-authored blobs.
 - A *new occurrence* is an unpaired one. It fires with `base_lines: None`,
   and `matched_*` names the first other group member in path order.
 - Accepted limitation (user decision 2026-10-01): lines are D11
