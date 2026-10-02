@@ -2518,3 +2518,40 @@ fn test_partially_overlapping_occurrences_of_one_move_share_its_deleted_run() {
         ]
     );
 }
+
+const SHORT_HEAD_LAST: usize = BLOCK_LINES + BLOCK_LINES / 2 - 1;
+
+#[test]
+fn test_an_occurrence_credited_only_at_its_tail_still_prefers_the_credited_run() {
+    let whole = statements("s", OVERLAP_WHOLE_STATEMENTS);
+    let head = statement_range("s", 0, SHORT_HEAD_LAST);
+    let tail = statement_range("s", OVERLAP_TAIL_FIRST, OVERLAP_WHOLE_STATEMENTS - 1);
+    let (_dir, repo) = common::init_repo();
+    let base = commit(
+        &repo,
+        &[
+            ("Q.java", java("Q", &head)),
+            ("S.java", java("S", &whole)),
+            ("T.java", java("T", &tail)),
+            ("X1.java", java("X1", &head)),
+            ("X2.java", java("X2", &tail)),
+        ],
+    );
+    let moved = commit(
+        &repo,
+        &[
+            ("Q.java", java("Q", "")),
+            ("S.java", java("S", "")),
+            ("T.java", java("T", "")),
+            ("X1.java", java("X1", &head)),
+            ("X2.java", java("X2", &tail)),
+            ("N.java", java("N", &whole)),
+            ("Y.java", java("Y", &head)),
+            ("Z.java", java("Z", &tail)),
+        ],
+    );
+
+    let found = evaluate(&repo, base, moved);
+
+    assert!(found.is_empty(), "three unchanged moves: {found:?}");
+}
