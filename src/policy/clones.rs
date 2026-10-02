@@ -10,7 +10,7 @@
 use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
 use rayon::prelude::*;
@@ -299,6 +299,8 @@ struct MovePool<'a> {
     /// Each credited base token with the one candidate token it was moved
     /// onto.
     consumed: HashMap<LeafId, LeafId>,
+    /// The candidate tokens that are values of `consumed`.
+    credited: HashSet<LeafId>,
 }
 
 impl<'a> MovePool<'a> {
@@ -353,6 +355,7 @@ impl<'a> MovePool<'a> {
             lengths,
             base_tokens,
             consumed: HashMap::new(),
+            credited: HashSet::new(),
         }
     }
 
@@ -371,6 +374,9 @@ impl<'a> MovePool<'a> {
         run: &Candidate,
     ) -> bool {
         let (from, to) = tokens.run_range(run);
+        let window_credited = tokens.leaves[from..to]
+            .iter()
+            .any(|leaf| self.credited.contains(leaf));
         let mut best: Option<(usize, usize, usize)> = None;
         for &length in &self.lengths {
             if length > to - from {
@@ -388,8 +394,10 @@ impl<'a> MovePool<'a> {
                     }
                     let can_beat_best = best.is_none_or(|(current, _, shared)| {
                         let current_lines = self.entries[current].1.source_lines;
-                        shared < length
-                            || (shared == length
+                        // No credited token in the window: every `shared` is 0.
+                        let bound = if window_credited { length } else { 0 };
+                        shared < bound
+                            || (shared == bound
                                 && (Reverse(base_run.source_lines), slot)
                                     < (Reverse(current_lines), current))
                     });
@@ -437,10 +445,10 @@ impl<'a> MovePool<'a> {
         let (base, base_run, (base_from, base_to)) = self.entries[slot];
         if let Some(base_tokens) = self.base_tokens.get(&(base, base_run.container)) {
             for offset in 0..base_to - base_from {
-                self.consumed.insert(
-                    base_tokens.leaves[base_from + offset],
-                    tokens.leaves[start + offset],
-                );
+                let leaf = tokens.leaves[start + offset];
+                self.consumed
+                    .insert(base_tokens.leaves[base_from + offset], leaf);
+                self.credited.insert(leaf);
             }
         }
         true
