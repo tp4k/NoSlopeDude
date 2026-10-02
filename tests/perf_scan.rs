@@ -489,5 +489,24 @@ fn test_date_cell_fails_when_date_fails() -> anyhow::Result<()> {
         "expected no cell on failure, got {:?}",
         String::from_utf8_lossy(&output.stdout)
     );
+
+    // Mirrors main's `date_cell_value="$(date_cell)"`: errexit does not
+    // apply inside the command substitution, so only date_cell's own
+    // `|| return 1` makes the assignment fail.
+    let output = run_sourced(&format!(
+        "REPO_ROOT='{}'; PATH='{}':\"$PATH\"; v=\"$(date_cell)\"; echo reached",
+        repo.display(),
+        shim.display()
+    ))?;
+    assert!(
+        !output.status.success(),
+        "expected the command-substitution call to fail, got success with stdout {:?}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        !String::from_utf8_lossy(&output.stdout).contains("reached"),
+        "script continued past a failed date_cell, stdout {:?}",
+        String::from_utf8_lossy(&output.stdout)
+    );
     Ok(())
 }
