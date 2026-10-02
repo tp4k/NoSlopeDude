@@ -10,7 +10,9 @@ use nsd::target::classify;
 #[test]
 fn test_min_clone_lines_defaults_to_10() -> anyhow::Result<()> {
     let cli = Cli::try_parse_from(["nsd", "scan", "some/path", "--output", "out"])?;
-    let CliCommand::Scan(args) = cli.command;
+    let CliCommand::Scan(args) = cli.command else {
+        anyhow::bail!("expected the scan subcommand");
+    };
     assert_eq!(args.min_clone_lines, 10);
     Ok(())
 }
