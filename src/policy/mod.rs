@@ -118,8 +118,9 @@ fn fetch_candidate_bytes(
 /// In `BaseIdentity::Oid` mode (A4), "changed" is decided from object ids
 /// rather than bytes: a commit/index candidate's blob oid is already known
 /// from its own snapshot entry (`Entry.oid`, D2), so an unchanged one is
-/// never even read; a worktree entry carries no oid, so that case reads
-/// the candidate once and hashes those same bytes with `Oid::hash_object`
+/// never even read; a worktree entry carries no oid, so a symlink is
+/// hashed from its target bytes via `worktree_symlink_oid`, and any other
+/// entry is read once and those same bytes hashed with `Oid::hash_object`
 /// (no ODB write, and no second, raw-fd read the way
 /// `git::diff::worktree_blob_oid`'s over-ceiling fallback does).
 fn diagnostics_for_candidate(
