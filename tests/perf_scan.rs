@@ -396,3 +396,98 @@ fn test_date_cell_fails_when_git_status_fails() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+#[cfg(unix)]
+#[test]
+fn test_incomplete_survives_a_skipped_path_named_incomplete() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let report = dir.path().join("report.json");
+    // The skipped entry's path value is the string "incomplete" and is
+    // listed before the top-level key: an unanchored first-match grep reads
+    // that entry's line, which carries no boolean.
+    std::fs::write(
+        &report,
+        r#"{
+  "overall": { "scanned_lines": 42 },
+  "skipped_files": [
+    {
+      "relative_path": "incomplete",
+      "reason": "parse_SyntaxError",
+      "detail": null
+    }
+  ],
+  "incomplete": true
+}
+"#,
+    )?;
+
+    let output = run_sourced(&format!("extract_incomplete '{}'", report.display()))?;
+
+    assert!(
+        output.status.success(),
+        "extract_incomplete failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "true");
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_date_cell_fails_when_date_fails() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let repo = dir.path().join("repo");
+    let shim = dir.path().join("shim");
+    std::fs::create_dir_all(&repo)?;
+    std::fs::create_dir_all(&shim)?;
+    let run_git = |args: &[&str]| -> anyhow::Result<()> {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(args)
+            .output()?;
+        anyhow::ensure!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(())
+    };
+    run_git(&["init"])?;
+    run_git(&[
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "x",
+    ])?;
+    let date_shim = shim.join("date");
+    std::fs::write(&date_shim, "#!/bin/sh\nexit 1\n")?;
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&date_shim, std::fs::Permissions::from_mode(0o755))?;
+    }
+
+    // The sha annotation succeeds (real git), so only `date -u` can fail.
+    let output = run_sourced(&format!(
+        "REPO_ROOT='{}'; PATH='{}':\"$PATH\"; date_cell",
+        repo.display(),
+        shim.display()
+    ))?;
+    assert!(
+        !output.status.success(),
+        "expected date_cell to fail when date fails, got success with stdout {:?}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "expected no cell on failure, got {:?}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    Ok(())
+}

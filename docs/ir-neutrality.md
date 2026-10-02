@@ -630,10 +630,18 @@ bash scripts/neutrality_gate.sh --capture
 
 re-captures `tests/golden/neutrality/clean.report.json` and
 `malformed.report.json` from the current `HEAD`, by running
-`cargo test --test neutrality` with `NSD_NEUTRALITY_CAPTURE=1` set — the
-same raw-text capture path the Rust harness's two corpus tests use, so the
-committed baseline is guaranteed byte-identical to what the compare mode
-would later read. It does not touch the pre-IR worktree at all.
+`cargo test --test neutrality` with `NSD_NEUTRALITY_CAPTURE_CLEAN=1` and
+`NSD_NEUTRALITY_CAPTURE_MALFORMED=1` set — the same raw-text capture path
+the Rust harness's two corpus tests use, so the committed baseline is
+guaranteed byte-identical to what the compare mode would later read. It
+does not touch the pre-IR worktree at all.
+
+Each corpus test is gated by its own variable, so recapturing one corpus
+directly (`NSD_NEUTRALITY_CAPTURE_CLEAN=1 cargo test --test neutrality`)
+never rewrites the other's baseline. The older shared
+`NSD_NEUTRALITY_CAPTURE` no longer selects anything; earlier sections of
+this document that name it describe how those captures were run at the
+time.
 
 ## What this gate is not
 
