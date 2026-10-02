@@ -427,6 +427,26 @@ fn test_callable_sharing_a_line_with_legacy_damage_is_not_swallowed_by_a_shift()
     assert!(evaluation.sites.is_empty(), "{:?}", evaluation.sites);
 }
 
+/// Ledger row 105: the extra `(1,1)` line-granularity site. Legacy `c`
+/// shares line 1 with `d`'s header; when `d` becomes damaged at line 3,
+/// line-granular tolerance also names the unchanged `c` on line 1, next to
+/// the real `(3,3)` damage site.
+#[test]
+fn test_line_sharing_legacy_callable_is_named_when_its_neighbour_becomes_damaged() {
+    let base_text = "export const c = () => <div>a & b</div>; export function d(x: number) {\n  if (x) { return 1; }\n  return 2;\n}\nexport function ok() {\n  return 1;\n}\n";
+    let damaged = base_text.replace("  return 2;\n}\n", "  return 2 +; }\n");
+    let (_dir, repo) = common::init_repo();
+    let base = commit(&repo, &[("w.tsx", base_text.to_string())]);
+    let candidate = commit(&repo, &[("w.tsx", damaged)]);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    assert_eq!(
+        evaluation.sites,
+        vec![site("w.tsx", 1, 1), site("w.tsx", 3, 3)]
+    );
+}
+
 #[test]
 fn test_deleted_line_inside_a_legacy_damaged_callable_raises_a101() {
     let (_dir, repo) = common::init_repo();

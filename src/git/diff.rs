@@ -551,7 +551,7 @@ pub(super) fn worktree_blob_oid(
 /// A worktree symlink entry's real object id (A8): hashes its on-disk
 /// target bytes as a blob, with no ODB write (D2) — the shared body behind
 /// both `diff_commit_to_worktree`'s Phase 1 and `SnapshotId::of_worktree`.
-pub(super) fn worktree_symlink_oid(
+pub(crate) fn worktree_symlink_oid(
     repo: &Repository,
     worktree: &WorktreeSnapshot,
     entry: &Entry,
