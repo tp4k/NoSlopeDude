@@ -342,6 +342,7 @@ mod tests {
         assert!(index.contains((6, 9)));
         assert!(!index.contains((6, 10)));
         assert!(!index.contains((4, 4)));
+        assert!(ContainIndex::new(&[(1, 10), (2, 3)]).contains((5, 6)));
     }
 
     #[test]
