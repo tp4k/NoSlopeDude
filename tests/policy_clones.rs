@@ -2289,3 +2289,232 @@ fn test_unmapped_tail_of_an_enclosing_method_still_raises_on_the_extension() {
         );
     }
 }
+
+// ---------------------------------------------------------------------
+// Move credit across overlapping occurrences.
+// ---------------------------------------------------------------------
+
+const OVERLAP_WHOLE_STATEMENTS: usize = 3 * BLOCK_LINES;
+const OVERLAP_HEAD_LAST: usize = 2 * BLOCK_LINES - 1;
+const OVERLAP_TAIL_FIRST: usize = BLOCK_LINES;
+const OVERLAP_SECOND_START: usize = FIRST_BODY_LINE + BLOCK_LINES;
+
+#[test]
+fn test_two_distinct_moves_with_shared_prefix_pass() {
+    let (_dir, repo) = common::init_repo();
+    let prefix = statements("s", 12);
+    let a = format!("{prefix}{}", statements("a", 12));
+    let b = format!("{prefix}{}", statements("b", 12));
+    let base = commit(
+        &repo,
+        &[
+            ("S.java", java("S", &a)),
+            ("T.java", java("T", &b)),
+            ("U.java", java("U", &a)),
+            ("V.java", java("V", &b)),
+            ("X.java", java("X", &prefix)),
+        ],
+    );
+    let candidate = commit(
+        &repo,
+        &[
+            ("S.java", java("S", "")),
+            ("T.java", java("T", "")),
+            ("U.java", java("U", &a)),
+            ("V.java", java("V", &b)),
+            ("X.java", java("X", &prefix)),
+            ("M.java", java("M", &b)),
+            ("N.java", java("N", &a)),
+        ],
+    );
+    let found = evaluate(&repo, base, candidate);
+    assert!(found.is_empty(), "two unchanged moves: {found:?}");
+}
+
+/// Base: `S`/`U` hold P+A, `T`/`V` hold P+B, `X` holds P.
+fn two_prefix_blocks_base(repo: &Repository) -> (Oid, String, String, String) {
+    let prefix = statements("s", BLOCK_LINES);
+    let a = format!("{prefix}{}", statements("a", BLOCK_LINES));
+    let b = format!("{prefix}{}", statements("b", BLOCK_LINES));
+    let base = commit(
+        repo,
+        &[
+            ("S.java", java("S", &a)),
+            ("T.java", java("T", &b)),
+            ("U.java", java("U", &a)),
+            ("V.java", java("V", &b)),
+            ("X.java", java("X", &prefix)),
+        ],
+    );
+    (base, prefix, a, b)
+}
+
+fn two_prefix_blocks_candidate(
+    repo: &Repository,
+    sources: [&str; 2],
+    kept: [&str; 3],
+    added: [&str; 2],
+) -> Oid {
+    let [a, b] = added;
+    commit(
+        repo,
+        &[
+            ("S.java", java("S", sources[0])),
+            ("T.java", java("T", sources[1])),
+            ("U.java", java("U", kept[0])),
+            ("V.java", java("V", kept[1])),
+            ("X.java", java("X", kept[2])),
+            ("M.java", java("M", b)),
+            ("N.java", java("N", a)),
+        ],
+    )
+}
+
+#[test]
+fn test_two_distinct_copies_with_shared_prefix_raise_on_every_occurrence() {
+    let (_dir, repo) = common::init_repo();
+    let (base, prefix, a, b) = two_prefix_blocks_base(&repo);
+    let candidate = two_prefix_blocks_candidate(&repo, [&a, &b], [&a, &b, &prefix], [&a, &b]);
+
+    let found = evaluate(&repo, base, candidate);
+
+    assert_eq!(
+        sites(&found),
+        vec![
+            body_site("M.java", BLOCK_LINES),
+            body_site("M.java", LONG_BLOCK_LINES),
+            body_site("N.java", BLOCK_LINES),
+            body_site("N.java", LONG_BLOCK_LINES),
+        ]
+    );
+    assert!(found.iter().all(|d| d.base_lines.is_none()), "{found:?}");
+}
+
+#[test]
+fn test_an_occurrence_inside_a_move_prefers_the_deleted_run_the_move_already_credited() {
+    let prefix = statements("s", BLOCK_LINES);
+    let long = format!("{prefix}{}", statements("a", BLOCK_LINES));
+    let (_dir, repo) = common::init_repo();
+    let base = commit(
+        &repo,
+        &[
+            ("R.java", java("R", &prefix)),
+            ("S.java", java("S", &long)),
+            ("U.java", java("U", &long)),
+        ],
+    );
+    let moved = commit(
+        &repo,
+        &[
+            ("R.java", java("R", "")),
+            ("S.java", java("S", "")),
+            ("U.java", java("U", &long)),
+            ("N.java", java("N", &long)),
+            ("Z.java", java("Z", &prefix)),
+        ],
+    );
+    let copied = commit(
+        &repo,
+        &[
+            ("R.java", java("R", &prefix)),
+            ("S.java", java("S", &long)),
+            ("U.java", java("U", &long)),
+            ("N.java", java("N", &long)),
+            ("Z.java", java("Z", &prefix)),
+        ],
+    );
+
+    let found = evaluate(&repo, base, moved);
+    assert!(found.is_empty(), "two unchanged moves: {found:?}");
+
+    let found = evaluate(&repo, base, copied);
+    assert_eq!(
+        sites(&found),
+        vec![
+            body_site("N.java", BLOCK_LINES),
+            body_site("N.java", LONG_BLOCK_LINES),
+            body_site("Z.java", BLOCK_LINES),
+        ]
+    );
+}
+
+#[test]
+fn test_move_credit_does_not_reach_a_copy_sharing_a_prefix_with_a_move() {
+    let (_dir, repo) = common::init_repo();
+    let (base, prefix, a, b) = two_prefix_blocks_base(&repo);
+    let candidate = two_prefix_blocks_candidate(&repo, ["", &b], [&a, &b, &prefix], [&a, &b]);
+
+    let found = evaluate(&repo, base, candidate);
+
+    assert_eq!(
+        sites(&found),
+        vec![
+            body_site("M.java", BLOCK_LINES),
+            body_site("M.java", LONG_BLOCK_LINES),
+        ]
+    );
+    assert!(found.iter().all(|d| d.base_lines.is_none()), "{found:?}");
+}
+
+#[test]
+fn test_partially_overlapping_occurrences_of_one_move_share_its_deleted_run() {
+    let whole = statements("s", OVERLAP_WHOLE_STATEMENTS);
+    let head = statement_range("s", 0, OVERLAP_HEAD_LAST);
+    let tail = statement_range("s", OVERLAP_TAIL_FIRST, OVERLAP_WHOLE_STATEMENTS - 1);
+    let (_dir, repo) = common::init_repo();
+    let base = commit(
+        &repo,
+        &[
+            ("R.java", java("R", &tail)),
+            ("S.java", java("S", &whole)),
+            ("X1.java", java("X1", &head)),
+            ("X2.java", java("X2", &tail)),
+        ],
+    );
+    let moved = commit(
+        &repo,
+        &[
+            ("R.java", java("R", "")),
+            ("S.java", java("S", "")),
+            ("X1.java", java("X1", &head)),
+            ("X2.java", java("X2", &tail)),
+            ("N.java", java("N", &whole)),
+            ("Z.java", java("Z", &tail)),
+        ],
+    );
+    let copied = commit(
+        &repo,
+        &[
+            ("R.java", java("R", &tail)),
+            ("S.java", java("S", &whole)),
+            ("X1.java", java("X1", &head)),
+            ("X2.java", java("X2", &tail)),
+            ("N.java", java("N", &whole)),
+            ("Z.java", java("Z", &tail)),
+        ],
+    );
+
+    let found = evaluate(&repo, base, moved);
+    assert!(found.is_empty(), "two unchanged moves: {found:?}");
+
+    let found = evaluate(&repo, base, copied);
+    assert_eq!(
+        sites(&found),
+        vec![
+            body_site("N.java", 2 * BLOCK_LINES),
+            body_site("N.java", OVERLAP_WHOLE_STATEMENTS),
+            site(
+                "N.java",
+                OVERLAP_SECOND_START,
+                OVERLAP_SECOND_START + BLOCK_LINES - 1
+            ),
+            site(
+                "N.java",
+                OVERLAP_SECOND_START,
+                OVERLAP_SECOND_START + 2 * BLOCK_LINES - 1
+            ),
+            body_site("Z.java", BLOCK_LINES),
+            body_site("Z.java", 2 * BLOCK_LINES),
+        ]
+    );
+}
