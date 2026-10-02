@@ -249,6 +249,19 @@ fn assert_every_source_is_discovered_or_skipped(sources: &[PathBuf], discover: &
     }
 }
 
+#[derive(Clone, Copy)]
+enum Corpus {
+    Clean,
+    Malformed,
+}
+
+fn capture_selected(
+    _corpus: Corpus,
+    _read_var: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> bool {
+    unimplemented!("per-corpus capture selection")
+}
+
 fn capture_requested() -> bool {
     std::env::var_os(NEUTRALITY_CAPTURE_ENV_VAR).is_some_and(|value| !value.is_empty())
 }
