@@ -176,9 +176,10 @@ only names the terms.
   own size whichever run wins, and the hiding it allows is at most
   `max(1, floor(overlap / 9))` added lines. It fires when the occurrence's
   added executable lines exceed `max(1, floor(effective / 10))`. The
-  effective size can only lower the threshold against `floor(source_lines /
-  10)`: a 100-line clone with 50 lines deleted and 6 added has effective
-  size 56, threshold 5, and fires.
+  effective size can only lower the threshold against the spec text's
+  `floor(B.source_lines / 10)`: for a 100-line clone (so `B.source_lines` is
+  100) with 50 lines deleted and 6 added, the effective size is 56, the
+  threshold 5, and it fires.
 - A *move*: with no such B, it pairs with a deleted base occurrence whose
   whole-token sequence is a contiguous run of its own (tokens are compared
   one by one, never through the joined digest string) and which is at most
