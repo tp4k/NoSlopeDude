@@ -6,6 +6,7 @@ pub mod cli;
 pub mod config;
 pub mod discover;
 pub(crate) mod exec_lines;
+pub mod format;
 pub mod git;
 #[cfg(test)]
 pub(crate) mod golden;
