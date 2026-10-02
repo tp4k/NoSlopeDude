@@ -1,8 +1,8 @@
-//! The `scan` command-line surface.
+//! The `scan` and `check` command-line surface.
 
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{ArgGroup, Parser, Subcommand};
 
 use crate::model::DEFAULT_MIN_CLONE_LINES;
 
@@ -17,6 +17,28 @@ pub struct Cli {
 pub enum Command {
     /// Scan a local folder or a public GitHub repository.
     Scan(ScanArgs),
+    /// Check a candidate change against its base and exit non-zero on regressions.
+    Check(CheckArgs),
+}
+
+#[derive(Debug, Parser, Clone, PartialEq, Eq)]
+#[command(group(ArgGroup::new("candidate").required(true).args(["staged", "base"])))]
+pub struct CheckArgs {
+    /// Check the Git index against `HEAD`.
+    #[arg(long)]
+    pub staged: bool,
+
+    /// Check `HEAD` against its merge base with this reference.
+    #[arg(long, value_name = "REF")]
+    pub base: Option<String>,
+
+    /// Check the working tree instead of `HEAD` (requires --base).
+    #[arg(long, requires = "base")]
+    pub worktree: bool,
+
+    /// Trusted configuration file outside the checkout, replacing nsd.yml.
+    #[arg(long, value_name = "PATH")]
+    pub config: Option<PathBuf>,
 }
 
 #[derive(Debug, Parser, Clone, PartialEq, Eq)]

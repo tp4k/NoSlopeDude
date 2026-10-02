@@ -1,26 +1,39 @@
+use std::ffi::OsString;
+use std::io::Write;
+use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::Context;
 use clap::Parser;
+use git2::Repository;
 
-use nsd::cli::{Cli, Command};
+use nsd::check::{run_check, CheckDiagnostic, CheckMode, CheckRequest};
+use nsd::cli::{CheckArgs, Cli, Command, ScanArgs};
+use nsd::config::{Config, CODE_INVALID_CONFIG};
+use nsd::format::{escape_terminal, render_terminal};
 use nsd::model::ScanSettings;
 use nsd::pipeline;
+use nsd::policy::exit::exit_status;
 use nsd::report;
+
+/// A check that could not run to a verdict exits with the error status.
+const CHECK_ERROR_EXIT: u8 = 2;
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    match run(cli) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("error: {error:#}");
-            ExitCode::FAILURE
-        }
+    match cli.command {
+        Command::Scan(args) => match run_scan(args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("error: {error:#}");
+                ExitCode::FAILURE
+            }
+        },
+        Command::Check(args) => ExitCode::from(run_check_command(&args)),
     }
 }
 
-fn run(cli: Cli) -> anyhow::Result<()> {
-    let Command::Scan(args) = cli.command;
+fn run_scan(args: ScanArgs) -> anyhow::Result<()> {
     std::fs::create_dir_all(&args.output)
         .with_context(|| format!("cannot create output directory {}", args.output.display()))?;
     let settings = ScanSettings {
@@ -32,4 +45,123 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     let output = pipeline::run(&args.target, settings)?;
     print!("{}", report::terminal_summary(&output.report));
     Ok(())
+}
+
+fn run_check_command(args: &CheckArgs) -> u8 {
+    match check_command(args) {
+        Ok(status) => status,
+        Err(error) => {
+            eprintln!("error: {}", escape_terminal(&format!("{error:#}")));
+            CHECK_ERROR_EXIT
+        }
+    }
+}
+
+fn check_command(args: &CheckArgs) -> anyhow::Result<u8> {
+    let repository = std::env::current_dir().context("cannot read the current directory")?;
+    let (diagnostics, status) = match &args.config {
+        Some(config) if config_is_inside_checkout(&repository, config)? => refused_config(config),
+        _ => {
+            let mode = match &args.base {
+                Some(reference) => CheckMode::Base {
+                    reference: reference.clone(),
+                    worktree: args.worktree,
+                },
+                None => CheckMode::Staged,
+            };
+            let outcome = run_check(&CheckRequest {
+                repository: &repository,
+                mode,
+                config_path: args.config.as_deref(),
+                allow_new_suppressions: false,
+            });
+            (outcome.diagnostics, outcome.exit_status)
+        }
+    };
+    std::io::stdout()
+        .write_all(render_terminal(&diagnostics).as_bytes())
+        .context("cannot write the diagnostics")?;
+    Ok(status)
+}
+
+fn refused_config(config: &Path) -> (Vec<CheckDiagnostic>, u8) {
+    let diagnostics = vec![CheckDiagnostic::Failure {
+        code: CODE_INVALID_CONFIG,
+        message: format!(
+            "trusted config {} is inside the candidate checkout",
+            config.display()
+        ),
+    }];
+    let status = exit_status(
+        diagnostics.iter().map(CheckDiagnostic::code),
+        &Config::default().policy,
+        false,
+    );
+    (diagnostics, status)
+}
+
+/// Whether `config`, as given, with its directory resolved, or with the link
+/// itself resolved, lies under the work tree of the repository at `repository` (`.git/` included). A directory
+/// that is not a work tree has no inside; `run_check` reports it as G101.
+fn config_is_inside_checkout(repository: &Path, config: &Path) -> anyhow::Result<bool> {
+    let Some(workdir) = Repository::open(repository)
+        .ok()
+        .and_then(|repo| repo.workdir().map(Path::to_path_buf))
+    else {
+        return Ok(false);
+    };
+    let absolute = repository.join(config);
+    let roots = [
+        std::fs::canonicalize(&workdir).context("cannot resolve the checkout root")?,
+        workdir,
+    ];
+    let mut forms = vec![
+        lexically_normalized(&absolute),
+        canonical_even_if_missing(&absolute)?,
+    ];
+    if let (Some(parent), Some(name)) = (absolute.parent(), absolute.file_name()) {
+        forms.push(canonical_even_if_missing(parent)?.join(name));
+    }
+    Ok(forms
+        .iter()
+        .any(|form| roots.iter().any(|root| form.starts_with(root))))
+}
+
+fn lexically_normalized(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other),
+        }
+    }
+    normalized
+}
+
+/// `fs::canonicalize` of the longest existing prefix of `path`, with the
+/// missing remainder appended as given.
+fn canonical_even_if_missing(path: &Path) -> anyhow::Result<PathBuf> {
+    let mut missing: Vec<OsString> = Vec::new();
+    let mut existing = path;
+    loop {
+        match std::fs::canonicalize(existing) {
+            Ok(mut resolved) => {
+                resolved.extend(missing.iter().rev());
+                return Ok(lexically_normalized(&resolved));
+            }
+            Err(error) => match (existing.file_name(), existing.parent()) {
+                (Some(name), Some(parent)) => {
+                    missing.push(name.to_os_string());
+                    existing = parent;
+                }
+                _ => {
+                    return Err(error)
+                        .with_context(|| format!("cannot resolve {}", path.display()));
+                }
+            },
+        }
+    }
 }
