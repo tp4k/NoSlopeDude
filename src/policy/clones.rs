@@ -356,12 +356,14 @@ impl<'a> MovePool<'a> {
         }
     }
 
-    /// Pairs `run` with the largest eligible unconsumed deleted occurrence
-    /// whose token sequence is contiguous inside it, and credits each of that
-    /// occurrence's tokens to the candidate token it lands on. A base token
-    /// credited to another candidate token is spent; one credited to the same
-    /// candidate token is shared by the overlapping occurrences of that one
-    /// move. Returns whether `run` is a move.
+    /// Pairs `run` with the eligible deleted occurrence whose token sequence
+    /// is contiguous inside it and that already has the most base tokens
+    /// credited onto exactly this window's tokens, then the largest, then the
+    /// earliest, and credits each of its tokens to the candidate token it
+    /// lands on. A base token credited to another candidate token is spent;
+    /// one credited to the same candidate token is shared by the overlapping
+    /// occurrences of that one move. The choice is never revisited and does
+    /// not look ahead at later occurrences. Returns whether `run` is a move.
     fn take_move(
         &mut self,
         language: LanguageFamily,
@@ -369,7 +371,7 @@ impl<'a> MovePool<'a> {
         run: &Candidate,
     ) -> bool {
         let (from, to) = tokens.run_range(run);
-        let mut best: Option<(usize, usize)> = None;
+        let mut best: Option<(usize, usize, usize)> = None;
         for &length in &self.lengths {
             if length > to - from {
                 break;
@@ -384,11 +386,14 @@ impl<'a> MovePool<'a> {
                     if run.source_lines > base_run.source_lines + threshold(base_run.source_lines) {
                         continue;
                     }
-                    let beats_best = best.is_none_or(|(current, _)| {
+                    let can_beat_best = best.is_none_or(|(current, _, shared)| {
                         let current_lines = self.entries[current].1.source_lines;
-                        (Reverse(base_run.source_lines), slot) < (Reverse(current_lines), current)
+                        shared < length
+                            || (shared == length
+                                && (Reverse(base_run.source_lines), slot)
+                                    < (Reverse(current_lines), current))
                     });
-                    if !beats_best {
+                    if !can_beat_best {
                         continue;
                     }
                     let Some(base_tokens) = self.base_tokens.get(&(*base, base_run.container))
@@ -397,19 +402,36 @@ impl<'a> MovePool<'a> {
                     };
                     let same_tokens = base_tokens.window(*base_from, *base_to)
                         == tokens.window(start, start + length);
-                    if same_tokens
-                        && (0..length).all(|offset| {
-                            self.consumed
-                                .get(&base_tokens.leaves[base_from + offset])
-                                .is_none_or(|&spent| spent == tokens.leaves[start + offset])
-                        })
-                    {
-                        best = Some((slot, start));
+                    if !same_tokens {
+                        continue;
+                    }
+                    let mut shared = 0;
+                    let mut agrees = true;
+                    for offset in 0..length {
+                        match self.consumed.get(&base_tokens.leaves[base_from + offset]) {
+                            None => {}
+                            Some(&spent) if spent == tokens.leaves[start + offset] => shared += 1,
+                            Some(_) => {
+                                agrees = false;
+                                break;
+                            }
+                        }
+                    }
+                    if !agrees {
+                        continue;
+                    }
+                    let beats_best = best.is_none_or(|(current, _, current_shared)| {
+                        let current_lines = self.entries[current].1.source_lines;
+                        (Reverse(shared), Reverse(base_run.source_lines), slot)
+                            < (Reverse(current_shared), Reverse(current_lines), current)
+                    });
+                    if beats_best {
+                        best = Some((slot, start, shared));
                     }
                 }
             }
         }
-        let Some((slot, start)) = best else {
+        let Some((slot, start, _)) = best else {
             return false;
         };
         let (base, base_run, (base_from, base_to)) = self.entries[slot];
@@ -673,12 +695,28 @@ pub fn evaluate_clones(
     if !added_subjects.is_empty() {
         let mut pool = MovePool::new(&base_views, &base_runs, &facts);
         let mut candidate_tokens: HashMap<(usize, u32), ContainerTokens<'_>> = HashMap::new();
-        for subject in added_subjects {
+        for subject in &added_subjects {
             let view = &views[subject.view];
-            let tokens = candidate_tokens
+            candidate_tokens
                 .entry((subject.view, subject.run.container))
                 .or_insert_with(|| ContainerTokens::new(view, subject.view, subject.run.container));
-            if !pool.take_move(view.language, tokens, &subject.run) {
+        }
+        let window_length = |subject: &Subject<'_>| {
+            let (from, to) =
+                candidate_tokens[&(subject.view, subject.run.container)].run_range(&subject.run);
+            to - from
+        };
+        added_subjects.sort_by_key(|subject| {
+            (
+                Reverse(window_length(subject)),
+                views[subject.view].path,
+                subject.run.start_line,
+                Reverse(subject.run.end_line),
+            )
+        });
+        for subject in added_subjects {
+            let tokens = &candidate_tokens[&(subject.view, subject.run.container)];
+            if !pool.take_move(views[subject.view].language, tokens, &subject.run) {
                 firing.push((subject, None));
             }
         }
