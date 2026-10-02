@@ -18,8 +18,9 @@
 //! `#[cfg(test)]` pre-IR reference implementation kept below for WS-1's
 //! pinned floor test; the retargeted production path uses neither.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::ops::RangeInclusive;
 
 use rayon::prelude::*;
 #[cfg(test)]
@@ -45,39 +46,49 @@ const TOKEN_SEPARATOR: char = '\u{1}';
 /// One candidate or grouped occurrence before it is exposed as a
 /// `CloneLocation` — carries `statement_count` too, needed only internally
 /// to order groups largest-first for the maximal-group filter. Carries the
-/// owning file as a `file_index` into the `ParsedFile` slice `run` was
-/// called with, rather than a cloned `PathBuf`: this candidate shape is
+/// owning file as a `file_index` into the file slice the enumeration was
+/// run over, rather than a cloned `PathBuf`: this candidate shape is
 /// produced `Θ(n²)` times per container, so an index avoids one heap
 /// allocation per candidate (perf row 6); it is resolved to a real
-/// `PathBuf` once, in `GroupBuilder::from_candidates`, only for the far
-/// smaller set of candidates that end up in a reported group.
-struct Candidate {
-    file_index: u32,
-    start_line: usize,
-    end_line: usize,
-    source_lines: usize,
-    statement_count: usize,
+/// `PathBuf` once, in `GroupBuilder::into_group`, only for the far smaller
+/// set of candidates that end up in a reported group. `container` is the
+/// ordinal of the run's container in `clone_containers`, and
+/// `first_statement` the index of its first statement there.
+#[derive(Clone, Copy)]
+pub(crate) struct Candidate {
+    pub(crate) file_index: u32,
+    pub(crate) container: u32,
+    pub(crate) first_statement: u32,
+    pub(crate) start_line: usize,
+    pub(crate) end_line: usize,
+    pub(crate) source_lines: usize,
+    pub(crate) statement_count: usize,
 }
 
 /// A clone group while it is still being assembled, before its
 /// `redundant_lines` total is computed.
-struct GroupBuilder {
-    language: LanguageFamily,
-    locations: Vec<CloneLocation>,
-    statement_count: usize,
+pub(crate) struct GroupBuilder {
+    pub(crate) language: LanguageFamily,
+    pub(crate) members: Vec<Candidate>,
+    pub(crate) statement_count: usize,
 }
 
 impl GroupBuilder {
-    fn from_candidates(
-        language: LanguageFamily,
-        candidates: Vec<Candidate>,
-        parsed_files: &[ParsedFile],
-    ) -> Self {
+    pub(crate) fn from_candidates(language: LanguageFamily, candidates: Vec<Candidate>) -> Self {
         let statement_count = candidates
             .first()
             .map(|candidate| candidate.statement_count)
             .unwrap_or(0);
-        let mut locations: Vec<CloneLocation> = candidates
+        GroupBuilder {
+            language,
+            members: candidates,
+            statement_count,
+        }
+    }
+
+    pub(crate) fn into_group(self, parsed_files: &[ParsedFile]) -> CloneGroup {
+        let mut locations: Vec<CloneLocation> = self
+            .members
             .into_iter()
             .map(|candidate| CloneLocation {
                 relative_path: parsed_files[candidate.file_index as usize]
@@ -95,21 +106,13 @@ impl GroupBuilder {
                 .cmp(&b.relative_path)
                 .then(a.start_line.cmp(&b.start_line))
         });
-        GroupBuilder {
-            language,
-            locations,
-            statement_count,
-        }
-    }
-
-    fn into_group(self) -> CloneGroup {
-        let redundant_lines: usize = self.locations[1..]
+        let redundant_lines: usize = locations[1..]
             .iter()
             .map(|location| location.source_lines)
             .sum();
         CloneGroup {
             language: self.language,
-            locations: self.locations,
+            locations,
             redundant_lines,
         }
     }
@@ -159,33 +162,20 @@ pub(crate) fn run_with_ir(
         .map(|(file_index, (file, ir_file))| {
             (
                 file.language,
-                enumerate_candidates(file, ir_file, file_index as u32, min_clone_lines),
+                enumerate_candidates(
+                    file.language,
+                    &file.source,
+                    ir_file,
+                    file_index as u32,
+                    min_clone_lines,
+                ),
             )
         })
         .collect();
 
-    let mut candidates_by_key: HashMap<u128, (LanguageFamily, Vec<Candidate>)> = HashMap::new();
-    for (language, candidates) in per_file {
-        for (key, candidate) in candidates {
-            candidates_by_key
-                .entry(key)
-                .or_insert_with(|| (language, Vec::new()))
-                .1
-                .push(candidate);
-        }
-    }
-
-    let builders: Vec<GroupBuilder> = candidates_by_key
-        .into_values()
-        .filter(|(_, candidates)| candidates.len() >= 2)
-        .map(|(language, candidates)| {
-            GroupBuilder::from_candidates(language, candidates, parsed_files)
-        })
-        .collect();
-
-    let mut groups: Vec<CloneGroup> = drop_subsumed_groups(builders)
+    let mut groups: Vec<CloneGroup> = maximal_groups(per_file)
         .into_iter()
-        .map(GroupBuilder::into_group)
+        .map(|builder| builder.into_group(parsed_files))
         .collect();
 
     groups.sort_by(|a, b| {
@@ -202,6 +192,35 @@ pub(crate) fn run_with_ir(
     ClonesResult { groups }
 }
 
+/// D14's grouping and D15's maximal filter over every file's candidates:
+/// each fingerprint with at least two candidates is a group, and a group
+/// all of whose occurrences lie inside a larger group's is dropped. The
+/// groups come back in no particular order and with their members in no
+/// particular order; callers sort. `file_index` in each member indexes the
+/// slice the per-file enumerations ran over.
+pub(crate) fn maximal_groups(
+    per_file: Vec<(LanguageFamily, Vec<(u128, Candidate)>)>,
+) -> Vec<GroupBuilder> {
+    let mut candidates_by_key: HashMap<u128, (LanguageFamily, Vec<Candidate>)> = HashMap::new();
+    for (language, candidates) in per_file {
+        for (key, candidate) in candidates {
+            candidates_by_key
+                .entry(key)
+                .or_insert_with(|| (language, Vec::new()))
+                .1
+                .push(candidate);
+        }
+    }
+
+    let builders: Vec<GroupBuilder> = candidates_by_key
+        .into_values()
+        .filter(|(_, candidates)| candidates.len() >= 2)
+        .map(|(language, candidates)| GroupBuilder::from_candidates(language, candidates))
+        .collect();
+
+    drop_subsumed_groups(builders)
+}
+
 /// D15's maximal filter: a group all of whose occurrences are contained in
 /// another (larger) reported group's occurrences is dropped, so one long
 /// duplicate does not also report all its sub-runs. Processes larger
@@ -210,20 +229,21 @@ pub(crate) fn run_with_ir(
 fn drop_subsumed_groups(mut builders: Vec<GroupBuilder>) -> Vec<GroupBuilder> {
     builders.sort_by_key(|builder| std::cmp::Reverse(builder.statement_count));
     let mut kept: Vec<GroupBuilder> = Vec::with_capacity(builders.len());
-    // Path -> every kept group's per-location line range in that file,
+    // File index -> every kept group's per-member line range in that file,
     // tagged with its index into `kept`. A candidate is tested only
-    // against the kept groups whose range covers its own canonical first
-    // location, never against the whole `kept` vector (perf row 4).
-    let mut kept_by_path: HashMap<PathBuf, Vec<(usize, usize, usize)>> = HashMap::new();
+    // against the kept groups whose range covers one of its own members,
+    // never against the whole `kept` vector (perf row 4).
+    let mut kept_by_file: HashMap<u32, Vec<(usize, usize, usize)>> = HashMap::new();
     for builder in builders {
-        let subsumed = is_subsumed_by_any_kept(&builder, &kept, &kept_by_path);
+        let subsumed = is_subsumed_by_any_kept(&builder, &kept, &kept_by_file);
         if !subsumed {
             let kept_index = kept.len();
-            for location in &builder.locations {
-                kept_by_path
-                    .entry(location.relative_path.clone())
-                    .or_default()
-                    .push((location.start_line, location.end_line, kept_index));
+            for member in &builder.members {
+                kept_by_file.entry(member.file_index).or_default().push((
+                    member.start_line,
+                    member.end_line,
+                    kept_index,
+                ));
             }
             kept.push(builder);
         }
@@ -231,19 +251,19 @@ fn drop_subsumed_groups(mut builders: Vec<GroupBuilder>) -> Vec<GroupBuilder> {
     kept
 }
 
-/// Whether some already-kept, still-larger group contains every location of
-/// `builder` (D15's maximal filter). Containing `builder.locations[0]` is
-/// necessary for any `other` to subsume `builder` at all, so the kept
-/// groups to run the full `is_subsumed` check against are narrowed to the
-/// ones with a location covering it, via `kept_by_path`, before that check
+/// Whether some already-kept, still-larger group contains every member of
+/// `builder` (D15's maximal filter). Containing any one member is necessary
+/// for any `other` to subsume `builder` at all, so the kept groups to run
+/// the full `is_subsumed` check against are narrowed to the ones with a
+/// member covering the first one, via `kept_by_file`, before that check
 /// runs (perf row 4).
 fn is_subsumed_by_any_kept(
     builder: &GroupBuilder,
     kept: &[GroupBuilder],
-    kept_by_path: &HashMap<PathBuf, Vec<(usize, usize, usize)>>,
+    kept_by_file: &HashMap<u32, Vec<(usize, usize, usize)>>,
 ) -> bool {
-    let first = &builder.locations[0];
-    let Some(entries) = kept_by_path.get(&first.relative_path) else {
+    let first = &builder.members[0];
+    let Some(entries) = kept_by_file.get(&first.file_index) else {
         return false;
     };
     let mut candidate_indices: Vec<usize> = entries
@@ -263,14 +283,14 @@ fn is_subsumed_by_any_kept(
     })
 }
 
-/// Whether every location in `candidate` sits inside some location of
-/// `other`, in the same file.
+/// Whether every member in `candidate` sits inside some member of `other`,
+/// in the same file.
 fn is_subsumed(candidate: &GroupBuilder, other: &GroupBuilder) -> bool {
-    candidate.locations.iter().all(|location| {
-        other.locations.iter().any(|other_location| {
-            other_location.relative_path == location.relative_path
-                && other_location.start_line <= location.start_line
-                && location.end_line <= other_location.end_line
+    candidate.members.iter().all(|member| {
+        other.members.iter().any(|other_member| {
+            other_member.file_index == member.file_index
+                && other_member.start_line <= member.start_line
+                && member.end_line <= other_member.end_line
         })
     })
 }
@@ -290,29 +310,43 @@ fn is_subsumed(candidate: &GroupBuilder, other: &GroupBuilder) -> bool {
 /// dispatch.
 /// WS-9 (C1): `ir_file` is the caller's own lowering (`run_with_ir`'s
 /// `ir_files`, index-aligned with `parsed_files`), not lowered again here.
-fn enumerate_candidates(
-    file: &ParsedFile,
+pub(crate) fn enumerate_candidates(
+    language: LanguageFamily,
+    source: &str,
     ir_file: &lower::IrFile,
     file_index: u32,
     min_clone_lines: u32,
 ) -> Vec<(u128, Candidate)> {
     let mut candidates = Vec::new();
+    for (container, statements) in clone_containers(ir_file).iter().enumerate() {
+        enumerate_container_candidates(
+            statements,
+            language,
+            (file_index, container as u32),
+            min_clone_lines,
+            source,
+            &mut candidates,
+        );
+    }
+    candidates
+}
+
+/// Every clone-candidate container of `ir_file` that holds at least
+/// `MIN_CANDIDATE_STATEMENTS` clone statements, as its statement list, in
+/// pre-order. A `Candidate::container` is an index into this list.
+pub(crate) fn clone_containers(ir_file: &lower::IrFile) -> Vec<Vec<&IrNode>> {
+    let mut containers = Vec::new();
     for_each_ir_node(&ir_file.root, &mut |node| {
         let statements: Vec<&IrNode> = node
             .children
             .iter()
             .filter(|child| child.is_clone_statement)
             .collect();
-        enumerate_container_candidates(
-            &statements,
-            file.language,
-            file_index,
-            min_clone_lines,
-            &file.source,
-            &mut candidates,
-        );
+        if statements.len() >= MIN_CANDIDATE_STATEMENTS {
+            containers.push(statements);
+        }
     });
-    candidates
+    containers
 }
 
 /// D15's ≥2-statement, ≥`min_clone_lines` filters over every contiguous
@@ -330,7 +364,7 @@ fn enumerate_candidates(
 fn enumerate_container_candidates(
     statements: &[&IrNode],
     language: LanguageFamily,
-    file_index: u32,
+    (file_index, container): (u32, u32),
     min_clone_lines: u32,
     source: &str,
     out: &mut Vec<(u128, Candidate)>,
@@ -371,6 +405,8 @@ fn enumerate_container_candidates(
                 fingerprint.finish(),
                 Candidate {
                     file_index,
+                    container,
+                    first_statement: start as u32,
                     start_line,
                     end_line,
                     source_lines,
@@ -402,19 +438,50 @@ fn enumerate_container_candidates(
 /// already covers.
 pub(crate) fn ir_statement_tokens(statement: &IrNode, source: &str) -> String {
     let mut tokens = String::new();
+    for token in statement_leaf_tokens(statement, source) {
+        tokens.push(TOKEN_SEPARATOR);
+        tokens.push_str(&token);
+    }
+    tokens
+}
+
+/// D14/D10: one statement's normalized leaf tokens as a sequence, the same
+/// tokens `ir_statement_tokens` joins, so containment can compare whole
+/// tokens instead of searching the joined string.
+pub(crate) fn statement_leaf_tokens<'a>(statement: &IrNode, source: &'a str) -> Vec<Cow<'a, str>> {
+    let mut tokens = Vec::new();
     for_each_ir_node(statement, &mut |node| {
         if !node.children.is_empty() || node.is_comment {
             return;
         }
-        tokens.push(TOKEN_SEPARATOR);
         let text = leaf_text(node, source);
-        if node.is_named {
-            tokens.push_str(text);
+        if node.is_named || !text.chars().any(char::is_whitespace) {
+            tokens.push(Cow::Borrowed(text));
         } else {
-            tokens.push_str(&text.split_whitespace().collect::<Vec<_>>().join(" "));
+            tokens.push(Cow::Owned(
+                text.split_whitespace().collect::<Vec<_>>().join(" "),
+            ));
         }
     });
     tokens
+}
+
+/// D11: the source lines a run of sibling statements counts, ascending and
+/// distinct, exactly the lines `accumulate_line` adds up for `source_lines`.
+pub(crate) fn run_executable_lines(statements: &[&IrNode]) -> Vec<usize> {
+    let mut lines = Vec::new();
+    let mut last_counted_line = 0usize;
+    for statement in statements {
+        for_each_ir_node(statement, &mut |node| {
+            if node.executable {
+                if let Some(fresh) = uncounted_lines(node, last_counted_line) {
+                    last_counted_line = *fresh.end();
+                    lines.extend(fresh);
+                }
+            }
+        });
+    }
+    lines
 }
 
 /// The source text at one `IrNode`'s own span — a byte slice, not a
@@ -501,13 +568,18 @@ fn family_prefix(language: LanguageFamily) -> &'static str {
 /// `for_each_ir_node` visiting leaves in non-decreasing source-line order,
 /// the same technique WS-2's callable SLOC uses.
 fn accumulate_line(node: &IrNode, count: &mut usize, last_counted_line: &mut usize) {
+    if let Some(fresh) = uncounted_lines(node, *last_counted_line) {
+        *count += fresh.end() - fresh.start() + 1;
+        *last_counted_line = *fresh.end();
+    }
+}
+
+/// The lines of a leaf not yet counted past `last_counted_line`, if any.
+fn uncounted_lines(node: &IrNode, last_counted_line: usize) -> Option<RangeInclusive<usize>> {
     let start = node.span.start_line as usize;
     let end = node.span.end_line as usize;
-    let from = start.max(*last_counted_line + 1);
-    if from <= end {
-        *count += end - from + 1;
-        *last_counted_line = end;
-    }
+    let from = start.max(last_counted_line + 1);
+    (from <= end).then_some(from..=end)
 }
 
 /// Iterative pre-order traversal of one already-built `IrNode` tree: visits

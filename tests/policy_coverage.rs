@@ -249,7 +249,10 @@ fn test_trusted_exclusion_removes_the_obligation() {
     assert!(evaluate_coverage(&inputs, &policy_with("deny")).is_empty());
 
     let kept = inputs_for(files, files, &Config::default());
-    assert_eq!(evaluate_coverage(&kept, &policy_with("deny")).len(), 1);
+    assert_eq!(
+        named(&evaluate_coverage(&kept, &policy_with("deny"))),
+        vec![("legacy/Big.java".to_string(), UnanalyzableReason::TooLarge)]
+    );
 }
 
 #[test]
@@ -298,10 +301,10 @@ fn test_output_is_sorted_by_path() {
 }
 
 #[test]
-fn test_config_exclude_removes_an_oversized_unchanged_file_from_a102() {
-    let big = padded_java(SOURCE_CEILING_BYTES + 1);
+fn test_config_exclude_removes_an_invalid_utf8_ts_file_from_a102() {
+    let invalid = b"export const s = \"\xff\xfe\";\n".to_vec();
     let files: &[(&[u8], Vec<u8>)] = &[
-        (b"legacy/Big.java", big),
+        (b"legacy/bad.ts", invalid),
         (b"Small.java", SMALL.as_bytes().to_vec()),
     ];
     let excluded = config("version: 1\nexclude: [\"legacy/**\"]\n");
@@ -312,6 +315,23 @@ fn test_config_exclude_removes_an_oversized_unchanged_file_from_a102() {
     let kept = inputs_for(files, files, &Config::default());
     assert_eq!(
         named(&evaluate_coverage(&kept, &policy_with("deny"))),
-        vec![("legacy/Big.java".to_string(), UnanalyzableReason::TooLarge)]
+        vec![(
+            "legacy/bad.ts".to_string(),
+            UnanalyzableReason::InvalidEncoding
+        )]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_too_large_takes_precedence_over_non_utf8_path() {
+    let big = padded_java(SOURCE_CEILING_BYTES + 1);
+    let files: &[(&[u8], Vec<u8>)] = &[(b"src/bad\xff.java", big)];
+    let inputs = inputs_for(files, files, &Config::default());
+    assert_eq!(inputs.len(), 1);
+    assert!(inputs[0].entry.too_large && inputs[0].entry.non_utf8_path);
+    assert_eq!(
+        named(&evaluate_coverage(&inputs, &policy_with("deny"))),
+        vec![("src/bad%FF.java".to_string(), UnanalyzableReason::TooLarge)]
     );
 }

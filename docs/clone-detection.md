@@ -147,3 +147,62 @@ to the single anonymous kind `"static get"` (`grammar.js:1252`), whose own
 source text carries whatever internal whitespace and trailing newline the
 author wrote — collapsed before hashing so two copies differing only in
 that token's internal formatting still fingerprint identically.
+
+## V102: clone regressions (M4-2)
+
+`src/policy/clones.rs::evaluate_clones` raises `NSD-V102` over a diff. The
+rules are `nsd-plan-final.md` *Diagnostics* and amendment A3, and
+`nsd-plan-implementation.md` *Policy and analysis behavior*; this section
+only names the terms.
+
+- An *occurrence* is one D15 candidate run, with its D11 `source_lines`.
+  On the candidate side only members of a maximal group (D14 grouping, D15
+  subsumption, over unchanged and changed files) count. On the base side
+  every qualifying run counts, unreduced, and the base version of a changed
+  path never joins the candidate groups.
+- A candidate occurrence is evaluated only if it lies in a changed file and
+  holds an added executable line, so pure line shifts and comment-only
+  edits never fire.
+- An *extension*: the diff maps some base occurrence B onto it. A base run
+  with an executable line that the diff maps outside the occurrence is not
+  eligible. Among the rest, the highest rank wins: shared executable lines
+  (`overlap`) less the executable base lines the diff does not map
+  (`unmapped`) beyond the occurrence's added lines (a base line that maps
+  onto a non-executable candidate line, such as a commented-out one, counts
+  as unmapped); a tie goes to the run with fewer such unmapped lines, then
+  to the larger run. The graded base is the chosen run's effective size,
+  `overlap + min(unmapped, added)`, not its `source_lines`. It counts only
+  base lines the diff accounts for, so it never exceeds the occurrence's
+  own size whichever run wins, and the hiding it allows is at most
+  `max(1, floor(overlap / 9))` added lines. It fires when the occurrence's
+  added executable lines exceed `max(1, floor(effective / 10))`. The
+  effective size can only lower the threshold against `floor(source_lines /
+  10)`: a 100-line clone with 50 lines deleted and 6 added has effective
+  size 56, threshold 5, and fires.
+- A *move*: with no such B, it pairs with a deleted base occurrence whose
+  whole-token sequence is a contiguous run of its own (tokens are compared
+  one by one, never through the joined digest string) and which is at most
+  that same threshold shorter. Added occurrences are paired longest token
+  window first (ties in source order, the longer first at an equal start),
+  so an occurrence that encloses another commits its credit before the one
+  inside it. Among the eligible deleted occurrences an added occurrence takes
+  the one with the most base tokens already credited onto exactly its own
+  candidate tokens, then the largest, then the earliest. A move maps each
+  base token of the deleted occurrence onto one candidate token. Each base
+  token is credited to the one candidate token it was moved onto: pairs that
+  put a shared base token on the same candidate token agree and share its
+  credit (a prefix, a suffix or a nested block of the same move), and a token
+  credited to another candidate token is spent, so a distinct copy never
+  reuses it. A move never fires. One exception is accepted: a pairing is
+  never revisited, and an added occurrence with more than one eligible
+  deleted occurrence chooses by the rank above without looking ahead at later
+  added occurrences that share no candidate token with it, so a later
+  unchanged move whose only eligible deleted occurrences were taken that way
+  can still raise V102. An exact assignment would be a backtracking search on
+  a hot path fed by PR-authored blobs.
+- A *new occurrence* is an unpaired one. It fires with `base_lines: None`,
+  and `matched_*` names the first other group member in path order.
+- Accepted limitation (user decision 2026-10-01): lines are D11
+  `source_lines`, so statements joined onto one line count as one line.
+  Fifty statements on one line are one line for both the extension and the
+  move thresholds.

@@ -11,9 +11,15 @@ use crate::policy::diagnostics::{CoverageDiagnostic, CODE_ANALYSIS_UNAVAILABLE};
 pub struct CoverageInput {
     /// A discovery-included entry.
     pub entry: IncludedEntry,
-    /// True when `entry.path` is the candidate-side path of a `git::diff::Change`: `Added`/`Modified`/`Typechange` `path`, `Renamed` `to`.
+    /// True when `entry.path` is the candidate-side path of a
+    /// `git::diff::Change`: `Added`/`Modified`/`Typechange` `path`, `Renamed`
+    /// `to`.
     pub changed: bool,
-    /// `analyze_file(..).err()` when the bytes were read; an unreadable included blob must be reported as a failure, never `None`.
+    /// `analyze_file(..).err()` when the bytes were read. `reason_of` checks
+    /// the entry's own `too_large` and `non_utf8_path` flags before this
+    /// field, so the caller need not read such a blob to fill it. Any other
+    /// included blob that should have been read but could not be is reported
+    /// as a failure, never `None`.
     pub failure: Option<UnanalyzableReason>,
 }
 

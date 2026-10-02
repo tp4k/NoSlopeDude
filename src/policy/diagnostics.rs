@@ -95,3 +95,25 @@ pub struct CoverageDiagnostic {
     pub path: RepoPath,
     pub reason: UnanalyzableReason,
 }
+
+/// A changed clone occurrence is new, or extended past the extension threshold,
+/// with a qualifying match elsewhere (`NSD-V102`).
+pub const CODE_CLONE_REGRESSION: &str = "NSD-V102";
+
+/// One V102 about a candidate clone occurrence. `base_lines` is the effective
+/// size of the diff-mapped base occurrence (its lines shared with the
+/// occurrence plus its unmapped lines up to the added lines) for an
+/// extension and `None` for a new occurrence; the `matched_*` fields name the
+/// first other member of the occurrence's maximal group in canonical order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CloneDiagnostic {
+    pub code: &'static str,
+    pub candidate_path: RepoPath,
+    pub candidate_start_line: usize,
+    pub candidate_end_line: usize,
+    pub base_lines: Option<usize>,
+    pub added_lines: usize,
+    pub matched_path: RepoPath,
+    pub matched_start_line: usize,
+    pub matched_end_line: usize,
+}
