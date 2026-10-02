@@ -100,9 +100,10 @@ fn refused_config(config: &Path) -> (Vec<CheckDiagnostic>, u8) {
     (diagnostics, status)
 }
 
-/// Whether `config`, as given, with its directory resolved, or with the link
-/// itself resolved, lies under the work tree of the repository at `repository` (`.git/` included). A directory
-/// that is not a work tree has no inside; `run_check` reports it as G101.
+/// Whether `config` lies under the work tree of the repository at
+/// `repository` (`.git/` included), either as given with its directory
+/// resolved, or with its own symlinks resolved too. A directory that is not
+/// a work tree has no inside; `run_check` reports it as G101.
 fn config_is_inside_checkout(repository: &Path, config: &Path) -> anyhow::Result<bool> {
     let Some(workdir) = Repository::open(repository)
         .ok()
@@ -110,21 +111,13 @@ fn config_is_inside_checkout(repository: &Path, config: &Path) -> anyhow::Result
     else {
         return Ok(false);
     };
-    let absolute = repository.join(config);
-    let roots = [
-        std::fs::canonicalize(&workdir).context("cannot resolve the checkout root")?,
-        workdir,
-    ];
-    let mut forms = vec![
-        lexically_normalized(&absolute),
-        canonical_even_if_missing(&absolute)?,
-    ];
+    let root = std::fs::canonicalize(&workdir).context("cannot resolve the checkout root")?;
+    let absolute = lexically_normalized(&repository.join(config));
+    let mut forms = vec![canonical_even_if_missing(&absolute)?];
     if let (Some(parent), Some(name)) = (absolute.parent(), absolute.file_name()) {
         forms.push(canonical_even_if_missing(parent)?.join(name));
     }
-    Ok(forms
-        .iter()
-        .any(|form| roots.iter().any(|root| form.starts_with(root))))
+    Ok(forms.iter().any(|form| form.starts_with(&root)))
 }
 
 fn lexically_normalized(path: &Path) -> PathBuf {
