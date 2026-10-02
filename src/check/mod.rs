@@ -19,6 +19,7 @@ use crate::git::path::RepoPath;
 use crate::git::snapshot::{CommitSnapshot, Entry, IndexSnapshot, WorktreeSnapshot};
 use crate::git::{wrap_git_error, GitError, CODE_SNAPSHOT_UNAVAILABLE};
 use crate::identity::matching::{match_callables, FileCallables};
+use crate::policy;
 use crate::policy::clones::evaluate_clones;
 use crate::policy::complexity::{classify, FileMetrics};
 use crate::policy::coverage::{evaluate_coverage, CoverageInput};
@@ -29,7 +30,7 @@ use crate::policy::diagnostics::{
 };
 use crate::policy::exit::exit_status;
 use crate::policy::findings::{match_findings, FindingFile};
-use crate::policy::{self, Candidate};
+use crate::policy::Candidate;
 use crate::suppress::apply_suppressions;
 
 /// What the candidate side of a check is.
