@@ -41,6 +41,9 @@ pub struct FindingRef {
 pub struct FindingPair {
     pub base: FindingRef,
     pub candidate: FindingRef,
+    /// True when the pair was matched in file context, not within a matched
+    /// callable. `apply_suppressions` inherits no suppression across such a
+    /// pair when either finding sits inside a callable.
     pub in_file_context: bool,
 }
 
