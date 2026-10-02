@@ -6,11 +6,11 @@ use std::path::Path;
 
 use crate::git::path::RepoPath;
 use crate::git::GitError;
+use crate::policy;
 use crate::policy::diagnostics::{
     CloneDiagnostic, CoverageDiagnostic, DamageDiagnostic, FindingDiagnostic, PolicyDiagnostic,
     SuppressionDiagnostic,
 };
-use crate::policy;
 
 /// What the candidate side of a check is.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,10 +52,7 @@ pub enum CheckDiagnostic {
     Config(policy::Diagnostic),
     /// A failure with no policy verdict behind it: G101 for a repository,
     /// snapshot, diff or read failure, or the code of a `resolve` failure.
-    Failure {
-        code: &'static str,
-        message: String,
-    },
+    Failure { code: &'static str, message: String },
 }
 
 impl CheckDiagnostic {
@@ -100,4 +97,25 @@ fn required_bytes(
 ) -> Result<Vec<u8>, CheckDiagnostic> {
     let _ = (path, read);
     unimplemented!("M5-4 scaffold")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::git::CODE_SNAPSHOT_UNAVAILABLE;
+
+    #[test]
+    fn test_unreadable_under_ceiling_changed_blob_maps_to_g101() {
+        let path = RepoPath::from_bytes(b"src/Foo.java".to_vec());
+
+        let unreadable = required_bytes(&path, Ok(None)).expect_err("an unreadable blob fails");
+        let readable = required_bytes(&path, Ok(Some(b"class Foo {}".to_vec())));
+
+        assert!(matches!(unreadable, CheckDiagnostic::Failure { .. }));
+        assert_eq!(unreadable.code(), CODE_SNAPSHOT_UNAVAILABLE);
+        assert_eq!(
+            readable.expect("readable bytes pass through"),
+            b"class Foo {}"
+        );
+    }
 }
