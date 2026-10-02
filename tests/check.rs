@@ -102,6 +102,14 @@ impl Fixture {
         index.write().expect("write the index");
     }
 
+    fn unstage(&self, path: &str) {
+        let mut index = self.repo.index().expect("open the index");
+        index
+            .remove_path(Path::new(path))
+            .expect("remove the path from the index");
+        index.write().expect("write the index");
+    }
+
     fn check(&self, mode: CheckMode) -> CheckOutcome {
         self.check_with(mode, None, false)
     }
@@ -712,4 +720,45 @@ fn test_check_result_is_deterministic() {
     assert!(first.diagnostics.len() >= 6, "{:?}", first.diagnostics);
     assert_eq!(first, second);
     assert_eq!(first, other);
+}
+
+#[test]
+fn test_clone_moved_by_deleting_its_source_file_passes() {
+    let fx = fixture();
+    fx.commit(&[
+        ("A.java", block_class("A", &clone_block("a")).as_bytes()),
+        ("B.java", block_class("B", &clone_block("a")).as_bytes()),
+    ]);
+    fx.unstage("A.java");
+    // Enough unique code around the block keeps rename detection from pairing
+    // the two files, so the source really is a deletion.
+    let body = format!(
+        "{}{}{}{}",
+        clone_block("a"),
+        clone_block("b"),
+        clone_block("c"),
+        clone_block("d")
+    );
+    fx.stage("New.java", block_class("New", &body).as_bytes());
+
+    let outcome = fx.staged();
+
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    assert_eq!(outcome.exit_status, EXIT_PASS);
+}
+
+#[test]
+fn test_base_mode_judges_a_file_changed_after_the_merge_base() {
+    let fx = fixture();
+    let first = fx.commit(&[("Mod.java", java_class("Mod", LOW_CC_IFS, 0).as_bytes())]);
+    let commit = fx.repo.find_commit(first).expect("find the first commit");
+    fx.repo
+        .branch("topic", &commit, false)
+        .expect("branch at the merge base");
+    fx.commit(&[("Mod.java", java_class("Mod", HIGH_CC_IFS, 0).as_bytes())]);
+
+    let outcome = fx.check(base_mode("topic", false));
+
+    assert_eq!(codes(&outcome), vec![E101]);
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
 }
