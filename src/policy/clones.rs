@@ -594,11 +594,18 @@ pub fn evaluate_clones(
     views.extend(unchanged.iter().filter_map(FileView::new));
     let facts = ChangeFacts::new(changes, &base_views, &views[..changed_count])?;
 
-    let per_file: Vec<(LanguageFamily, PerFileCandidates)> = views
+    let mut per_file: Vec<(LanguageFamily, PerFileCandidates)> = views
         .par_iter()
         .enumerate()
         .map(|(index, view)| (view.language, view.enumerate(index, min_clone_lines)))
         .collect();
+    let changed_fingerprints: HashSet<u128> = per_file[..changed_count]
+        .iter()
+        .flat_map(|(_, candidates)| candidates.iter().map(|&(key, _)| key))
+        .collect();
+    for (_, candidates) in &mut per_file[changed_count..] {
+        candidates.retain(|(key, _)| changed_fingerprints.contains(key));
+    }
     let base_runs: Vec<Vec<Candidate>> = base_views
         .par_iter()
         .enumerate()
