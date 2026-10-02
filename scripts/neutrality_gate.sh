@@ -21,7 +21,8 @@
 #   scripts/neutrality_gate.sh --capture  -- re-capture tests/golden/neutrality/
 #                                             baselines from the current HEAD
 #                                             by delegating to the Rust harness's
-#                                             own NSD_NEUTRALITY_CAPTURE mode
+#                                             per-corpus NSD_NEUTRALITY_CAPTURE_CLEAN
+#                                             and _MALFORMED modes
 #                                             (`cargo test --test neutrality`);
 #                                             skips the pre-IR worktree/diff
 #                                             logic entirely.
@@ -33,7 +34,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 if [ "${1:-}" = "--capture" ]; then
   echo "Capturing tests/golden/neutrality/ baselines from HEAD via 'cargo test --test neutrality'..." >&2
   cd "$REPO_ROOT"
-  NSD_NEUTRALITY_CAPTURE=1 cargo test --test neutrality
+  NSD_NEUTRALITY_CAPTURE_CLEAN=1 NSD_NEUTRALITY_CAPTURE_MALFORMED=1 cargo test --test neutrality
   exit $?
 fi
 

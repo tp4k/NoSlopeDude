@@ -58,12 +58,12 @@ extract_scanned_lines() {
 }
 
 # extract_incomplete <report.json path>
-# Prints the top-level `incomplete` boolean. It is a unique top-level key,
-# so a plain grep is sound (unlike `scanned_lines`/`skipped_files`, which
-# both recur inside nested blocks).
+# Prints the top-level `incomplete` boolean. The match is anchored to the
+# two-space indent of a top-level key in the pretty-printed report, so a
+# skipped path whose value is `"incomplete"` cannot be mistaken for it.
 extract_incomplete() {
   local file="$1"
-  grep -m1 '"incomplete"' "$file" | grep -o 'true\|false'
+  grep -m1 '^  "incomplete"' "$file" | grep -o 'true\|false'
 }
 
 # extract_skipped_block <report.json path>
@@ -128,12 +128,14 @@ head_sha_annotation() {
 # docs/measurements.md (a parenthetical in the date cell). B12/row 7: a
 # failing git inside head_sha_annotation must fail this function closed
 # too, not print a truncated cell -- `set -e` is not inherited by a
-# command substitution, so the failure is captured explicitly here
-# rather than relying on `$(head_sha_annotation)` propagating it.
+# command substitution, so the failure (of `date -u` as well) is captured
+# explicitly here rather than relying on `$(head_sha_annotation)`
+# propagating it.
 date_cell() {
-  local ann
+  local ann day
   ann="$(head_sha_annotation)" || return 1
-  printf '%s %s' "$(date -u +%Y-%m-%d)" "$ann"
+  day="$(date -u +%Y-%m-%d)" || return 1
+  printf '%s %s' "$day" "$ann"
 }
 
 main() {

@@ -87,12 +87,12 @@ const DECLARED_DELTAS: &[&str] = &[
     "/scores/java/verbosity/scanned_lines",
 ];
 
-/// Set (non-empty) to make the two corpus tests below overwrite their
-/// baseline files with a freshly captured, normalized report instead of
-/// comparing against them. This is the one code path that writes
-/// `tests/golden/neutrality/`; a plain `cargo test` never sets it.
-/// `scripts/neutrality_gate.sh --capture` is the operator entry point.
+/// Legacy shared capture variable. It no longer selects anything: capture
+/// is gated per corpus by `capture_var`, so recapturing one corpus cannot
+/// rewrite the other's baseline.
 const NEUTRALITY_CAPTURE_ENV_VAR: &str = "NSD_NEUTRALITY_CAPTURE";
+const CLEAN_CAPTURE_ENV_VAR: &str = "NSD_NEUTRALITY_CAPTURE_CLEAN";
+const MALFORMED_CAPTURE_ENV_VAR: &str = "NSD_NEUTRALITY_CAPTURE_MALFORMED";
 
 fn manifest_path(relative: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative)
@@ -255,19 +255,23 @@ enum Corpus {
     Malformed,
 }
 
-fn capture_var(_corpus: Corpus) -> &'static str {
-    unimplemented!("per-corpus capture variable name")
+/// The one environment variable gating `corpus`'s baseline write. Set
+/// (non-empty) it makes that corpus's test overwrite its baseline with a
+/// freshly captured report instead of comparing; a plain `cargo test` sets
+/// neither. `scripts/neutrality_gate.sh --capture` sets both.
+fn capture_var(corpus: Corpus) -> &'static str {
+    match corpus {
+        Corpus::Clean => CLEAN_CAPTURE_ENV_VAR,
+        Corpus::Malformed => MALFORMED_CAPTURE_ENV_VAR,
+    }
 }
 
-fn capture_selected(
-    _corpus: Corpus,
-    _read_var: impl Fn(&str) -> Option<std::ffi::OsString>,
-) -> bool {
-    unimplemented!("per-corpus capture selection")
+fn capture_selected(corpus: Corpus, read_var: impl Fn(&str) -> Option<std::ffi::OsString>) -> bool {
+    read_var(capture_var(corpus)).is_some_and(|value| !value.is_empty())
 }
 
-fn capture_requested() -> bool {
-    std::env::var_os(NEUTRALITY_CAPTURE_ENV_VAR).is_some_and(|value| !value.is_empty())
+fn capture_requested(corpus: Corpus) -> bool {
+    capture_selected(corpus, |name| std::env::var_os(name))
 }
 
 /// Replaces exactly one occurrence of `target_input` (the corpus's own
@@ -371,7 +375,7 @@ fn test_clean_corpus_report_is_byte_identical_to_the_pre_ir_baseline() {
     let actual_text = normalize_raw_text(&scanned.json_text, &scanned.target_input);
 
     let baseline_path = manifest_path(CLEAN_BASELINE_PATH);
-    if capture_requested() {
+    if capture_requested(Corpus::Clean) {
         fs::write(&baseline_path, &actual_text).expect("write clean neutrality baseline");
         return;
     }
@@ -390,7 +394,7 @@ fn test_malformed_corpus_report_matches_its_baseline_with_declared_deltas_only()
     let actual_text = normalize_raw_text(&scanned.json_text, &scanned.target_input);
 
     let baseline_path = manifest_path(MALFORMED_BASELINE_PATH);
-    if capture_requested() {
+    if capture_requested(Corpus::Malformed) {
         fs::write(&baseline_path, &actual_text).expect("write malformed neutrality baseline");
         return;
     }
