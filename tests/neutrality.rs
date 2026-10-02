@@ -255,6 +255,10 @@ enum Corpus {
     Malformed,
 }
 
+fn capture_var(_corpus: Corpus) -> &'static str {
+    unimplemented!("per-corpus capture variable name")
+}
+
 fn capture_selected(
     _corpus: Corpus,
     _read_var: impl Fn(&str) -> Option<std::ffi::OsString>,
