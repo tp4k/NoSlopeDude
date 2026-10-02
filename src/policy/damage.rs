@@ -145,6 +145,60 @@ fn has_changed_line(
         .is_some()
 }
 
+/// Closed line ranges kept as disjoint merged runs, so "does some range
+/// overlap this one" is one ordered lookup.
+#[derive(Default)]
+struct OverlapIndex {
+    runs: BTreeMap<usize, usize>,
+}
+
+impl OverlapIndex {
+    fn overlaps(&self, (start, end): (usize, usize)) -> bool {
+        self.runs
+            .range(..=end)
+            .next_back()
+            .is_some_and(|(_, &run_end)| start <= run_end)
+    }
+
+    fn insert(&mut self, (mut start, mut end): (usize, usize)) {
+        while let Some((&run_start, &run_end)) = self.runs.range(..=end).next_back() {
+            if run_end < start {
+                break;
+            }
+            self.runs.remove(&run_start);
+            start = start.min(run_start);
+            end = end.max(run_end);
+        }
+        self.runs.insert(start, end);
+    }
+}
+
+/// Ranges sorted by start with the running maximum end, so "does some range
+/// contain this one" is one binary search.
+struct ContainIndex {
+    by_start: Vec<(usize, usize)>,
+}
+
+impl ContainIndex {
+    fn new(ranges: &[(usize, usize)]) -> Self {
+        let mut by_start = ranges.to_vec();
+        by_start.sort_unstable();
+        let mut widest = 0;
+        for (_, end) in &mut by_start {
+            widest = widest.max(*end);
+            *end = widest;
+        }
+        Self { by_start }
+    }
+
+    fn contains(&self, (start, end): (usize, usize)) -> bool {
+        let below = self
+            .by_start
+            .partition_point(|&(range_start, _)| range_start <= start);
+        below > 0 && end <= self.by_start[below - 1].1
+    }
+}
+
 fn covers(lines: &BTreeSet<usize>, (start, end): (usize, usize)) -> bool {
     lines.range(start..=end).count() == end - start + 1
 }
@@ -160,13 +214,26 @@ fn file_diagnostics(
     let line_map = base
         .map(|base| map_lines(base.source, candidate.source))
         .transpose()?;
-    let tolerated = tolerated_lines(base, line_map.as_ref());
-    let measured = measured_lines(base, candidate, line_map.as_ref());
-    let candidate_to_base: BTreeMap<usize, usize> = line_map
-        .iter()
-        .flat_map(|map| map.base_to_candidate.iter())
-        .map(|(&base_line, &candidate_line)| (candidate_line, base_line))
-        .collect();
+    let tolerated = if ir.damage.is_empty() {
+        BTreeSet::new()
+    } else {
+        tolerated_lines(base, line_map.as_ref())
+    };
+    let measured = if ir.excluded_callables.is_empty() {
+        BTreeSet::new()
+    } else {
+        measured_lines(base, candidate, line_map.as_ref())
+    };
+    let candidate_to_base: BTreeMap<usize, usize> =
+        if ir.excluded_callables.is_empty() && ir.excluded_blocks.is_empty() {
+            BTreeMap::new()
+        } else {
+            line_map
+                .iter()
+                .flat_map(|map| map.base_to_candidate.iter())
+                .map(|(&base_line, &candidate_line)| (candidate_line, base_line))
+                .collect()
+        };
 
     let mut raised: Vec<(usize, usize)> = ir
         .damage
@@ -174,7 +241,14 @@ fn file_diagnostics(
         .map(|damage| line_range(damage.span))
         .filter(|&range| !covers(&tolerated, range))
         .collect();
-    let damage_raised = raised.clone();
+    let mut damage_reported = OverlapIndex::default();
+    for &range in &raised {
+        damage_reported.insert(range);
+    }
+    let mut reported = OverlapIndex::default();
+    for &range in &raised {
+        reported.insert(range);
+    }
     let callable_ranges: Vec<(usize, usize)> = ir
         .excluded_callables
         .iter()
@@ -183,26 +257,21 @@ fn file_diagnostics(
     for &(start, end) in &callable_ranges {
         let changed = has_changed_line(line_map.as_ref(), &candidate_to_base, (start, end));
         let swallows_measured = measured.range(start..=end).next().is_some();
-        let already_reported = damage_raised
-            .iter()
-            .any(|&(damage_start, damage_end)| damage_start <= end && start <= damage_end);
+        let already_reported = damage_reported.overlaps((start, end));
         if (changed || swallows_measured) && !already_reported {
             raised.push((start, end));
+            reported.insert((start, end));
         }
     }
+    let enclosing_callables = ContainIndex::new(&callable_ranges);
     for &span in &ir.excluded_blocks {
         let (start, end) = line_range(span);
-        let inside_callable = callable_ranges
-            .iter()
-            .any(|&(callable_start, callable_end)| callable_start <= start && end <= callable_end);
-        let already_reported = raised
-            .iter()
-            .any(|&(raised_start, raised_end)| raised_start <= end && start <= raised_end);
-        if !inside_callable
-            && !already_reported
+        if !enclosing_callables.contains((start, end))
+            && !reported.overlaps((start, end))
             && has_changed_line(line_map.as_ref(), &candidate_to_base, (start, end))
         {
             raised.push((start, end));
+            reported.insert((start, end));
         }
     }
     Ok(raised
@@ -264,5 +333,24 @@ mod tests {
             ends: BTreeSet::from([3]),
         };
         assert!(!is_still_measured((None, None), &candidates));
+    }
+
+    #[test]
+    fn contain_index_counts_a_range_sharing_the_widest_end() {
+        let index = ContainIndex::new(&[(5, 9), (1, 3)]);
+        assert!(index.contains((5, 9)));
+        assert!(index.contains((6, 9)));
+        assert!(!index.contains((6, 10)));
+        assert!(!index.contains((4, 4)));
+    }
+
+    #[test]
+    fn overlap_index_keeps_a_nested_range_inside_its_run() {
+        let mut index = OverlapIndex::default();
+        index.insert((1, 10));
+        index.insert((2, 3));
+        assert!(index.overlaps((5, 6)));
+        assert!(index.overlaps((10, 12)));
+        assert!(!index.overlaps((11, 12)));
     }
 }

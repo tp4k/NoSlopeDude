@@ -1164,6 +1164,40 @@ fn test_rewritten_block_does_not_match_its_own_replaced_base_version() {
 }
 
 #[test]
+fn test_unrelated_unchanged_clone_groups_do_not_change_v102() {
+    let unrelated_pair = [
+        ("U1.java", java("U1", &block("u"))),
+        ("U2.java", java("U2", &block("u"))),
+    ];
+    fn files(extra: &[(&'static str, String)]) -> Vec<(&'static str, String)> {
+        let mut files = vec![
+            ("A.java", java("A", &block("a"))),
+            ("Other.java", java("Other", "")),
+        ];
+        files.extend_from_slice(extra);
+        files
+    }
+    let new_copy = [("New.java", java("New", &block("a")))];
+    let (_dir, repo) = common::init_repo();
+    let base_alone = commit(&repo, &files(&[]));
+    let candidate_alone = commit(&repo, &files(&new_copy));
+    let base_with_pair = commit(&repo, &files(&unrelated_pair));
+    let candidate_with_pair = commit(
+        &repo,
+        &files(&[new_copy.as_slice(), unrelated_pair.as_slice()].concat()),
+    );
+
+    let expected = vec![body_site("New.java", BLOCK_LINES)];
+    assert_eq!(
+        sites(&evaluate(&repo, base_alone, candidate_alone)),
+        expected
+    );
+    let found = evaluate(&repo, base_with_pair, candidate_with_pair);
+    assert_eq!(sites(&found), expected);
+    assert_eq!(found[0].matched_path.render(), "A.java");
+}
+
+#[test]
 fn test_clones_between_unchanged_files_raise_nothing() {
     let (_dir, repo) = common::init_repo();
     let base = commit(
