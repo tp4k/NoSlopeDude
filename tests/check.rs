@@ -408,6 +408,52 @@ fn test_unreadable_base_config_blob_raises_g101_not_c102() {
     assert_eq!(outcome.exit_status, EXIT_ERROR);
 }
 
+#[test]
+fn test_unreadable_changed_base_blob_raises_g101() {
+    let fx = fixture();
+    let committed = java_class("Foo", LOW_CC_IFS, 0);
+    let oid = fx.commit(&[("Foo.java", committed.as_bytes())]);
+    let tree = fx
+        .repo
+        .find_commit(oid)
+        .and_then(|c| c.tree())
+        .expect("tree");
+    let blob = tree.get_name("Foo.java").expect("Foo.java entry").id();
+    let header = format!("blob {}\0", committed.len());
+    let reviewed = format!("// reviewed\n{committed}");
+    let forged = "x".repeat(committed.len());
+    corrupt_loose_object(&fx.repo, blob, format!("{header}{forged}").as_bytes());
+    fx.stage("Foo.java", reviewed.as_bytes());
+
+    let outcome = fx.staged();
+
+    assert_eq!(codes(&outcome), vec![G101]);
+    assert_eq!(outcome.exit_status, EXIT_ERROR);
+}
+
+#[test]
+fn test_unreadable_changed_candidate_blob_raises_g101() {
+    let fx = fixture();
+    fx.commit(&[("Foo.java", java_class("Foo", LOW_CC_IFS, 0).as_bytes())]);
+    let staged = java_class("Foo", HIGH_CC_IFS, 0);
+    fx.stage("Foo.java", staged.as_bytes());
+    let blob = fx
+        .repo
+        .index()
+        .expect("open the index")
+        .get_path(Path::new("Foo.java"), 0)
+        .expect("staged entry")
+        .id;
+    let header = format!("blob {}\0", staged.len());
+    let forged = "x".repeat(staged.len());
+    corrupt_loose_object(&fx.repo, blob, format!("{header}{forged}").as_bytes());
+
+    let outcome = fx.staged();
+
+    assert!(codes(&outcome).contains(&G101));
+    assert_eq!(outcome.exit_status & EXIT_ERROR, EXIT_ERROR);
+}
+
 // ---------------------------------------------------------------------
 // Evaluators.
 // ---------------------------------------------------------------------
@@ -600,6 +646,19 @@ fn test_candidate_config_cannot_weaken_its_own_check() {
     fx.commit(&[("Foo.java", java_class("Foo", LOW_CC_IFS, 0).as_bytes())]);
     fx.stage("Foo.java", java_class("Foo", HIGH_CC_IFS, 0).as_bytes());
     fx.stage("nsd.yml", E101_OFF.as_bytes());
+
+    let outcome = fx.staged();
+
+    assert_eq!(codes(&outcome), vec![C101, E101]);
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
+#[test]
+fn test_candidate_config_exclude_cannot_hide_its_own_regression() {
+    let fx = fixture();
+    fx.commit(&[("src/Foo.java", java_class("Foo", LOW_CC_IFS, 0).as_bytes())]);
+    fx.stage("src/Foo.java", java_class("Foo", HIGH_CC_IFS, 0).as_bytes());
+    fx.stage("nsd.yml", b"version: 1\nexclude:\n  - src/**\n");
 
     let outcome = fx.staged();
 
