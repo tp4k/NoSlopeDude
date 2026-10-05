@@ -1,5 +1,6 @@
 use std::ffi::OsString;
 use std::io::Write;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
 
@@ -101,10 +102,11 @@ fn refused_config(config: &Path) -> (Vec<CheckDiagnostic>, u8) {
 }
 
 /// Whether `config` lies under the work tree of the repository at
-/// `repository` (`.git/` included), either as given with its directory
-/// resolved, with its own symlinks resolved too, or resolved on disk from the
-/// raw path (so `..` after a symlink is followed as the OS does). A directory
-/// that is not a work tree has no inside; `run_check` reports it as G101.
+/// `repository` (`.git/` included): by the absolute path as given, by any
+/// resolved form of it (so `..` after a symlink is followed as the OS does),
+/// or because an existing ancestor of those forms is the work-tree root under
+/// another name (same device and inode). A directory that is not a work tree
+/// has no inside; `run_check` reports it as G101.
 fn config_is_inside_checkout(repository: &Path, config: &Path) -> anyhow::Result<bool> {
     let Some(workdir) = Repository::open(repository)
         .ok()
@@ -114,7 +116,7 @@ fn config_is_inside_checkout(repository: &Path, config: &Path) -> anyhow::Result
     };
     let root = std::fs::canonicalize(&workdir).context("cannot resolve the checkout root")?;
     let absolute = lexically_normalized(&repository.join(config));
-    let mut forms = vec![canonical_even_if_missing(&absolute)?];
+    let mut forms = vec![absolute.clone(), canonical_even_if_missing(&absolute)?];
     if let (Some(parent), Some(name)) = (absolute.parent(), absolute.file_name()) {
         forms.push(canonical_even_if_missing(parent)?.join(name));
     }
@@ -127,7 +129,19 @@ fn config_is_inside_checkout(repository: &Path, config: &Path) -> anyhow::Result
             forms.push(resolved.join(name));
         }
     }
-    Ok(forms.iter().any(|form| form.starts_with(&root)))
+    if forms.iter().any(|form| form.starts_with(&root)) {
+        return Ok(true);
+    }
+    let Ok(root_identity) = std::fs::metadata(&root).map(|meta| (meta.dev(), meta.ino())) else {
+        return Ok(false);
+    };
+    Ok(forms
+        .iter()
+        .flat_map(|form| form.ancestors())
+        .any(|ancestor| {
+            std::fs::metadata(ancestor)
+                .is_ok_and(|meta| meta.is_dir() && (meta.dev(), meta.ino()) == root_identity)
+        }))
 }
 
 fn lexically_normalized(path: &Path) -> PathBuf {
