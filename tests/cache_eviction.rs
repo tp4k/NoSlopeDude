@@ -263,3 +263,27 @@ fn test_plain_open_runs_the_pass() {
 
     assert!(!stale.exists());
 }
+
+#[test]
+fn test_linked_worktree_open_evicts_the_shared_cache_once() {
+    let (_dir, repo) = common::init_repo();
+    common::commit_entries(
+        &repo,
+        &[(b"A.java".to_vec(), 0o100644, b"class A {}\n".to_vec())],
+    );
+    let linked_dir = tempfile::TempDir::new().expect("temp dir");
+    let linked_path = linked_dir.path().join("linked");
+    repo.worktree("linked", &linked_path, None)
+        .expect("add a linked worktree");
+    let linked = git2::Repository::open(&linked_path).expect("open linked");
+    let root = cache_root(&repo);
+    let t0 = SystemTime::now();
+    let first = plant_entry(&root, 1, KIB, DAY * 40, t0);
+    let second = plant_entry(&root, 2, KIB, DAY * 40, t0);
+
+    Cache::open_at(&linked, UNLIMITED, t0).expect("open from the linked worktree");
+    assert!(!first.exists(), "the pass reaches the shared cache");
+
+    Cache::open_at(&repo, UNLIMITED, t0 + DAY / 24).expect("open from the main worktree");
+    assert!(second.exists(), "the stamp is shared by both worktrees");
+}

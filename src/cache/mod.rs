@@ -8,6 +8,7 @@ use std::fmt;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use git2::{Oid, Repository};
 use serde::{Deserialize, Serialize};
@@ -154,6 +155,10 @@ pub struct Cache {
 impl Cache {
     /// Opens the cache of `repo`'s common Git directory, creating the root.
     pub fn open(repo: &Repository) -> Result<Cache, CacheError> {
+        Cache::open_at(repo, EvictionLimits::DEFAULT, SystemTime::now())
+    }
+
+    fn open_root(repo: &Repository) -> Result<Cache, CacheError> {
         let root = ROOT_COMPONENTS
             .iter()
             .fold(repo.commondir().to_path_buf(), |path, part| path.join(part));
@@ -180,7 +185,8 @@ impl Cache {
     /// unreadable or unparsable one, another version, a header that is not
     /// this key's, or a payload that does not match its digest.
     pub fn get(&self, key: &CacheKey) -> Option<CachedAnalysis> {
-        let bytes = fs::read(self.entry_path(key)).ok()?;
+        let path = self.entry_path(key);
+        let bytes = fs::read(&path).ok()?;
         let split = bytes.iter().position(|byte| *byte == HEADER_TERMINATOR)?;
         let payload_bytes = &bytes[split + 1..];
         let header: Header = serde_json::from_slice(&bytes[..split]).ok()?;
@@ -193,7 +199,9 @@ impl Cache {
         if !matches {
             return None;
         }
-        serde_json::from_slice(payload_bytes).ok()
+        let analysis = serde_json::from_slice(payload_bytes).ok()?;
+        self.refresh_recency(&path);
+        Some(analysis)
     }
 
     /// Writes `analysis` under `key` through a temp file renamed into place,
