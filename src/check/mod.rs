@@ -417,11 +417,19 @@ impl Sides<'_> {
             .collect();
 
         let mut base_reads = Vec::new();
+        let mut base_coverage = Vec::new();
         for included in &base_discovery.included {
-            if !changed_base.contains(&included.path)
-                || included.too_large
-                || included.non_utf8_path
-            {
+            if !changed_base.contains(&included.path) {
+                continue;
+            }
+            // A changed file the base cannot analyze is an analysis gap of its
+            // own, even when its candidate side fits.
+            if included.too_large || included.non_utf8_path {
+                base_coverage.push(CoverageInput {
+                    entry: included.clone(),
+                    changed: true,
+                    failure: None,
+                });
                 continue;
             }
             let read = base_entries
@@ -488,6 +496,16 @@ impl Sides<'_> {
                 }),
             }
         }
+        let reported: HashSet<RepoPath> = loads
+            .coverage
+            .iter()
+            .map(|input| input.entry.path.clone())
+            .collect();
+        loads.coverage.extend(
+            base_coverage
+                .into_iter()
+                .filter(|input| !reported.contains(&input.entry.path)),
+        );
         loads
     }
 

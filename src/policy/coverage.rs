@@ -13,7 +13,8 @@ pub struct CoverageInput {
     pub entry: IncludedEntry,
     /// True when `entry.path` is the candidate-side path of a
     /// `git::diff::Change`: `Added`/`Modified`/`Typechange` `path`, `Renamed`
-    /// `to`.
+    /// `to`; or its base-side path, when the base copy of a changed file is
+    /// too large or has a non-UTF-8 path.
     pub changed: bool,
     /// `analyze_file(..).err()` when the bytes were read. `reason_of` checks
     /// the entry's own `too_large` and `non_utf8_path` flags before this
