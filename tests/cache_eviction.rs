@@ -288,3 +288,27 @@ fn test_linked_worktree_open_evicts_the_shared_cache_once() {
     Cache::open_at(&repo, UNLIMITED, t0 + DAY / 24).expect("open from the main worktree");
     assert!(second.exists(), "the stamp is shared by both worktrees");
 }
+
+#[cfg(unix)]
+#[test]
+fn test_a_symlinked_entry_is_not_an_entry_under_any_cap() {
+    let (dir, _repo, cache) = open_empty();
+    let now = SystemTime::now();
+    let target = dir.path().join("target.bin");
+    plant_file(&target, KIB, DAY, now);
+    let real = cache.root().join("ab");
+    fs::create_dir_all(&real).expect("real fan-out dir");
+    let link = real.join(format!("{}.json", entry_name(2)));
+    std::os::unix::fs::symlink(&target, &link).expect("symlinked entry");
+
+    let removed = cache.evict(
+        EvictionLimits {
+            max_bytes: 0,
+            ..UNLIMITED
+        },
+        now,
+    );
+
+    assert_eq!(removed, 0);
+    assert!(link.symlink_metadata().is_ok() && target.exists());
+}
