@@ -591,6 +591,26 @@ fn test_check_missing_config_outside_symlink_then_dotdot_inside_is_refused() {
 }
 
 #[test]
+fn test_check_config_in_a_missing_dir_after_outside_symlink_then_dotdot_is_refused() {
+    let fx = Fixture::staged_regression();
+    fs::create_dir_all(fx.root().join("sub")).expect("create a directory in the checkout");
+    let outside = TempDir::new().expect("create a directory outside the checkout");
+    let link = outside.path().join("l");
+    symlink(fx.root().join("sub"), &link).expect("link an outside path to a checkout directory");
+    let given = link.join("..").join("missing").join("absent.yml");
+
+    let output = fx.nsd(&["check", "--staged", "--config", path_str(&given)]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_ERROR));
+    let listing = stdout(&output);
+    assert!(listing.contains(C102), "{listing}");
+    assert!(
+        listing.contains("inside the candidate checkout"),
+        "{listing}"
+    );
+}
+
+#[test]
 fn test_check_config_symlink_reached_through_symlink_dotdot_is_refused() {
     let parent = TempDir::new().expect("create a parent directory");
     let root = parent.path().join("repo");
