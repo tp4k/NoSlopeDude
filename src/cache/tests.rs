@@ -152,3 +152,50 @@ fn test_tampered_payload_with_intact_header_is_a_miss() {
     cache.put(&key, &built).expect("repair");
     assert_eq!(cache.get(&key), Some(built));
 }
+
+const MULTI_LINE_DAMAGE_SOURCE: &str = "class A {
+    int ok() {
+        return 1;
+    }
+    @@@ junk
+    more junk (
+       here
+    }
+}
+";
+
+#[test]
+fn test_multi_line_damage_span_round_trips() {
+    let (_dir, cache) = cache();
+    let analysis = analysis_of(MULTI_LINE_DAMAGE_SOURCE);
+    assert!(analysis
+        .ir
+        .damage
+        .iter()
+        .any(|damage| damage.span.end_line > damage.span.start_line));
+    let key = key_of(MULTI_LINE_DAMAGE_SOURCE);
+    cache
+        .put(
+            &key,
+            &CachedAnalysis::from_analysis(&analysis, MULTI_LINE_DAMAGE_SOURCE, MIN_LINES),
+        )
+        .expect("put");
+
+    let hydrated = cache
+        .get(&key)
+        .expect("hit")
+        .hydrate(Path::new("A.java"), LanguageFamily::Java)
+        .expect("hydrates");
+    let read: Vec<_> = hydrated
+        .damage
+        .iter()
+        .map(|damage| (damage.kind, damage.start_line, damage.end_line))
+        .collect();
+    let expected: Vec<_> = analysis
+        .ir
+        .damage
+        .iter()
+        .map(|damage| (damage.kind, damage.span.start_line, damage.span.end_line))
+        .collect();
+    assert_eq!(read, expected);
+}
