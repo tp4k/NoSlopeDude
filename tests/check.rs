@@ -652,6 +652,49 @@ fn test_unchanged_unanalyzable_file_raises_a102_only_while_v102_is_enabled() {
     assert_eq!(disabled.exit_status, EXIT_PASS);
 }
 
+/// `text` followed by one padding comment, `length` bytes in all.
+fn padded_to(text: &str, length: usize) -> Vec<u8> {
+    let mut bytes = format!("{text}// ").into_bytes();
+    let pad = length - bytes.len() - 1;
+    bytes.extend(std::iter::repeat_n(b'x', pad));
+    bytes.push(b'\n');
+    assert_eq!(bytes.len(), length);
+    bytes
+}
+
+#[test]
+fn test_changed_file_over_ceiling_only_in_the_base_raises_a102_on_the_base_path() {
+    let fx = fixture();
+    let class = java_class("Big", LOW_CC_IFS, 0);
+    fx.commit(&[("Big.java", &padded_to(&class, ceiling() + 1))]);
+    fx.stage("Big.java", class.as_bytes());
+
+    let outcome = fx.staged();
+
+    assert_eq!(
+        coverage_reasons(&outcome),
+        vec![("Big.java".to_string(), "too_large")]
+    );
+    assert_eq!(codes(&outcome), vec![A102]);
+    assert_eq!(outcome.exit_status, EXIT_ERROR);
+}
+
+#[test]
+fn test_changed_file_over_ceiling_on_both_sides_raises_one_a102() {
+    let fx = fixture();
+    let class = java_class("Big", LOW_CC_IFS, 0);
+    fx.commit(&[("Big.java", &padded_to(&class, ceiling() + 1))]);
+    fx.stage("Big.java", &padded_to(&class, ceiling() + 2));
+
+    let outcome = fx.staged();
+
+    assert_eq!(
+        coverage_reasons(&outcome),
+        vec![("Big.java".to_string(), "too_large")]
+    );
+    assert_eq!(outcome.exit_status, EXIT_ERROR);
+}
+
 #[test]
 fn test_regression_and_analysis_error_together_exit_3() {
     let fx = fixture();
