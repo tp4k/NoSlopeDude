@@ -157,6 +157,39 @@ Sections, in document order, each its own `<section id="...">`:
    JSON, so a reader of the HTML alone sees the non-equivalence disclosure
    the Assumptions section requires.
 
+## Check JSON (M6-1/M6-2 subset)
+
+`nsd check --format json` prints one compact JSON document followed by `\n`.
+It is the subset of M6-1/M6-2 that `check` needs now; fields may be added by
+M6-2, and these are not meant to be renamed. Keys are sorted at every level,
+every number is an integer, paths are repository-relative (`%XX` for non-UTF-8
+bytes), and nothing records time or the checkout's location.
+
+```json
+{"diagnostics":[...],"exit_status":3,"result_scope":"check","schema_version":1}
+```
+
+- `schema_version` is `1`, `result_scope` is `"check"`, and `exit_status` is
+  the process exit code (`0`-`3`).
+- `diagnostics` keeps the order of the terminal listing, one entry per line.
+  Each entry has `code` and the fields of its terminal line:
+
+| Codes | Fields besides `code` |
+|---|---|
+| `NSD-E101`, `NSD-E102`, `NSD-G102` | `path`, `start_line`, `end_line`, `callable`, `base` (`{path, start_line, end_line, cc, sloc}` or `null`) |
+| `NSD-V101` | `path`, `start_line`, `end_line`, `rule_id` |
+| `NSD-S101`, `NSD-S102` | `path`, `directive_line`, `rule_id` (a string or `null`) |
+| `NSD-A101` | `path`, `start_line`, `end_line` |
+| `NSD-A102` | `path`, `reason` |
+| `NSD-V102` | `path`, `start_line`, `end_line`, `added_lines`, `matched` (`{path, start_line, end_line}`) |
+| `NSD-C101`, `NSD-C102` about the candidate config | `path` (`"nsd.yml"`) |
+| `NSD-G101`, `NSD-C102` for a refused `--config` | `message` |
+
+Not in this document yet (M6-2): the complete entity set, snapshot IDs,
+configuration and measurement fingerprints, and per-reason skip counts. A
+`message` is passed through as the terminal listing prints it, so it is not
+guaranteed free of absolute paths. `scan`'s `report.json` is unchanged.
+
 ## Terminal summary
 
 Printed to stdout by `nsd::report::terminal_summary`: the scan

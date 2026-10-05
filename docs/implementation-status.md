@@ -169,15 +169,15 @@ Plan: `nsd-plan-final.md` *M3–M5*. M3-1, M3-2, M3-3, M3-4 and M4-1 are done (l
 
 ## M6–M7 — Output, CI hardening
 
-Plan: `nsd-plan-final.md` *M6–M7*. **Not started.** The imported engine
+Plan: `nsd-plan-final.md` *M6–M7*. Started: `nsd check --format json` (subset). The imported engine
 already emits a scan-scoped `report.json` and standalone HTML, but none of it
 has been brought to the v1 canonical contract (`schema_version: 1`,
 `result_scope`, snapshot IDs, per-reason skip counts, check scope).
 
 | ID | Deliverable | Status |
 |---|---|---|
-| M6-1 | Canonical report `schema_version: 1` distinguishing `scan` and `check` scopes | `[ ]` |
-| M6-2 | Canonical JSON: complete entity/diagnostic set, stable ordering, fixed numeric serialization, repo-relative paths, snapshot IDs, configuration and measurement fingerprints, per-reason skip counts, no timestamps/absolute paths/excerpts | `[ ]` |
+| M6-1 | Canonical report `schema_version: 1` distinguishing `scan` and `check` scopes | `[~]` — check scope emits `schema_version: 1`, `result_scope: "check"` via `nsd check --format json` (`src/format/json.rs`, `tests/cli_check_json.rs`); scan scope's `report.json` not yet canonical |
+| M6-2 | Canonical JSON: complete entity/diagnostic set, stable ordering, fixed numeric serialization, repo-relative paths, snapshot IDs, configuration and measurement fingerprints, per-reason skip counts, no timestamps/absolute paths/excerpts | `[~]` — `nsd check --format json` has sorted keys, integers only, repo-relative paths, diagnostics in `CheckOutcome` order and no timestamps. Remaining: complete entity set (callables, ratios, summaries), snapshot IDs, configuration and measurement fingerprints, per-reason skip counts, the no-absolute-path guarantee for G101/C102 free-text messages (passed through as in the terminal listing), and the checkout-roots and thread-counts byte-identity legs |
 | M6-3 | Terminal (50) and agent (30) renderers with deterministic omitted counts; exit status always reflects the complete result | `[ ]` |
 | M6-4 | Scan HTML standalone, each excerpt capped at 20 lines / 4 KiB with an explicit truncation marker | `[~]` — HTML exists (`src/report/html.rs`), caps and truncation marker not implemented |
 | M7-1 | Built-in exclusions incl. nested `.git` checkouts; `scan` excludes test/fixture/`e2e`/QA paths unless requested, `check` has no default test exclusion | `[~]` — `src/discover.rs` has the scan-side set; nested-checkout exclusion is on `feat/m1-snapshots` for Git-backed discovery only |
