@@ -251,3 +251,37 @@ fn test_unknown_rule_id_is_a_miss() {
     cache.put(&key, &built).expect("repair");
     assert_eq!(cache.get(&key), Some(built));
 }
+
+#[test]
+fn test_vanished_entry_does_not_fail_the_pass() {
+    use super::EvictionLimits;
+    use std::time::{Duration, SystemTime};
+
+    let (_dir, cache) = cache();
+    let now = SystemTime::now();
+    let old = now - Duration::from_secs(40 * 24 * 60 * 60);
+    let mut paths = Vec::new();
+    for index in 0..3u32 {
+        let name = format!("{index:02x}{index:030x}");
+        let dir = cache.root().join(&name[..2]);
+        fs::create_dir_all(&dir).expect("fan-out dir");
+        let path = dir.join(format!("{name}.json"));
+        fs::write(&path, b"x").expect("entry");
+        let file = fs::File::options().write(true).open(&path).expect("open");
+        file.set_times(fs::FileTimes::new().set_modified(old))
+            .expect("age");
+        paths.push(path);
+    }
+    let limits = EvictionLimits {
+        max_bytes: u64::MAX,
+        max_age: Duration::from_secs(30 * 24 * 60 * 60),
+    };
+
+    let removed = cache.run_pass(limits, now, &|path| {
+        let _ = fs::remove_file(path);
+        fs::remove_file(path)
+    });
+
+    assert_eq!(removed, 3);
+    assert!(paths.iter().all(|path| !path.exists()));
+}
