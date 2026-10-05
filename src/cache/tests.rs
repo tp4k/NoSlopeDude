@@ -199,3 +199,25 @@ fn test_multi_line_damage_span_round_trips() {
         .collect();
     assert_eq!(read, expected);
 }
+
+const CANDIDATE_RECORD_LEN: usize = 7;
+
+#[test]
+fn test_clone_candidate_is_stored_as_an_array() {
+    let (_dir, cache) = cache();
+    let analysis = analysis_of(CLEAN_SOURCE);
+    let built = CachedAnalysis::from_analysis(&analysis, CLEAN_SOURCE, MIN_LINES);
+    let key = key_of(CLEAN_SOURCE);
+    cache.put(&key, &built).expect("put");
+    let candidates = built.clone_candidates(0);
+    assert!(!candidates.is_empty());
+
+    let text = fs::read_to_string(cache.entry_path(&key)).expect("read entry");
+    let split = text.find('\n').expect("header line");
+    let payload: serde_json::Value = serde_json::from_str(&text[split + 1..]).expect("payload");
+    let record = payload["analyzed"]["clone_candidates"][0]
+        .as_array()
+        .expect("candidate is a JSON array");
+    assert_eq!(record.len(), CANDIDATE_RECORD_LEN);
+    assert_eq!(record[0], format!("{:032x}", candidates[0].0));
+}
