@@ -312,3 +312,36 @@ fn test_a_symlinked_entry_is_not_an_entry_under_any_cap() {
     assert_eq!(removed, 0);
     assert!(link.symlink_metadata().is_ok() && target.exists());
 }
+
+#[test]
+fn test_an_out_of_range_stamp_counts_as_due() {
+    let (_dir, repo) = common::init_repo();
+    let root = cache_root(&repo);
+    let now = SystemTime::now();
+    let stale = plant_entry(&root, 1, KIB, DAY * 31, now);
+    fs::write(root.join("eviction-stamp"), u64::MAX.to_string()).expect("plant the stamp");
+
+    Cache::open_at(&repo, EvictionLimits::DEFAULT, now).expect("open with an out-of-range stamp");
+
+    assert!(!stale.exists(), "an unreadable stamp means the pass is due");
+}
+
+#[cfg(unix)]
+#[test]
+fn test_unwritable_stamp_skips_the_pass() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (_dir, repo) = common::init_repo();
+    let root = cache_root(&repo);
+    let t0 = SystemTime::now();
+    let later = t0 + DAY + DAY / 24;
+    Cache::open_at(&repo, UNLIMITED, t0).expect("first open");
+    let stale = plant_entry(&root, 1, KIB, DAY * 31, later);
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o500)).expect("lock the root");
+
+    let reopened = Cache::open_at(&repo, UNLIMITED, later);
+
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).expect("unlock the root");
+    reopened.expect("open succeeds without a stamp");
+    assert!(stale.exists(), "no stamp could be written, so no pass runs");
+}
