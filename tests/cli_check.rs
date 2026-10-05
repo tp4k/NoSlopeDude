@@ -291,6 +291,22 @@ fn test_check_config_inside_the_checkout_is_refused_with_c102() {
 }
 
 #[test]
+fn test_check_refusal_of_an_absolute_config_prints_no_checkout_path() {
+    let fx = Fixture::staged_regression();
+    let inside = write_config(fx.root(), "trusted.yml", WARN_E101);
+    let canonical = fs::canonicalize(fx.root()).expect("canonicalize the scratch repository");
+
+    for given in [path_str(&inside), path_str(&canonical.join("trusted.yml"))] {
+        let output = fx.nsd(&["check", "--staged", "--config", given]);
+
+        let listing = stdout(&output);
+        assert!(listing.contains(C102), "{given}: {listing}");
+        assert!(!listing.contains(path_str(fx.root())), "{listing}");
+        assert!(!listing.contains(path_str(&canonical)), "{listing}");
+    }
+}
+
+#[test]
 fn test_check_config_symlink_resolving_inside_the_checkout_is_refused() {
     let fx = Fixture::staged_regression();
     let target = write_config(fx.root(), "trusted.yml", WARN_E101);
