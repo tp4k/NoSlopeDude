@@ -590,3 +590,61 @@ fn test_unchanged_cached_unanalyzable_file_still_raises_a102() {
     assert_eq!(warm.diagnostics, cold.diagnostics);
     assert_eq!(warm.exit_status, cold.exit_status);
 }
+
+fn modified_at(path: &Path) -> std::time::SystemTime {
+    fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .expect("read the entry's modification time")
+}
+
+#[test]
+fn test_worktree_check_hits_an_unchanged_file_by_the_bytes_it_read() {
+    let fx = fixture();
+    let block = block_class("A", &clone_block("a", CLONE_BLOCK_LINES));
+    fx.commit(&[("A.java", block.as_bytes())]);
+    fs::write(fx.dir.path().join("A.java"), block.as_bytes()).expect("mirror the file");
+    fs::write(
+        fx.dir.path().join("Copy.java"),
+        block_class("Copy", &clone_block("a", CLONE_BLOCK_LINES)).as_bytes(),
+    )
+    .expect("add an untracked copy");
+    let mode = || CheckMode::Base {
+        reference: "HEAD".to_string(),
+        worktree: true,
+    };
+    let run = || {
+        run_check(&CheckRequest {
+            repository: fx.dir.path(),
+            mode: mode(),
+            config_path: None,
+            allow_new_suppressions: false,
+        })
+    };
+    let cold = run();
+    let key = CacheKey::new(fx.blob("A.java"), Grammar::Java, DEFAULT_MIN_CLONE_LINES);
+    let entry = fx.cache().entry_path(&key);
+    let written = modified_at(&entry);
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    let warm = run();
+
+    assert_eq!(codes(&cold), [V102]);
+    assert_eq!(warm.diagnostics, cold.diagnostics);
+    assert_eq!(modified_at(&entry), written, "a hit does not rewrite");
+}
+
+#[test]
+fn test_base_side_blob_never_enters_the_cache() {
+    let fx = fixture();
+    let committed = java_class("Foo", 4);
+    let staged = java_class("Foo", HIGH_CC_IFS);
+    fx.commit(&[("Foo.java", committed.as_bytes())]);
+    fx.stage("Foo.java", staged.as_bytes());
+
+    let outcome = fx.staged();
+
+    assert_eq!(codes(&outcome), ["NSD-E101"]);
+    assert!(fx
+        .entry(fx.blob("Foo.java"), Grammar::Java, DEFAULT_MIN_CLONE_LINES)
+        .is_none());
+}
