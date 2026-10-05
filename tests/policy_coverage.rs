@@ -269,18 +269,38 @@ fn test_legacy_parse_damage_is_not_a102() {
     assert!(evaluate_coverage(&inputs, &policy_with("deny")).is_empty());
 }
 
-#[test]
-fn test_unsupported_extension_never_raises_a102() {
+fn unsupported_extension_input(changed: bool) -> Vec<CoverageInput> {
     let mut inputs = inputs_for(
         &[(b"Small.java", SMALL.as_bytes().to_vec())],
         &[(b"Small.java", SMALL.as_bytes().to_vec())],
         &Config::default(),
     );
     inputs[0].failure = Some(UnanalyzableReason::UnsupportedExtension);
-    for changed in [false, true] {
-        inputs[0].changed = changed;
-        assert!(evaluate_coverage(&inputs, &policy_with("deny")).is_empty());
+    inputs[0].changed = changed;
+    inputs
+}
+
+/// Ledger row 108 (user decision): a changed included input analysis
+/// reports as `UnsupportedExtension` fails closed, whatever V102 says.
+#[test]
+fn test_changed_unsupported_extension_raises_a102() {
+    let inputs = unsupported_extension_input(true);
+    for v102 in ["deny", "off"] {
+        assert_eq!(
+            named(&evaluate_coverage(&inputs, &policy_with(v102))),
+            vec![(
+                "Small.java".to_string(),
+                UnanalyzableReason::UnsupportedExtension
+            )],
+            "V102 {v102}"
+        );
     }
+}
+
+#[test]
+fn test_unchanged_unsupported_extension_raises_no_a102() {
+    let inputs = unsupported_extension_input(false);
+    assert!(evaluate_coverage(&inputs, &policy_with("deny")).is_empty());
 }
 
 #[test]

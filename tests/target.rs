@@ -1,13 +1,16 @@
 //! Revision probing of a local target (D6) must not run code configured by
 //! the scanned checkout's own `.git/config`.
 
+mod common;
+
 use std::fs;
 use std::path::Path;
 
-use git2::{Repository, Signature};
+use git2::Repository;
 use nsd::target::{classify, resolve};
 use tempfile::TempDir;
 
+const MODE_REGULAR: i32 = 0o100644;
 const TRACKED_FILE: &str = "Tracked.java";
 const UNTRACKED_FILE: &str = "Untracked.java";
 const HOOK_FILE: &str = "hook.sh";
@@ -17,24 +20,23 @@ const EXECUTABLE_MODE: u32 = 0o755;
 
 /// A repository with one committed, unmodified file; returns the commit sha.
 fn committed_repo() -> (TempDir, Repository, String) {
-    let dir = TempDir::new().expect("create a temp dir for the repository");
-    let repo = Repository::init(dir.path()).expect("init the repository");
-    fs::write(dir.path().join(TRACKED_FILE), "class Tracked {}\n").expect("write a tracked file");
+    let (dir, repo) = common::init_repo();
+    let content = b"class Tracked {}\n";
+    let commit = common::commit_entries(
+        &repo,
+        &[(
+            TRACKED_FILE.as_bytes().to_vec(),
+            MODE_REGULAR,
+            content.to_vec(),
+        )],
+    );
+    fs::write(dir.path().join(TRACKED_FILE), content).expect("write a tracked file");
     let mut index = repo.index().expect("open the index");
     index
         .add_path(Path::new(TRACKED_FILE))
         .expect("stage the tracked file");
     index.write().expect("write the index");
-    let tree = repo
-        .find_tree(index.write_tree().expect("write the tree"))
-        .expect("find the tree");
-    let signature = Signature::now("nsd test", "test@example.invalid").expect("signature");
-    let sha = repo
-        .commit(Some("HEAD"), &signature, &signature, "init", &tree, &[])
-        .expect("commit")
-        .to_string();
-    drop(tree);
-    (dir, repo, sha)
+    (dir, repo, commit.to_string())
 }
 
 fn resolved_revision(dir: &Path) -> nsd::model::Revision {

@@ -87,12 +87,12 @@ const DECLARED_DELTAS: &[&str] = &[
     "/scores/java/verbosity/scanned_lines",
 ];
 
-/// Set (non-empty) to make the two corpus tests below overwrite their
-/// baseline files with a freshly captured, normalized report instead of
-/// comparing against them. This is the one code path that writes
-/// `tests/golden/neutrality/`; a plain `cargo test` never sets it.
-/// `scripts/neutrality_gate.sh --capture` is the operator entry point.
+/// Legacy shared capture variable. It no longer selects anything: capture
+/// is gated per corpus by `capture_var`, so recapturing one corpus cannot
+/// rewrite the other's baseline.
 const NEUTRALITY_CAPTURE_ENV_VAR: &str = "NSD_NEUTRALITY_CAPTURE";
+const CLEAN_CAPTURE_ENV_VAR: &str = "NSD_NEUTRALITY_CAPTURE_CLEAN";
+const MALFORMED_CAPTURE_ENV_VAR: &str = "NSD_NEUTRALITY_CAPTURE_MALFORMED";
 
 fn manifest_path(relative: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative)
@@ -249,8 +249,29 @@ fn assert_every_source_is_discovered_or_skipped(sources: &[PathBuf], discover: &
     }
 }
 
-fn capture_requested() -> bool {
-    std::env::var_os(NEUTRALITY_CAPTURE_ENV_VAR).is_some_and(|value| !value.is_empty())
+#[derive(Clone, Copy)]
+enum Corpus {
+    Clean,
+    Malformed,
+}
+
+/// The one environment variable gating `corpus`'s baseline write. Set
+/// (non-empty) it makes that corpus's test overwrite its baseline with a
+/// freshly captured report instead of comparing; a plain `cargo test` sets
+/// neither. `scripts/neutrality_gate.sh --capture` sets both.
+fn capture_var(corpus: Corpus) -> &'static str {
+    match corpus {
+        Corpus::Clean => CLEAN_CAPTURE_ENV_VAR,
+        Corpus::Malformed => MALFORMED_CAPTURE_ENV_VAR,
+    }
+}
+
+fn capture_selected(corpus: Corpus, read_var: impl Fn(&str) -> Option<std::ffi::OsString>) -> bool {
+    read_var(capture_var(corpus)).is_some_and(|value| !value.is_empty())
+}
+
+fn capture_requested(corpus: Corpus) -> bool {
+    capture_selected(corpus, |name| std::env::var_os(name))
 }
 
 /// Replaces exactly one occurrence of `target_input` (the corpus's own
@@ -354,7 +375,7 @@ fn test_clean_corpus_report_is_byte_identical_to_the_pre_ir_baseline() {
     let actual_text = normalize_raw_text(&scanned.json_text, &scanned.target_input);
 
     let baseline_path = manifest_path(CLEAN_BASELINE_PATH);
-    if capture_requested() {
+    if capture_requested(Corpus::Clean) {
         fs::write(&baseline_path, &actual_text).expect("write clean neutrality baseline");
         return;
     }
@@ -373,7 +394,7 @@ fn test_malformed_corpus_report_matches_its_baseline_with_declared_deltas_only()
     let actual_text = normalize_raw_text(&scanned.json_text, &scanned.target_input);
 
     let baseline_path = manifest_path(MALFORMED_BASELINE_PATH);
-    if capture_requested() {
+    if capture_requested(Corpus::Malformed) {
         fs::write(&baseline_path, &actual_text).expect("write malformed neutrality baseline");
         return;
     }
@@ -539,4 +560,29 @@ fn test_corpus_copy_is_outside_any_git_work_tree() {
         report["scan"]["revision"]["unavailable_reason"],
         Value::String("not_a_git_repository".to_string())
     );
+}
+
+#[test]
+fn test_capture_selection_is_per_corpus() {
+    let only = |selected: Corpus| {
+        let name = capture_var(selected);
+        move |queried: &str| (queried == name).then(|| std::ffi::OsString::from("1"))
+    };
+    let unset = |_: &str| None;
+    let legacy_shared = |queried: &str| {
+        (queried == NEUTRALITY_CAPTURE_ENV_VAR).then(|| std::ffi::OsString::from("1"))
+    };
+
+    assert_ne!(capture_var(Corpus::Clean), capture_var(Corpus::Malformed));
+    assert!(capture_selected(Corpus::Clean, only(Corpus::Clean)));
+    assert!(!capture_selected(Corpus::Malformed, only(Corpus::Clean)));
+    assert!(capture_selected(Corpus::Malformed, only(Corpus::Malformed)));
+    assert!(!capture_selected(Corpus::Clean, only(Corpus::Malformed)));
+    assert!(!capture_selected(Corpus::Clean, unset));
+    assert!(!capture_selected(Corpus::Malformed, unset));
+    assert!(!capture_selected(Corpus::Clean, legacy_shared));
+    assert!(!capture_selected(Corpus::Malformed, legacy_shared));
+    let empty =
+        |queried: &str| (queried == capture_var(Corpus::Clean)).then(std::ffi::OsString::new);
+    assert!(!capture_selected(Corpus::Clean, empty));
 }

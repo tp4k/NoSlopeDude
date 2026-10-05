@@ -6,6 +6,7 @@ pub mod cli;
 pub mod config;
 pub mod discover;
 pub(crate) mod exec_lines;
+pub mod format;
 pub mod git;
 #[cfg(test)]
 pub(crate) mod golden;
@@ -17,6 +18,7 @@ pub mod profile;
 pub mod target;
 
 pub mod analysis;
+pub mod check;
 pub mod clones;
 pub mod identity;
 pub mod ir;

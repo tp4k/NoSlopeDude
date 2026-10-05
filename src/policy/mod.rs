@@ -11,6 +11,7 @@ pub mod complexity;
 pub mod coverage;
 pub mod damage;
 pub mod diagnostics;
+pub mod exit;
 pub mod findings;
 
 use std::path::Path;
@@ -18,6 +19,7 @@ use std::path::Path;
 use git2::{ObjectType, Oid, Repository};
 
 use crate::config::{self, Config, ConfigError, CODE_CONFIG_CHANGED, CODE_INVALID_CONFIG};
+use crate::git::diff::worktree_symlink_oid;
 use crate::git::snapshot::{CommitSnapshot, EntryKind, IndexSnapshot, WorktreeSnapshot};
 
 /// Where the effective `Config` in a `Resolution` came from (Settled
@@ -116,8 +118,9 @@ fn fetch_candidate_bytes(
 /// In `BaseIdentity::Oid` mode (A4), "changed" is decided from object ids
 /// rather than bytes: a commit/index candidate's blob oid is already known
 /// from its own snapshot entry (`Entry.oid`, D2), so an unchanged one is
-/// never even read; a worktree entry carries no oid, so that case reads
-/// the candidate once and hashes those same bytes with `Oid::hash_object`
+/// never even read; a worktree entry carries no oid, so a symlink is
+/// hashed from its target bytes via `worktree_symlink_oid`, and any other
+/// entry is read once and those same bytes hashed with `Oid::hash_object`
 /// (no ODB write, and no second, raw-fd read the way
 /// `git::diff::worktree_blob_oid`'s over-ceiling fallback does).
 fn diagnostics_for_candidate(
@@ -185,7 +188,20 @@ fn diagnostics_for_candidate(
                         None,
                     )
                 }
-                Candidate::Worktree(_) => {
+                Candidate::Worktree(snapshot) => {
+                    // An unchanged symlink never reaches the read below, which
+                    // rejects a non-regular entry: compare its target-bytes oid
+                    // with the base's, as the commit/index arms do. A failed
+                    // hash falls through to that read's own diagnostics.
+                    let unchanged_symlink = config::find_root_entry(&snapshot.entries)
+                        .filter(|entry| entry.kind == EntryKind::Symlink)
+                        .and_then(|entry| worktree_symlink_oid(repo, snapshot, entry).ok())
+                        .is_some_and(|oid| {
+                            base_oid == Some(oid) && base_kind == Some(EntryKind::Symlink)
+                        });
+                    if unchanged_symlink {
+                        return Ok(Vec::new());
+                    }
                     let bytes = match fetch_candidate_bytes(repo, &candidate) {
                         Ok(bytes) => bytes,
                         Err(err) if err.code() == CODE_INVALID_CONFIG => {

@@ -123,6 +123,85 @@ fn finding_files(files: &[Analyzed]) -> Vec<FindingFile<'_>> {
 
 type Site = (String, usize, usize);
 
+#[test]
+fn test_block_overlapping_a_raised_callable_is_not_raised_again() {
+    let base_text = "if (flag) {\n  const c = <div>a & b</div>;\n  function f() {\n    return <i>a & b</i>;\n  }\n  g();\n}\n";
+    let edited = "if (flag) {\n  const c = <div>a & b</div>;\n  function f() {\n    h();\n    return <i>a & b</i>;\n  }\n  g();\n}\n";
+    let (_dir, repo) = common::init_repo();
+    let base = commit(&repo, &[("w.tsx", base_text.to_string())]);
+    let candidate = commit(&repo, &[("w.tsx", edited.to_string())]);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    assert_eq!(evaluation.sites, vec![site("w.tsx", 3, 6)]);
+}
+
+#[test]
+fn test_nested_excluded_callables_are_each_raised() {
+    let base_text = "function outer() {\n  const c = <div>a & b</div>;\n  function inner() {\n    return <i>a & b</i>;\n  }\n  return 1;\n}\n";
+    let edited = "function outer() {\n  const c = <div>a & b</div>;\n  function inner() {\n    h();\n    return <i>a & b</i>;\n  }\n  return 1;\n}\n";
+    let (_dir, repo) = common::init_repo();
+    let base = commit(&repo, &[("w.tsx", base_text.to_string())]);
+    let candidate = commit(&repo, &[("w.tsx", edited.to_string())]);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    assert_eq!(
+        evaluation.sites,
+        vec![site("w.tsx", 1, 8), site("w.tsx", 3, 6)]
+    );
+}
+
+/// `evaluate_damage` alone over an added file of `count` broken methods;
+/// returns the minimum of three timings and the A101 count.
+fn added_damaged_methods_run(count: usize) -> (std::time::Duration, usize) {
+    const SAMPLES: usize = 3;
+    let text = (0..count).fold(String::from("class W {\n"), |mut text, index| {
+        text.push_str(&format!(
+            "    void broken{index}(int a {{\n        return;\n    }}\n"
+        ));
+        text
+    }) + "}\n";
+    let path = RepoPath::from_bytes(b"W.java".to_vec());
+    let analysis = analyze_file(Path::new("W.java"), text.as_bytes()).expect("candidate");
+    let candidate_files = [FindingFile {
+        path: path.clone(),
+        source: text.as_bytes(),
+        analysis: &analysis,
+    }];
+    let changes = [Change::Added {
+        path,
+        kind: nsd::git::snapshot::EntryKind::Regular,
+    }];
+    let mut fastest = std::time::Duration::MAX;
+    let mut sites = 0;
+    for _ in 0..SAMPLES {
+        let started = std::time::Instant::now();
+        let found = evaluate_damage(&[], &candidate_files, &changes).expect("evaluate");
+        fastest = fastest.min(started.elapsed());
+        sites = found.len();
+    }
+    (fastest, sites)
+}
+
+#[test]
+fn test_overlap_lookups_do_not_scale_quadratically_in_damage_sites() {
+    const METHOD_COUNT: usize = 1_000;
+    const SCALED_METHOD_COUNT: usize = METHOD_COUNT * 8;
+    const SCALING_ASSERT_MULTIPLIER: u32 = 32;
+
+    let (elapsed, sites) = added_damaged_methods_run(METHOD_COUNT);
+    let (scaled_elapsed, scaled_sites) = added_damaged_methods_run(SCALED_METHOD_COUNT);
+
+    assert_eq!((sites, scaled_sites), (METHOD_COUNT, SCALED_METHOD_COUNT));
+    assert!(
+        scaled_elapsed < elapsed * SCALING_ASSERT_MULTIPLIER,
+        "a quadratic overlap scan scales ~64x from N to 8N, an indexed lookup ~8x: evaluate_damage \
+         at N={METHOD_COUNT} took {elapsed:?}, at 8N={SCALED_METHOD_COUNT} took {scaled_elapsed:?}, \
+         expected 8N < {SCALING_ASSERT_MULTIPLIER}x N"
+    );
+}
+
 struct Evaluation {
     sites: Vec<Site>,
     changes: Vec<Change>,
@@ -427,6 +506,26 @@ fn test_callable_sharing_a_line_with_legacy_damage_is_not_swallowed_by_a_shift()
     assert!(evaluation.sites.is_empty(), "{:?}", evaluation.sites);
 }
 
+/// Ledger row 105: the extra `(1,1)` line-granularity site. Legacy `c`
+/// shares line 1 with `d`'s header; when `d` becomes damaged at line 3,
+/// line-granular tolerance also names the unchanged `c` on line 1, next to
+/// the real `(3,3)` damage site.
+#[test]
+fn test_line_sharing_legacy_callable_is_named_when_its_neighbour_becomes_damaged() {
+    let base_text = "export const c = () => <div>a & b</div>; export function d(x: number) {\n  if (x) { return 1; }\n  return 2;\n}\nexport function ok() {\n  return 1;\n}\n";
+    let damaged = base_text.replace("  return 2;\n}\n", "  return 2 +; }\n");
+    let (_dir, repo) = common::init_repo();
+    let base = commit(&repo, &[("w.tsx", base_text.to_string())]);
+    let candidate = commit(&repo, &[("w.tsx", damaged)]);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    assert_eq!(
+        evaluation.sites,
+        vec![site("w.tsx", 1, 1), site("w.tsx", 3, 3)]
+    );
+}
+
 #[test]
 fn test_deleted_line_inside_a_legacy_damaged_callable_raises_a101() {
     let (_dir, repo) = common::init_repo();
@@ -605,4 +704,17 @@ fn test_still_measured_lookup_does_not_scale_quadratically() {
          N={CALLABLE_COUNT} took {elapsed:?}, at 8N={SCALED_CALLABLE_COUNT} took {scaled_elapsed:?}, \
          expected 8N < {SCALING_ASSERT_MULTIPLIER}x N"
     );
+}
+
+#[test]
+fn test_block_after_a_nested_callable_stays_inside_its_outer_callable() {
+    let base_text = "function outer() {\n  function inner() {\n    return 1;\n  }\n  if (x) {\n    g();\n  }\n}\n";
+    let edited = "function outer() {\n  function inner() {\n    return <b>a & c</b>;\n  }\n  if (x) {\n    h();\n    g();\n  }\n}\n";
+    let (_dir, repo) = common::init_repo();
+    let base = commit(&repo, &[("w.tsx", base_text.to_string())]);
+    let candidate = commit(&repo, &[("w.tsx", edited.to_string())]);
+
+    let evaluation = evaluate(&repo, base, candidate);
+
+    assert_eq!(evaluation.sites, vec![site("w.tsx", 3, 3)]);
 }

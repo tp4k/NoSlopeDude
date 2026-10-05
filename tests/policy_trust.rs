@@ -712,6 +712,133 @@ fn test_trusted_mode_unchanged_symlink_base_reports_nothing() {
     );
 }
 
+/// Ledger row 62: the worktree candidate's early return must also see an
+/// unchanged symlink `nsd.yml` (a worktree entry carries no oid, so the
+/// commit/index comparison alone never matches it).
+#[test]
+fn test_trusted_mode_unchanged_symlink_base_with_worktree_candidate_reports_nothing() {
+    let (dir, repo) = common::init_repo();
+    let target = b"version: 1\n";
+    let commit_oid = common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_SYMLINK, target.to_vec())],
+    );
+    sync_index_to_commit(&repo, commit_oid);
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+    std::os::unix::fs::symlink(
+        std::str::from_utf8(target).expect("utf-8 target"),
+        dir.path().join("nsd.yml"),
+    )
+    .expect("create the worktree symlink");
+    let worktree_snapshot = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+
+    let trusted_dir = tempfile::TempDir::new().expect("create a temp dir for the trusted config");
+    let trusted_path = trusted_dir.path().join("trusted.yml");
+    std::fs::write(&trusted_path, b"version: 1\n").expect("write trusted config");
+
+    let resolution = policy::resolve(
+        &repo,
+        Some(trusted_path.as_path()),
+        &base,
+        Candidate::Worktree(&worktree_snapshot),
+    )
+    .expect("a trusted config resolves even when the base is a symlink");
+
+    assert!(
+        resolution.diagnostics.is_empty(),
+        "an unchanged symlink nsd.yml in the worktree must not report a change"
+    );
+}
+
+/// Ledger row 62, oid side: a worktree symlink `nsd.yml` whose target differs
+/// from the symlink base is a changed candidate, so the early return must
+/// compare oids and not only kinds.
+#[test]
+fn test_trusted_mode_changed_symlink_base_with_worktree_candidate_reports_c101_c102() {
+    let (dir, repo) = common::init_repo();
+    let commit_oid = common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_SYMLINK, b"version: 1\n".to_vec())],
+    );
+    sync_index_to_commit(&repo, commit_oid);
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+    std::os::unix::fs::symlink("other.yml", dir.path().join("nsd.yml"))
+        .expect("create the retargeted worktree symlink");
+    let worktree_snapshot = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+
+    let trusted_dir = tempfile::TempDir::new().expect("create a temp dir for the trusted config");
+    let trusted_path = trusted_dir.path().join("trusted.yml");
+    std::fs::write(&trusted_path, b"version: 1\n").expect("write trusted config");
+
+    let resolution = policy::resolve(
+        &repo,
+        Some(trusted_path.as_path()),
+        &base,
+        Candidate::Worktree(&worktree_snapshot),
+    )
+    .expect("a trusted config resolves even when the base is a symlink");
+
+    let codes: Vec<_> = resolution.diagnostics.iter().map(|d| d.code).collect();
+    assert_eq!(codes, [CODE_CONFIG_CHANGED, CODE_INVALID_CONFIG]);
+}
+
+/// The worktree twin of the kind gate: a regular base whose blob is missing
+/// from the object database (so its bytes are unreadable and the diff falls
+/// back to oids) shares its oid with a worktree symlink whose target bytes
+/// are the same, but not its kind, so the worktree candidate must still
+/// report `[C101, C102]`.
+#[test]
+fn test_trusted_mode_unreadable_regular_base_replaced_by_identical_worktree_symlink_reports_c101_c102(
+) {
+    let (dir, repo) = common::init_repo();
+    let target = b"version: 1\n";
+    let commit_oid = common::commit_entries(
+        &repo,
+        &[(b"nsd.yml".to_vec(), MODE_REGULAR, target.to_vec())],
+    );
+    sync_index_to_commit(&repo, commit_oid);
+    let base = CommitSnapshot::head_or_empty(&repo).expect("snapshot base commit");
+    let blob = Oid::hash_object(ObjectType::Blob, target).expect("hash the blob");
+    let blob_hex = blob.to_string();
+    let loose = dir
+        .path()
+        .join(".git/objects")
+        .join(&blob_hex[..2])
+        .join(&blob_hex[2..]);
+    std::fs::remove_file(&loose).expect("remove the loose base blob");
+    std::os::unix::fs::symlink(
+        std::str::from_utf8(target).expect("utf-8 target"),
+        dir.path().join("nsd.yml"),
+    )
+    .expect("create the worktree symlink");
+    let worktree_snapshot = WorktreeSnapshot::open(&repo).expect("open worktree snapshot");
+
+    let trusted_dir = tempfile::TempDir::new().expect("create a temp dir for the trusted config");
+    let trusted_path = trusted_dir.path().join("trusted.yml");
+    std::fs::write(&trusted_path, b"version: 1\n").expect("write trusted config");
+
+    let resolution = policy::resolve(
+        &repo,
+        Some(trusted_path.as_path()),
+        &base,
+        Candidate::Worktree(&worktree_snapshot),
+    )
+    .expect("a trusted config resolves even when the base blob is missing");
+
+    assert_eq!(
+        resolution.diagnostics,
+        vec![
+            Diagnostic {
+                code: CODE_CONFIG_CHANGED
+            },
+            Diagnostic {
+                code: CODE_INVALID_CONFIG
+            }
+        ],
+        "a regular base replaced by a byte-identical worktree symlink is a kind change"
+    );
+}
+
 /// triage-ws1-r2.md row 2: the candidate-side half of the kind gate. A
 /// regular base whose bytes are unreadable (over-ceiling), compared
 /// against a candidate whose `nsd.yml` is a symlink with byte-identical
