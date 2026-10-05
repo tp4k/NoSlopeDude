@@ -696,6 +696,22 @@ fn test_changed_file_over_ceiling_on_both_sides_raises_one_a102() {
 }
 
 #[test]
+fn test_deleting_a_file_over_ceiling_raises_nothing() {
+    let fx = fixture();
+    let class = java_class("Big", LOW_CC_IFS, 0);
+    fx.commit(&[
+        ("Foo.java", java_class("Foo", LOW_CC_IFS, 0).as_bytes()),
+        ("Big.java", &padded_to(&class, ceiling() + 1)),
+    ]);
+    fx.unstage("Big.java");
+
+    let outcome = fx.staged();
+
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    assert_eq!(outcome.exit_status, EXIT_PASS);
+}
+
+#[test]
 fn test_regression_and_analysis_error_together_exit_3() {
     let fx = fixture();
     fx.commit(&[("Foo.java", java_class("Foo", LOW_CC_IFS, 0).as_bytes())]);
