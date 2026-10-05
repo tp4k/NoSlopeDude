@@ -58,9 +58,9 @@ fn key_of(source: &str) -> CacheKey {
     CacheKey::new(blob, Grammar::Java, MIN_LINES)
 }
 
-fn candidate_fields(
-    candidates: &[(u128, crate::clones::Candidate)],
-) -> Vec<(u128, u32, u32, u32, usize, usize, usize, usize)> {
+type CandidateFields = (u128, u32, u32, u32, usize, usize, usize, usize);
+
+fn candidate_fields(candidates: &[(u128, crate::clones::Candidate)]) -> Vec<CandidateFields> {
     candidates
         .iter()
         .map(|(key, c)| {
