@@ -345,3 +345,17 @@ fn test_unwritable_stamp_skips_the_pass() {
     reopened.expect("open succeeds without a stamp");
     assert!(stale.exists(), "no stamp could be written, so no pass runs");
 }
+
+#[test]
+fn test_a_hit_on_a_fresh_entry_keeps_its_mtime() {
+    let (_dir, _repo, cache) = open_empty();
+    let now = SystemTime::now();
+    let (key, path) = real_entry(&cache, "function a(x) { return x; }\n");
+    age_to(&path, DAY / 2, now);
+    let before = fs::metadata(&path).expect("stat").modified().expect("mtime");
+
+    assert!(cache.get(&key).is_some());
+
+    let after = fs::metadata(&path).expect("stat").modified().expect("mtime");
+    assert_eq!(after, before, "an entry under a day old is not touched");
+}
