@@ -648,3 +648,22 @@ fn test_base_side_blob_never_enters_the_cache() {
         .entry(fx.blob("Foo.java"), Grammar::Java, DEFAULT_MIN_CLONE_LINES)
         .is_none());
 }
+
+#[cfg(unix)]
+#[test]
+fn test_failed_entry_write_warns_once_and_keeps_the_verdict() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let healthy = Fixture::scenario().staged();
+    let fx = Fixture::scenario();
+    let root = fx.cache_root();
+    fx.cache();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o555)).expect("make the root read-only");
+
+    let outcome = fx.staged();
+
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).expect("restore the root");
+    assert_eq!(outcome.diagnostics, healthy.diagnostics);
+    assert_eq!(outcome.exit_status, healthy.exit_status);
+    assert_eq!(outcome.warnings.len(), 1, "{:?}", outcome.warnings);
+}
