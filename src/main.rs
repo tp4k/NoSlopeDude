@@ -121,13 +121,9 @@ fn config_is_inside_checkout(repository: &Path, config: &Path) -> anyhow::Result
         forms.push(canonical_even_if_missing(parent)?.join(name));
     }
     let raw = repository.join(config);
-    if let Ok(resolved) = std::fs::canonicalize(&raw) {
-        forms.push(resolved);
-    }
+    forms.push(canonical_even_if_missing(&raw)?);
     if let (Some(parent), Some(name)) = (raw.parent(), raw.file_name()) {
-        if let Ok(resolved) = std::fs::canonicalize(parent) {
-            forms.push(resolved.join(name));
-        }
+        forms.push(canonical_even_if_missing(parent)?.join(name));
     }
     if forms.iter().any(|form| form.starts_with(&root)) {
         return Ok(true);
@@ -159,7 +155,8 @@ fn lexically_normalized(path: &Path) -> PathBuf {
 }
 
 /// `fs::canonicalize` of the longest existing prefix of `path`, with the
-/// missing remainder appended as given.
+/// missing remainder appended as given (a `..` in it included) and then
+/// normalized lexically.
 fn canonical_even_if_missing(path: &Path) -> anyhow::Result<PathBuf> {
     let mut missing: Vec<OsString> = Vec::new();
     let mut existing = path;
@@ -169,9 +166,9 @@ fn canonical_even_if_missing(path: &Path) -> anyhow::Result<PathBuf> {
                 resolved.extend(missing.iter().rev());
                 return Ok(lexically_normalized(&resolved));
             }
-            Err(error) => match (existing.file_name(), existing.parent()) {
-                (Some(name), Some(parent)) => {
-                    missing.push(name.to_os_string());
+            Err(error) => match (existing.components().next_back(), existing.parent()) {
+                (Some(last), Some(parent)) => {
+                    missing.push(last.as_os_str().to_os_string());
                     existing = parent;
                 }
                 _ => {
