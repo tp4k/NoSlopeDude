@@ -17,11 +17,13 @@ use crate::hashing::Digest;
 use crate::model::Grammar;
 use crate::profile::{fingerprint, MeasurementProfileInputs};
 
+mod evict;
 mod payload;
 
 #[cfg(test)]
 mod tests;
 
+pub use evict::EvictionLimits;
 pub use payload::{
     AnalyzedPayload, CachedAnalysis, CachedCallable, CachedCallableKind, CachedCandidate,
     CachedDamage, CachedDamageKind, CachedFinding, CachedIdentity, CachedReason, Hydrated,
