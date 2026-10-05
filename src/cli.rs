@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use clap::{ArgGroup, Parser, Subcommand};
+use clap::{ArgGroup, Parser, Subcommand, ValueEnum};
 
 use crate::model::DEFAULT_MIN_CLONE_LINES;
 
@@ -19,6 +19,15 @@ pub enum Command {
     Scan(ScanArgs),
     /// Check a candidate change against its base and exit non-zero on regressions.
     Check(CheckArgs),
+}
+
+/// How `check` prints its diagnostics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Format {
+    /// One escaped line per diagnostic.
+    Terminal,
+    /// One canonical JSON document.
+    Json,
 }
 
 #[derive(Debug, Parser, Clone, PartialEq, Eq)]
@@ -39,6 +48,10 @@ pub struct CheckArgs {
     /// Trusted configuration file outside the checkout, replacing nsd.yml.
     #[arg(long, value_name = "PATH")]
     pub config: Option<PathBuf>,
+
+    /// Output format of the diagnostics.
+    #[arg(long, value_enum, default_value_t = Format::Terminal)]
+    pub format: Format,
 }
 
 #[derive(Debug, Parser, Clone, PartialEq, Eq)]

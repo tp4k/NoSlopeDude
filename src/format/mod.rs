@@ -1,8 +1,12 @@
 //! Terminal listing of a check's diagnostics. Every line is escaped by
 //! `escape_terminal`, because names, paths and messages come from a PR.
 
+mod json;
+
 use crate::check::CheckDiagnostic;
 use crate::git::path::RepoPath;
+
+pub use json::render_json;
 
 /// The file a `CheckDiagnostic::Config` is about.
 const CANDIDATE_CONFIG_FILE: &str = "nsd.yml";

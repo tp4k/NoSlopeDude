@@ -8,9 +8,9 @@ use clap::Parser;
 use git2::Repository;
 
 use nsd::check::{run_check, CheckDiagnostic, CheckMode, CheckRequest};
-use nsd::cli::{CheckArgs, Cli, Command, ScanArgs};
+use nsd::cli::{CheckArgs, Cli, Command, Format, ScanArgs};
 use nsd::config::{Config, CODE_INVALID_CONFIG};
-use nsd::format::{escape_terminal, render_terminal};
+use nsd::format::{escape_terminal, render_json, render_terminal};
 use nsd::model::ScanSettings;
 use nsd::pipeline;
 use nsd::policy::exit::exit_status;
@@ -78,8 +78,12 @@ fn check_command(args: &CheckArgs) -> anyhow::Result<u8> {
             (outcome.diagnostics, outcome.exit_status)
         }
     };
+    let rendered = match args.format {
+        Format::Terminal => render_terminal(&diagnostics),
+        Format::Json => render_json(&diagnostics, status),
+    };
     std::io::stdout()
-        .write_all(render_terminal(&diagnostics).as_bytes())
+        .write_all(rendered.as_bytes())
         .context("cannot write the diagnostics")?;
     Ok(status)
 }
