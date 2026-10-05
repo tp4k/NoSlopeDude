@@ -101,6 +101,9 @@ pub struct CheckOutcome {
     pub diagnostics: Vec<CheckDiagnostic>,
     /// `policy::exit::exit_status` over `diagnostics`.
     pub exit_status: u8,
+    /// Exit-neutral notes about the run, outside `diagnostics`: at most one,
+    /// raised when the analysis cache failed and the run continued uncached.
+    pub warnings: Vec<String>,
 }
 
 /// Runs one check. Never fails: an internal error is an `NSD-G101` (or the
@@ -118,6 +121,7 @@ pub fn run_check(request: &CheckRequest<'_>) -> CheckOutcome {
     CheckOutcome {
         diagnostics,
         exit_status,
+        warnings: Vec::new(),
     }
 }
 
