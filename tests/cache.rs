@@ -224,6 +224,23 @@ fn test_entry_under_another_keys_name_is_a_miss() {
     fs::copy(cache.entry_path(&key), &target).expect("copy entry");
 
     assert!(cache.get(&other).is_none());
+
+    let payload = cache.get(&key).expect("stored entry");
+    let other_blob = blob_oid("class Other {}\n");
+    assert_ne!(blob, other_blob);
+    let differing_in_one_part = [
+        CacheKey::new(other_blob, Grammar::Java, MIN_LINES),
+        CacheKey::new(blob, Grammar::Java, MIN_LINES_OTHER),
+    ];
+    for other in &differing_in_one_part {
+        let target = cache.entry_path(other);
+        fs::create_dir_all(target.parent().expect("fan-out dir")).expect("mkdir");
+        fs::copy(cache.entry_path(&key), &target).expect("copy entry");
+
+        assert!(cache.get(other).is_none());
+        cache.put(other, &payload).expect("repair");
+        assert_eq!(cache.get(other), Some(payload.clone()));
+    }
 }
 
 #[test]
