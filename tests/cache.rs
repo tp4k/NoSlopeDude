@@ -379,3 +379,21 @@ fn test_unanalyzable_outcome_is_cached() {
     );
     assert!(CachedAnalysis::unanalyzable(UnanalyzableReason::TooLarge).is_none());
 }
+
+#[test]
+fn test_unparsable_header_line_is_a_miss() {
+    let (_dir, _repo, cache) = open_cache();
+    let (key, read) = stored_and_read(&cache, JAVA_SOURCE);
+    let path = cache.entry_path(&key);
+    let good = fs::read(&path).expect("read entry");
+    let split = good.iter().position(|&b| b == b'\n').expect("header line");
+
+    let mut cut_header = good[..split - 3].to_vec();
+    cut_header.extend_from_slice(&good[split..]);
+    for bytes in [cut_header, b"not json\n{}".to_vec()] {
+        fs::write(&path, &bytes).expect("damage entry");
+        assert!(cache.get(&key).is_none());
+        cache.put(&key, &read).expect("repair");
+        assert_eq!(cache.get(&key), Some(read.clone()));
+    }
+}
