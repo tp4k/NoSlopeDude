@@ -316,6 +316,19 @@ fn base_paths(changes: &[Change]) -> HashSet<&RepoPath> {
         .collect()
 }
 
+/// Each base-side path of `changes` mapped to its candidate-side path;
+/// deletions and additions have no pair.
+fn candidate_counterparts(changes: &[Change]) -> HashMap<&RepoPath, &RepoPath> {
+    changes
+        .iter()
+        .filter_map(|change| match change {
+            Change::Modified { path, .. } | Change::Typechange { path, .. } => Some((path, path)),
+            Change::Renamed { from, to, .. } => Some((from, to)),
+            Change::Added { .. } | Change::Deleted { .. } => None,
+        })
+        .collect()
+}
+
 /// The bytes of an included entry that must be readable, or the G101 that
 /// says its snapshot is unavailable. A regular, under-ceiling entry whose
 /// read yields `None` is never an analysis reason: the blob vanished or
@@ -403,6 +416,12 @@ impl Sides<'_> {
         let candidate_discovery = discover(self.candidate.entries(), self.scope);
         let changed_candidate = candidate_paths(self.changes);
         let changed_base = base_paths(self.changes);
+        let counterparts = candidate_counterparts(self.changes);
+        let candidate_included: HashSet<&RepoPath> = candidate_discovery
+            .included
+            .iter()
+            .map(|included| &included.path)
+            .collect();
         let base_entries: HashMap<&RepoPath, &Entry> = self
             .base
             .entries
@@ -423,13 +442,19 @@ impl Sides<'_> {
                 continue;
             }
             // A changed file the base cannot analyze is an analysis gap of its
-            // own, even when its candidate side fits.
+            // own, even when its candidate side fits; a deletion, or a change
+            // whose candidate side is out of scope, has nothing to compare.
             if included.too_large || included.non_utf8_path {
-                base_coverage.push(CoverageInput {
-                    entry: included.clone(),
-                    changed: true,
-                    failure: None,
-                });
+                let compared = counterparts
+                    .get(&included.path)
+                    .is_some_and(|to| candidate_included.contains(to));
+                if compared {
+                    base_coverage.push(CoverageInput {
+                        entry: included.clone(),
+                        changed: true,
+                        failure: None,
+                    });
+                }
                 continue;
             }
             let read = base_entries
