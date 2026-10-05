@@ -61,7 +61,7 @@ fn run_check_command(args: &CheckArgs) -> u8 {
 fn check_command(args: &CheckArgs) -> anyhow::Result<u8> {
     let repository = std::env::current_dir().context("cannot read the current directory")?;
     let (diagnostics, status) = match &args.config {
-        Some(config) if config_is_inside_checkout(&repository, config)? => refused_config(config),
+        Some(config) if config_is_inside_checkout(&repository, config)? => refused_config(),
         _ => {
             let mode = match &args.base {
                 Some(reference) => CheckMode::Base {
@@ -85,13 +85,12 @@ fn check_command(args: &CheckArgs) -> anyhow::Result<u8> {
     Ok(status)
 }
 
-fn refused_config(config: &Path) -> (Vec<CheckDiagnostic>, u8) {
+/// The refusal names no path: the one given may be absolute, and the listing
+/// never prints the checkout's location.
+fn refused_config() -> (Vec<CheckDiagnostic>, u8) {
     let diagnostics = vec![CheckDiagnostic::Failure {
         code: CODE_INVALID_CONFIG,
-        message: format!(
-            "trusted config {} is inside the candidate checkout",
-            config.display()
-        ),
+        message: "trusted config is inside the candidate checkout".to_string(),
     }];
     let status = exit_status(
         diagnostics.iter().map(CheckDiagnostic::code),
