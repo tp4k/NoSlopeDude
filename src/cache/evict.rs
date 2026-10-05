@@ -73,8 +73,9 @@ impl Cache {
     ) -> Result<Cache, CacheError> {
         let cache = Cache::open_root(repo)?;
         if cache.pass_is_due(now) {
-            cache.record_pass(now);
-            cache.evict(limits, now);
+            if cache.record_pass(now) {
+                cache.evict(limits, now);
+            }
         }
         Ok(cache)
     }
@@ -105,7 +106,9 @@ impl Cache {
             }
         }
         entries.sort_by(|a, b| (a.modified, &a.path).cmp(&(b.modified, &b.path)));
-        let mut total: u64 = entries.iter().map(|entry| entry.len).sum();
+        let mut total: u64 = entries
+            .iter()
+            .fold(0, |sum, entry| u64::saturating_add(sum, entry.len));
         for entry in entries {
             let expired = age_of(entry.modified, now) > limits.max_age;
             if (expired || total > limits.max_bytes) && gone(remove(&entry.path)) {
@@ -172,16 +175,17 @@ impl Cache {
             .and_then(|_| fs::read_to_string(&path).ok())
             .and_then(|text| text.trim().parse::<u64>().ok());
         match recorded {
-            Some(seconds) => now
-                .duration_since(UNIX_EPOCH + Duration::from_secs(seconds))
+            Some(seconds) => UNIX_EPOCH
+                .checked_add(Duration::from_secs(seconds))
+                .and_then(|stamped| now.duration_since(stamped).ok())
                 .map_or(true, |elapsed| elapsed >= PASS_INTERVAL),
             None => true,
         }
     }
 
     /// Writes the stamp through a rename, so a symlink planted at its path
-    /// is replaced, not followed. A failure only means the pass runs again.
-    fn record_pass(&self, now: SystemTime) {
+    /// is replaced, not followed. Returns whether the stamp was persisted.
+    fn record_pass(&self, now: SystemTime) -> bool {
         let seconds = now.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         let written = NamedTempFile::new_in(&self.root).and_then(|mut staged| {
             write!(staged, "{seconds}")?;
@@ -189,7 +193,7 @@ impl Cache {
                 .persist(self.stamp_path())
                 .map_err(|failure| failure.error)
         });
-        drop(written);
+        written.is_ok()
     }
 
     /// Best effort: moves a hit entry's mtime to now once it is a day old.
