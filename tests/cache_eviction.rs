@@ -352,10 +352,16 @@ fn test_a_hit_on_a_fresh_entry_keeps_its_mtime() {
     let now = SystemTime::now();
     let (key, path) = real_entry(&cache, "function a(x) { return x; }\n");
     age_to(&path, DAY / 2, now);
-    let before = fs::metadata(&path).expect("stat").modified().expect("mtime");
+    let before = fs::metadata(&path)
+        .expect("stat")
+        .modified()
+        .expect("mtime");
 
     assert!(cache.get(&key).is_some());
 
-    let after = fs::metadata(&path).expect("stat").modified().expect("mtime");
+    let after = fs::metadata(&path)
+        .expect("stat")
+        .modified()
+        .expect("mtime");
     assert_eq!(after, before, "an entry under a day old is not touched");
 }
