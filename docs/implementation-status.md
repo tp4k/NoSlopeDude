@@ -69,8 +69,8 @@ repository proves it. "The code exists" is `[~]`, not `[x]`.
 | `feat/m0c-grammar` | merged into `main` at `4a36680` (`--no-ff`) | Was the M0c working branch; its worktree `~/pet/nsd-m0c-grammar` was removed |
 | `feat/m3-policy` | merged into `main` at `17fd3b4` (PR #3) | Was the M3 and M4-1 working branch |
 | `feat/m4-v102` | merged into `main` at `7149ef7` (PR #4) | Was the M4-2 working branch (A102 ledger follow-ups, V102 comparison and its Codex follow-ups, consistent move credit) |
-| `feat/m5-check` (`~/pet/nsd-m5-check`) | merged into `main` at `b8175eb` (PR #5) | Was the M5-3/M5-4 working branch, including its ledger fixes |
-| `feat/m5-check-ws1`..`ws5`, `ws7` (`~/pet/nsd-m5-check-ws<N>`) | merged into `feat/m5-check` at `729b125` (WS-1), `b40a84d` (WS-2), `c5f7c7a` (WS-3), `77c4402` (WS-4), `d23e4e5` (WS-5), `2408921` (WS-7); WS-6 landed on top, and all reached `main` with PR #5 | Stream branches of that run |
+| `feat/m5-check` (deleted) | merged into `main` at `b8175eb` (PR #5) | Was the M5-3/M5-4 working branch, including its ledger fixes; its worktree `~/pet/nsd-m5-check` was removed with it |
+| `feat/m5-check-ws1`..`ws5`, `ws7` (deleted) | merged into `feat/m5-check` at `729b125` (WS-1), `b40a84d` (WS-2), `c5f7c7a` (WS-3), `77c4402` (WS-4), `d23e4e5` (WS-5), `2408921` (WS-7); WS-6 landed on top, and all reached `main` with PR #5 | Stream branches of that run; their worktrees were removed with them |
 | `feat/m5-cache` (`~/pet/nsd-m5-cache`) | `32a4b69` (verified at WS-5 start) | M5-1, M5-2, check JSON output (M6-1) and its stream branches `feat/m5-cache-ws<N>`. Unmerged: agents never merge to `main` |
 
 `feat/m5-cache` is this run's unmerged working branch; every other branch
