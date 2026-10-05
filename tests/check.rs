@@ -592,6 +592,37 @@ fn test_changed_invalid_encoding_file_raises_a102() {
     assert_eq!(outcome.exit_status, EXIT_ERROR);
 }
 
+const V102_OFF: &str = "version: 1\npolicy:\n  NSD-V102: off\n";
+
+#[test]
+fn test_changed_invalid_encoding_file_raises_a102_while_v102_is_off() {
+    let fx = fixture();
+    fx.commit(&[("util.ts", b"export const x = 1;\n")]);
+    fx.stage("util.ts", INVALID_UTF8_TS);
+    let (_dir, off) = write_trusted_config(V102_OFF);
+
+    let outcome = fx.check_with(CheckMode::Staged, Some(&off), false);
+
+    assert_eq!(
+        coverage_reasons(&outcome),
+        vec![("util.ts".to_string(), "invalid_encoding")]
+    );
+    assert_eq!(outcome.exit_status, EXIT_ERROR);
+}
+
+#[test]
+fn test_changed_complexity_regression_raises_e101_while_v102_is_off() {
+    let fx = fixture();
+    fx.commit(&[("Foo.java", java_class("Foo", LOW_CC_IFS, 0).as_bytes())]);
+    fx.stage("Foo.java", java_class("Foo", HIGH_CC_IFS, 0).as_bytes());
+    let (_dir, off) = write_trusted_config(V102_OFF);
+
+    let outcome = fx.check_with(CheckMode::Staged, Some(&off), false);
+
+    assert_eq!(codes(&outcome), vec![E101]);
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
 #[test]
 fn test_unchanged_unanalyzable_file_raises_a102_only_while_v102_is_enabled() {
     let fx = fixture();
