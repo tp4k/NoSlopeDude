@@ -18,6 +18,7 @@ pub mod profile;
 pub mod target;
 
 pub mod analysis;
+pub mod cache;
 pub mod check;
 pub mod clones;
 pub mod identity;
