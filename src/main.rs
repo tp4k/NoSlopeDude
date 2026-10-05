@@ -75,6 +75,9 @@ fn check_command(args: &CheckArgs) -> anyhow::Result<u8> {
                 config_path: args.config.as_deref(),
                 allow_new_suppressions: false,
             });
+            for warning in &outcome.warnings {
+                eprintln!("warning: {}", escape_terminal(warning));
+            }
             (outcome.diagnostics, outcome.exit_status)
         }
     };

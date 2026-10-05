@@ -569,6 +569,16 @@ fn diff_mapped(
     best.map(|(_, effective)| effective)
 }
 
+/// An unchanged included file reduced to what clone evaluation uses: its
+/// path, language and enumerated candidates (any `file_index`; the
+/// evaluator rebinds it).
+#[derive(Clone)]
+pub(crate) struct UnchangedCandidates {
+    pub(crate) path: RepoPath,
+    pub(crate) language: LanguageFamily,
+    pub(crate) candidates: Vec<(u128, Candidate)>,
+}
+
 /// Raises V102 for every changed candidate clone occurrence that is new or
 /// materially extended and has a qualifying match elsewhere (A3: a deleted
 /// base occurrence that maps to an added one is a move, not a regression).
@@ -588,24 +598,71 @@ pub fn evaluate_clones(
     if policy.nsd_v102 == Severity::Off {
         return Ok(Vec::new());
     }
+    let unchanged_views: Vec<FileView<'_>> = unchanged.iter().filter_map(FileView::new).collect();
+    let precomputed: Vec<UnchangedCandidates> = unchanged_views
+        .par_iter()
+        .enumerate()
+        .map(|(index, view)| UnchangedCandidates {
+            path: view.path.clone(),
+            language: view.language,
+            candidates: view.enumerate(index, min_clone_lines),
+        })
+        .collect();
+    evaluate_clones_precomputed(
+        base,
+        candidate,
+        &precomputed,
+        changes,
+        min_clone_lines,
+        policy,
+    )
+}
+
+/// `evaluate_clones` over unchanged files whose candidates were enumerated
+/// (or loaded from the cache) by the caller, so no unchanged source or
+/// analysis is held here.
+pub(crate) fn evaluate_clones_precomputed(
+    base: &[FindingFile<'_>],
+    candidate: &[FindingFile<'_>],
+    unchanged: &[UnchangedCandidates],
+    changes: &[Change],
+    min_clone_lines: u32,
+    policy: &PolicyConfig,
+) -> Result<Vec<CloneDiagnostic>, GitError> {
+    if policy.nsd_v102 == Severity::Off {
+        return Ok(Vec::new());
+    }
     let base_views: Vec<FileView<'_>> = base.iter().filter_map(FileView::new).collect();
-    let mut views: Vec<FileView<'_>> = candidate.iter().filter_map(FileView::new).collect();
+    let views: Vec<FileView<'_>> = candidate.iter().filter_map(FileView::new).collect();
     let changed_count = views.len();
-    views.extend(unchanged.iter().filter_map(FileView::new));
-    let facts = ChangeFacts::new(changes, &base_views, &views[..changed_count])?;
+    let facts = ChangeFacts::new(changes, &base_views, &views)?;
+    let path_of = |file_index: u32| -> &RepoPath {
+        let index = file_index as usize;
+        match views.get(index) {
+            Some(view) => view.path,
+            None => &unchanged[index - changed_count].path,
+        }
+    };
 
     let mut per_file: Vec<(LanguageFamily, PerFileCandidates)> = views
         .par_iter()
         .enumerate()
         .map(|(index, view)| (view.language, view.enumerate(index, min_clone_lines)))
         .collect();
-    let changed_fingerprints: HashSet<u128> = per_file[..changed_count]
+    let changed_fingerprints: HashSet<u128> = per_file
         .iter()
         .flat_map(|(_, candidates)| candidates.iter().map(|&(key, _)| key))
         .collect();
-    for (_, candidates) in &mut per_file[changed_count..] {
-        candidates.retain(|(key, _)| changed_fingerprints.contains(key));
-    }
+    per_file.extend(unchanged.iter().enumerate().map(|(position, file)| {
+        let file_index = (changed_count + position) as u32;
+        let kept = file
+            .candidates
+            .iter()
+            .filter(|(key, _)| changed_fingerprints.contains(key))
+            .map(|&(key, run)| (key, Candidate { file_index, ..run }))
+            .collect();
+        (file.language, kept)
+    }));
     let base_runs: Vec<Vec<Candidate>> = base_views
         .par_iter()
         .enumerate()
@@ -619,13 +676,9 @@ pub fn evaluate_clones(
 
     let mut subjects: Vec<Subject<'_>> = Vec::new();
     for mut group in maximal_groups(per_file) {
-        group.members.sort_by_key(|run| {
-            (
-                views[run.file_index as usize].path,
-                run.start_line,
-                run.end_line,
-            )
-        });
+        group
+            .members
+            .sort_by_key(|run| (path_of(run.file_index), run.start_line, run.end_line));
         for (position, run) in group.members.iter().enumerate() {
             let view = run.file_index as usize;
             if view >= changed_count {
@@ -646,11 +699,7 @@ pub fn evaluate_clones(
                     view,
                     run: *run,
                     added,
-                    matched: (
-                        views[other.file_index as usize].path,
-                        other.start_line,
-                        other.end_line,
-                    ),
+                    matched: (path_of(other.file_index), other.start_line, other.end_line),
                 });
             }
         }
