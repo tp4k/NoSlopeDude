@@ -225,7 +225,7 @@ struct Flagged<'a> {
 /// Collects into a `BTreeSet` first (so the result is sorted and
 /// deduplicated for free), then converts to the `Vec<usize>`
 /// `FileLanguageLines::executable_lines` stores.
-fn executable_lines_from_ir(ir_file: &lower::IrFile) -> Vec<usize> {
+pub(crate) fn executable_lines_from_ir(ir_file: &lower::IrFile) -> Vec<usize> {
     let mut executable_lines = BTreeSet::new();
     collect_ir_executable_lines(&ir_file.root, &mut executable_lines);
     executable_lines.into_iter().collect()
