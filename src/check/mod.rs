@@ -479,7 +479,7 @@ struct LoadTask<'a> {
 /// The outcome of loading one file in the parallel pass.
 enum Load {
     Failure(CheckDiagnostic),
-    Changed(Loaded),
+    Changed(Box<Loaded>),
     Unchanged(UnchangedCandidates),
     Unanalyzable(UnanalyzableReason),
 }
@@ -529,11 +529,11 @@ fn load_base(repo: &Repository, task: &LoadTask<'_>, read: ReadBlob<'_>) -> Load
         Err(failure) => return Load::Failure(failure),
     };
     match analyze_bytes(&task.included.path, &bytes) {
-        Ok(analysis) => Load::Changed(Loaded {
+        Ok(analysis) => Load::Changed(Box::new(Loaded {
             path: task.included.path.clone(),
             bytes,
             analysis,
-        }),
+        })),
         Err(reason) => Load::Unanalyzable(reason),
     }
 }
@@ -615,11 +615,11 @@ fn load_candidate(
         cache.put(blob, grammar, payload);
     }
     match analysis {
-        Ok(analysis) if task.changed => Load::Changed(Loaded {
+        Ok(analysis) if task.changed => Load::Changed(Box::new(Loaded {
             path: included.path.clone(),
             bytes,
             analysis,
-        }),
+        })),
         Ok(_) => payload.map_or(
             Load::Unanalyzable(UnanalyzableReason::InvalidEncoding),
             |payload| unchanged_load(included, payload),
@@ -714,7 +714,7 @@ impl Sides<'_> {
         }) {
             match load {
                 Load::Failure(failure) => loads.failures.push(failure),
-                Load::Changed(loaded) => loads.base.push(loaded),
+                Load::Changed(loaded) => loads.base.push(*loaded),
                 Load::Unchanged(_) | Load::Unanalyzable(_) => {}
             }
         }
@@ -748,7 +748,7 @@ impl Sides<'_> {
         for (task, load) in candidate_tasks.iter().zip(results) {
             match load {
                 Load::Failure(failure) => loads.failures.push(failure),
-                Load::Changed(loaded) => loads.changed.push(loaded),
+                Load::Changed(loaded) => loads.changed.push(*loaded),
                 Load::Unchanged(candidates) => loads.unchanged.push(candidates),
                 Load::Unanalyzable(reason) => loads.coverage.push(CoverageInput {
                     entry: task.included.clone(),
