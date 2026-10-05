@@ -170,6 +170,7 @@ impl Fixture {
         let Ok(fan_outs) = fs::read_dir(self.cache_root()) else {
             return files;
         };
+        let fan_outs = fan_outs.filter(|fan_out| fan_out.as_ref().is_ok_and(|e| e.path().is_dir()));
         for fan_out in fan_outs {
             for entry in fs::read_dir(fan_out.expect("read a fan-out").path()).expect("list it") {
                 files.push(entry.expect("read an entry").path());
