@@ -1,6 +1,5 @@
 use std::ffi::OsString;
 use std::io::Write;
-use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
 
@@ -127,7 +126,7 @@ fn config_is_inside_checkout(repository: &Path, config: &Path) -> anyhow::Result
     if forms.iter().any(|form| form.starts_with(&root)) {
         return Ok(true);
     }
-    let Ok(root_identity) = std::fs::metadata(&root).map(|meta| (meta.dev(), meta.ino())) else {
+    let Some(root_identity) = std::fs::metadata(&root).ok().as_ref().and_then(identity) else {
         return Ok(false);
     };
     Ok(forms
@@ -135,8 +134,22 @@ fn config_is_inside_checkout(repository: &Path, config: &Path) -> anyhow::Result
         .flat_map(|form| form.ancestors())
         .any(|ancestor| {
             std::fs::metadata(ancestor)
-                .is_ok_and(|meta| meta.is_dir() && (meta.dev(), meta.ino()) == root_identity)
+                .is_ok_and(|meta| meta.is_dir() && identity(&meta) == Some(root_identity))
         }))
+}
+
+/// The `(st_dev, st_ino)` pair that names a file on unix.
+#[cfg(unix)]
+fn identity(meta: &std::fs::Metadata) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    Some((meta.dev(), meta.ino()))
+}
+
+/// No stable identity is read off other platforms, so containment there rests
+/// on the lexical and canonical forms alone.
+#[cfg(not(unix))]
+fn identity(_meta: &std::fs::Metadata) -> Option<(u64, u64)> {
+    None
 }
 
 fn lexically_normalized(path: &Path) -> PathBuf {
