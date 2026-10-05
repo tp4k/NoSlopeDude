@@ -181,8 +181,9 @@ pub struct CachedFinding {
     pub enclosing_callable: Option<usize>,
 }
 
-/// A clone candidate without its `file_index`.
+/// A clone candidate without its `file_index`, stored as a JSON array.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(into = "CandidateRecord", from = "CandidateRecord")]
 pub struct CachedCandidate {
     #[serde(with = "hex_u128")]
     pub key: u128,
@@ -192,6 +193,46 @@ pub struct CachedCandidate {
     pub end_line: usize,
     pub source_lines: usize,
     pub statement_count: usize,
+}
+
+/// The on-disk array form of a `CachedCandidate`, in field order.
+#[derive(Serialize, Deserialize)]
+struct CandidateRecord(
+    #[serde(with = "hex_u128")] u128,
+    u32,
+    u32,
+    usize,
+    usize,
+    usize,
+    usize,
+);
+
+impl From<CachedCandidate> for CandidateRecord {
+    fn from(candidate: CachedCandidate) -> Self {
+        Self(
+            candidate.key,
+            candidate.container,
+            candidate.first_statement,
+            candidate.start_line,
+            candidate.end_line,
+            candidate.source_lines,
+            candidate.statement_count,
+        )
+    }
+}
+
+impl From<CandidateRecord> for CachedCandidate {
+    fn from(record: CandidateRecord) -> Self {
+        Self {
+            key: record.0,
+            container: record.1,
+            first_statement: record.2,
+            start_line: record.3,
+            end_line: record.4,
+            source_lines: record.5,
+            statement_count: record.6,
+        }
+    }
 }
 
 /// A parse-damage span as its kind and line range.

@@ -199,3 +199,55 @@ fn test_multi_line_damage_span_round_trips() {
         .collect();
     assert_eq!(read, expected);
 }
+
+const CANDIDATE_RECORD_LEN: usize = 7;
+
+#[test]
+fn test_clone_candidate_is_stored_as_an_array() {
+    let (_dir, cache) = cache();
+    let analysis = analysis_of(CLEAN_SOURCE);
+    let built = CachedAnalysis::from_analysis(&analysis, CLEAN_SOURCE, MIN_LINES);
+    let key = key_of(CLEAN_SOURCE);
+    cache.put(&key, &built).expect("put");
+    let candidates = built.clone_candidates(0);
+    assert!(!candidates.is_empty());
+
+    let text = fs::read_to_string(cache.entry_path(&key)).expect("read entry");
+    let split = text.find('\n').expect("header line");
+    let payload: serde_json::Value = serde_json::from_str(&text[split + 1..]).expect("payload");
+    let record = payload["analyzed"]["clone_candidates"][0]
+        .as_array()
+        .expect("candidate is a JSON array");
+    assert_eq!(record.len(), CANDIDATE_RECORD_LEN);
+    assert_eq!(record[0], format!("{:032x}", candidates[0].0));
+}
+
+const UNKNOWN_RULE_ID: &str = "X999";
+
+#[test]
+fn test_unknown_rule_id_is_a_miss() {
+    let (_dir, cache) = cache();
+    let analysis = analysis_of(CLEAN_SOURCE);
+    let built = CachedAnalysis::from_analysis(&analysis, CLEAN_SOURCE, MIN_LINES);
+    let key = key_of(CLEAN_SOURCE);
+    cache.put(&key, &built).expect("put");
+    assert!(!analysis.findings.is_empty());
+
+    let path = cache.entry_path(&key);
+    let text = fs::read_to_string(&path).expect("read entry");
+    let split = text.find('\n').expect("header line");
+    let mut header: serde_json::Value = serde_json::from_str(&text[..split]).expect("header");
+    let mut payload: serde_json::Value = serde_json::from_str(&text[split + 1..]).expect("payload");
+    payload["analyzed"]["findings"][0]["rule_id"] = serde_json::json!(UNKNOWN_RULE_ID);
+    let forged = serde_json::to_vec(&payload).expect("encode payload");
+    header["payload_digest"] =
+        serde_json::json!(super::digest_hex(super::PAYLOAD_FAMILY_PREFIX, &[&forged]));
+    let mut bytes = serde_json::to_vec(&header).expect("encode header");
+    bytes.push(b'\n');
+    bytes.extend_from_slice(&forged);
+    fs::write(&path, bytes).expect("write entry");
+
+    assert!(cache.get(&key).is_none());
+    cache.put(&key, &built).expect("repair");
+    assert_eq!(cache.get(&key), Some(built));
+}
