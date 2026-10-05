@@ -694,6 +694,63 @@ fn test_check_config_through_the_firmlink_alias_of_the_checkout_is_refused() {
     assert!(!listing.contains(E101), "{listing}");
 }
 
+#[cfg(target_os = "macos")]
+fn firmlink_alias_of_checkout(fx: &Fixture) -> PathBuf {
+    use std::os::unix::fs::MetadataExt;
+
+    let canonical = fs::canonicalize(fx.root()).expect("canonicalize the checkout");
+    let alias_root = Path::new("/System/Volumes/Data").join(
+        canonical
+            .strip_prefix("/")
+            .expect("the canonical root is absolute"),
+    );
+    let ordinary = fs::metadata(&canonical).expect("stat the ordinary root");
+    let aliased = fs::metadata(&alias_root).expect("stat the firmlink alias of the root");
+    assert_eq!(
+        (aliased.dev(), aliased.ino()),
+        (ordinary.dev(), ordinary.ino())
+    );
+    alias_root
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn test_check_config_through_an_outside_symlink_to_the_firmlink_alias_then_dotdot_is_refused() {
+    let fx = Fixture::staged_regression();
+    write_config(fx.root(), "trusted.yml", WARN_E101);
+    fs::create_dir_all(fx.root().join("sub")).expect("create a directory in the checkout");
+    let alias_root = firmlink_alias_of_checkout(&fx);
+    let outside = TempDir::new().expect("create a directory outside the checkout");
+    let link = outside.path().join("l");
+    symlink(alias_root.join("sub"), &link)
+        .expect("link an outside path to the alias of a checkout directory");
+    let given = link.join("..").join("trusted.yml");
+
+    let output = fx.nsd(&["check", "--staged", "--config", path_str(&given)]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_ERROR));
+    let listing = stdout(&output);
+    assert!(listing.contains(C102), "{listing}");
+    assert!(!listing.contains(E101), "{listing}");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn test_check_missing_config_through_the_firmlink_alias_is_refused_as_inside() {
+    let fx = Fixture::staged_regression();
+    let given = firmlink_alias_of_checkout(&fx).join("absent.yml");
+
+    let output = fx.nsd(&["check", "--staged", "--config", path_str(&given)]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_ERROR));
+    let listing = stdout(&output);
+    assert!(listing.contains(C102), "{listing}");
+    assert!(
+        listing.contains("inside the candidate checkout"),
+        "{listing}"
+    );
+}
+
 #[test]
 fn test_check_config_in_a_dir_that_merely_contains_a_link_to_the_checkout_is_used() {
     let fx = Fixture::staged_regression();
