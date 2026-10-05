@@ -613,3 +613,153 @@ fn test_check_config_symlink_reached_through_symlink_dotdot_is_refused() {
     assert!(listing.contains(C102), "{listing}");
     assert!(!listing.contains(E101), "{listing}");
 }
+
+fn checkout_with_link_to_outside_dir() -> (Fixture, TempDir) {
+    let fx = Fixture::staged_regression();
+    let outside = TempDir::new().expect("create a directory outside the checkout");
+    symlink(outside.path(), fx.root().join("linkdir"))
+        .expect("link a checkout path to an outside directory");
+    (fx, outside)
+}
+
+#[test]
+fn test_check_config_under_a_checkout_symlink_to_an_outside_dir_is_refused() {
+    let (fx, outside) = checkout_with_link_to_outside_dir();
+    write_config(outside.path(), "trusted.yml", WARN_E101);
+    let canonical = fs::canonicalize(fx.root()).expect("canonicalize the checkout");
+    let canonical_given = canonical.join("linkdir").join("trusted.yml");
+    let spelled_given = fx.root().join("linkdir").join("trusted.yml");
+
+    for given in [
+        path_str(&canonical_given),
+        path_str(&spelled_given),
+        "linkdir/trusted.yml",
+    ] {
+        let output = fx.nsd(&["check", "--staged", "--config", given]);
+
+        assert_eq!(exit_code(&output), Some(EXIT_ERROR), "{given}");
+        let listing = stdout(&output);
+        assert!(listing.contains(C102), "{given}: {listing}");
+        assert!(
+            listing.contains("inside the candidate checkout"),
+            "{given}: {listing}"
+        );
+        assert!(!listing.contains(E101), "{given}: {listing}");
+    }
+}
+
+#[test]
+fn test_check_missing_config_under_a_checkout_symlink_to_an_outside_dir_is_refused() {
+    let (fx, _outside) = checkout_with_link_to_outside_dir();
+    let canonical = fs::canonicalize(fx.root()).expect("canonicalize the checkout");
+    let given = canonical.join("linkdir").join("absent.yml");
+
+    let output = fx.nsd(&["check", "--staged", "--config", path_str(&given)]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_ERROR));
+    let listing = stdout(&output);
+    assert!(listing.contains(C102), "{listing}");
+    assert!(
+        listing.contains("inside the candidate checkout"),
+        "{listing}"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn test_check_config_through_the_firmlink_alias_of_the_checkout_is_refused() {
+    use std::os::unix::fs::MetadataExt;
+
+    let fx = Fixture::staged_regression();
+    write_config(fx.root(), "trusted.yml", WARN_E101);
+    let canonical = fs::canonicalize(fx.root()).expect("canonicalize the checkout");
+    let alias_root = Path::new("/System/Volumes/Data").join(
+        canonical
+            .strip_prefix("/")
+            .expect("the canonical root is absolute"),
+    );
+    let ordinary = fs::metadata(&canonical).expect("stat the ordinary root");
+    let aliased = fs::metadata(&alias_root).expect("stat the firmlink alias of the root");
+    assert_eq!(
+        (aliased.dev(), aliased.ino()),
+        (ordinary.dev(), ordinary.ino())
+    );
+    let given = alias_root.join("trusted.yml");
+
+    let output = fx.nsd(&["check", "--staged", "--config", path_str(&given)]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_ERROR));
+    let listing = stdout(&output);
+    assert!(listing.contains(C102), "{listing}");
+    assert!(!listing.contains(E101), "{listing}");
+}
+
+#[cfg(target_os = "macos")]
+fn firmlink_alias_of_checkout(fx: &Fixture) -> PathBuf {
+    use std::os::unix::fs::MetadataExt;
+
+    let canonical = fs::canonicalize(fx.root()).expect("canonicalize the checkout");
+    let alias_root = Path::new("/System/Volumes/Data").join(
+        canonical
+            .strip_prefix("/")
+            .expect("the canonical root is absolute"),
+    );
+    let ordinary = fs::metadata(&canonical).expect("stat the ordinary root");
+    let aliased = fs::metadata(&alias_root).expect("stat the firmlink alias of the root");
+    assert_eq!(
+        (aliased.dev(), aliased.ino()),
+        (ordinary.dev(), ordinary.ino())
+    );
+    alias_root
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn test_check_config_through_an_outside_symlink_to_the_firmlink_alias_then_dotdot_is_refused() {
+    let fx = Fixture::staged_regression();
+    write_config(fx.root(), "trusted.yml", WARN_E101);
+    fs::create_dir_all(fx.root().join("sub")).expect("create a directory in the checkout");
+    let alias_root = firmlink_alias_of_checkout(&fx);
+    let outside = TempDir::new().expect("create a directory outside the checkout");
+    let link = outside.path().join("l");
+    symlink(alias_root.join("sub"), &link)
+        .expect("link an outside path to the alias of a checkout directory");
+    let given = link.join("..").join("trusted.yml");
+
+    let output = fx.nsd(&["check", "--staged", "--config", path_str(&given)]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_ERROR));
+    let listing = stdout(&output);
+    assert!(listing.contains(C102), "{listing}");
+    assert!(!listing.contains(E101), "{listing}");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn test_check_missing_config_through_the_firmlink_alias_is_refused_as_inside() {
+    let fx = Fixture::staged_regression();
+    let given = firmlink_alias_of_checkout(&fx).join("absent.yml");
+
+    let output = fx.nsd(&["check", "--staged", "--config", path_str(&given)]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_ERROR));
+    let listing = stdout(&output);
+    assert!(listing.contains(C102), "{listing}");
+    assert!(
+        listing.contains("inside the candidate checkout"),
+        "{listing}"
+    );
+}
+
+#[test]
+fn test_check_config_in_a_dir_that_merely_contains_a_link_to_the_checkout_is_used() {
+    let fx = Fixture::staged_regression();
+    let outside = TempDir::new().expect("create a directory outside the checkout");
+    let config = write_config(outside.path(), "trusted.yml", WARN_E101);
+    symlink(fx.root(), outside.path().join("back")).expect("link an outside path to the checkout");
+
+    let output = fx.nsd(&["check", "--staged", "--config", path_str(&config)]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_PASS));
+    assert!(stdout(&output).contains(E101), "{}", stdout(&output));
+}

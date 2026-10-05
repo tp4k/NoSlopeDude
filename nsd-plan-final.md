@@ -112,6 +112,12 @@ Final-review amendments, approved after A1–A7:
 | A9 | **Suppressions bind to findings.** Match a suppression by rule ID and its matched underlying finding. Moving that finding together with its unchanged directive is tolerated; reusing the directive for an unmatched finding raises `S101`. | *Stable data model*; M3–M5; acceptance tests |
 | A10 | **Clone-index completeness includes unchanged files.** When `V102` is enabled (`deny` or `warn`), an included unchanged file required for clone comparison that cannot be analyzed because of size, encoding, or capability failure raises `A102`. Trusted exclusion removes it from scope; mapped legacy parse-damage tolerance is unchanged. | *Required clone coverage*; M3–M5; acceptance tests |
 
+Post-freeze amendments (2026-10-05, user decision):
+
+| # | Amendment | Where applied |
+|---|---|---|
+| A11 | **A trusted `--config` must lie outside the candidate checkout.** A `--config <path>` inside the checkout is refused with `NSD-C102`, exit `2`. It is never read and no policy evaluation runs. "Inside" holds when any of these does: (1) the absolute given path, meaning the path joined to the current directory with `.` and `..` removed lexically, lies under the repository's canonical work-tree root; (2) a canonical (symlink-resolved) form of it does: the whole path, its directory with the file name appended, or the path as the OS resolves it, so `..` after a symlink counts. When the file is missing, its longest existing prefix is resolved; (3) filesystem identity: an existing directory among the ancestors of the forms in (1) and (2) has the same `(st_dev, st_ino)` as the work-tree root. So an alias of the work-tree root itself or of one of its ancestors that canonicalization does not merge, such as the macOS firmlink `/System/Volumes/Data<root>`, a bind mount of the root or of an ancestor, or a case variant on a case-insensitive volume, still counts. Only such aliases are promised: the identity clause compares against the root's identity alone. `.git/` is included throughout. Ancestors come from those normalized and resolved forms, never from the raw path's own prefixes, so `sub/../../x.yml` that leaves the checkout is outside. A missing path is judged by (1) and (2), and by (3) through whichever ancestors exist. Two exceptions are documented and not refused: a hard link outside the checkout to a file inside it, and a bind mount of a subdirectory of the checkout (not of the root) at a path outside it. Like a copy, each is a separate name only the invoker can create. A `--config` file outside the checkout completely replaces repository policy for that invocation. | *CLI and configuration*; M3–M5; *Test and acceptance plan* |
+
 R also deleted P's *Settled decisions*, *Architecture*, *Spec deltas* and
 *Rejected during grilling* — roughly half the plan, including the `git2`
 choice, the module map, and the quantified reasons each alternative lost.
@@ -179,7 +185,8 @@ exists, else `10` (amendment A2).
 - `--base`: base is `merge-base(HEAD, ref)`; candidate is `HEAD`, or the
   complete worktree overlay when `--worktree` is supplied.
 - Discover only repository-root `nsd.yml`. A trusted external `--config <path>`
-  overrides it.
+  overrides it; a path inside the candidate checkout is refused with `NSD-C102`
+  (amendment A11).
 - Checks use the **base snapshot's** config. When base has none, immutable
   built-in defaults judge the change; candidate config is validated and
   reported but applies only to later checks.
@@ -732,7 +739,9 @@ why.
   trusted exclusion removes the obligation, `off` removes only the additional
   unchanged-file obligation, and mapped legacy parse damage remains tolerated;
 - candidate config weakening, first-config defaults, trusted override, invalid
-  config, candidate `.gitignore` changes, and **`C101` not altering exit 0**;
+  config, a trusted `--config` inside the checkout, reached through an ancestor
+  symlink or a filesystem alias, refused with `C102` (A11), candidate
+  `.gitignore` changes, and **`C101` not altering exit 0**;
 - clones against untouched files, changed-file replacement, new occurrence,
   material extension (base `10`: `+1` passes, `+2` fails; base `100`: `+10`
   passes, `+11` fails), **cross-file move passes and cross-file copy fails**
