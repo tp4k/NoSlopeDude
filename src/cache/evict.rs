@@ -72,10 +72,8 @@ impl Cache {
         now: SystemTime,
     ) -> Result<Cache, CacheError> {
         let cache = Cache::open_root(repo)?;
-        if cache.pass_is_due(now) {
-            if cache.record_pass(now) {
-                cache.evict(limits, now);
-            }
+        if cache.pass_is_due(now) && cache.record_pass(now) {
+            cache.evict(limits, now);
         }
         Ok(cache)
     }
@@ -178,7 +176,7 @@ impl Cache {
             Some(seconds) => UNIX_EPOCH
                 .checked_add(Duration::from_secs(seconds))
                 .and_then(|stamped| now.duration_since(stamped).ok())
-                .map_or(true, |elapsed| elapsed >= PASS_INTERVAL),
+                .is_none_or(|elapsed| elapsed >= PASS_INTERVAL),
             None => true,
         }
     }
