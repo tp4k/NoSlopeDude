@@ -279,10 +279,11 @@ fn test_linked_worktree_open_evicts_the_shared_cache_once() {
     let root = cache_root(&repo);
     let t0 = SystemTime::now();
     let first = plant_entry(&root, 1, KIB, DAY * 40, t0);
-    let second = plant_entry(&root, 2, KIB, DAY * 40, t0);
 
     Cache::open_at(&linked, UNLIMITED, t0).expect("open from the linked worktree");
     assert!(!first.exists(), "the pass reaches the shared cache");
+
+    let second = plant_entry(&root, 2, KIB, DAY * 40, t0);
 
     Cache::open_at(&repo, UNLIMITED, t0 + DAY / 24).expect("open from the main worktree");
     assert!(second.exists(), "the stamp is shared by both worktrees");
