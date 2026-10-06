@@ -81,7 +81,8 @@ impl Cache {
     /// One eviction pass: removes entries older than `limits.max_age` and
     /// stale temp files, then the least recently used entries until the
     /// total is at most `limits.max_bytes`. The total counts the temp files
-    /// still left, which are never evicted for size. Returns how many files
+    /// still left, which are never evicted for size; when they alone exceed
+    /// the cap, no entry is evicted for size either. Returns how many files
     /// it found gone after removal; a file it cannot remove is skipped.
     pub fn evict(&self, limits: EvictionLimits, now: SystemTime) -> usize {
         self.run_pass(limits, now, &|path| fs::remove_file(path))
@@ -107,13 +108,17 @@ impl Cache {
                 total = total.saturating_add(temp.len);
             }
         }
+        // Removing entries cannot bring the total under the cap when the
+        // temp files alone exceed it, so then none is removed for size.
+        let cap_reachable = total <= limits.max_bytes;
         entries.sort_by(|a, b| (a.modified, &a.path).cmp(&(b.modified, &b.path)));
         total = entries
             .iter()
             .fold(total, |sum, entry| u64::saturating_add(sum, entry.len));
         for entry in entries {
             let expired = age_of(entry.modified, now) > limits.max_age;
-            if (expired || total > limits.max_bytes) && gone(remove(&entry.path)) {
+            let over_cap = cap_reachable && total > limits.max_bytes;
+            if (expired || over_cap) && gone(remove(&entry.path)) {
                 removed += 1;
                 total = total.saturating_sub(entry.len);
             }
@@ -199,8 +204,10 @@ impl Cache {
     }
 
     /// Best effort: moves a hit entry's mtime to now once it is a day old.
-    /// The file is opened read-only: setting its times needs ownership,
-    /// not write access, so a read-only entry still keeps its recency.
+    /// The file is opened read-only first: on Unix setting its times needs
+    /// ownership, not write access, so a read-only entry still keeps its
+    /// recency. Windows needs a handle with write access, so a failed
+    /// read-only touch is retried through one.
     pub(super) fn refresh_recency(&self, path: &Path) {
         let Ok(meta) = fs::symlink_metadata(path) else {
             return;
@@ -211,8 +218,10 @@ impl Cache {
         if !meta.is_file() || !stale {
             return;
         }
+        let touch = |file: File| file.set_times(FileTimes::new().set_modified(SystemTime::now()));
         let touched = File::open(path)
-            .and_then(|file| file.set_times(FileTimes::new().set_modified(SystemTime::now())));
+            .and_then(touch)
+            .or_else(|_| File::options().write(true).open(path).and_then(touch));
         drop(touched);
     }
 }
