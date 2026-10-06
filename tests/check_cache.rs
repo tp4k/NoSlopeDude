@@ -7,6 +7,7 @@ mod common;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::time::{Duration, Instant};
 
 use git2::{IndexEntry, IndexTime, ObjectType, Oid, Repository};
 use serde_json::Value;
@@ -36,6 +37,11 @@ const ZLIB_FINAL_STORED_BLOCK: u8 = 0x01;
 const ADLER_MODULUS: u32 = 65_521;
 const ADLER_SHIFT: u32 = 16;
 const SIXTY_DAYS_SECS: u64 = 60 * 24 * 60 * 60;
+const V102_OFF: &str = "version: 1\npolicy:\n  NSD-V102: off\n";
+const SCALING_STATEMENTS: usize = 250;
+const SCALING_FACTOR: usize = 4;
+const SCALING_SAMPLES: usize = 3;
+const SCALING_ASSERT_MULTIPLIER: u32 = 8;
 
 struct Fixture {
     dir: TempDir,
@@ -751,4 +757,74 @@ fn test_unreadable_cache_entry_warns_once_and_keeps_the_verdict() {
     assert_eq!(outcome.warnings.len(), 1, "{:?}", outcome.warnings);
     assert_eq!(mode.ok(), Some(0), "the unreadable entry was replaced");
     assert_eq!(fs::read(&path).expect("read it again"), bytes);
+}
+
+fn write_v102_off_config() -> (TempDir, PathBuf) {
+    let dir = TempDir::new().expect("create a temp dir for the trusted config");
+    let path = dir.path().join("trusted.yml");
+    fs::write(&path, V102_OFF).expect("write the trusted config");
+    (dir, path)
+}
+
+fn one_method(statements: usize) -> String {
+    block_class("Foo", &clone_block("a", statements))
+}
+
+fn fastest_v102_off_check(statements: usize, block_cache: bool) -> Duration {
+    let fx = fixture();
+    fx.commit(&[("Foo.java", one_method(1).as_bytes())]);
+    fx.stage("Foo.java", one_method(statements).as_bytes());
+    if block_cache {
+        fx.block_cache_dir();
+    }
+    let (_config_dir, config) = write_v102_off_config();
+    (0..SCALING_SAMPLES)
+        .map(|_| {
+            let started = Instant::now();
+            fx.check(Some(&config));
+            started.elapsed()
+        })
+        .min()
+        .expect("at least one sample")
+}
+
+fn assert_v102_off_scales_linearly(block_cache: bool) {
+    let small = fastest_v102_off_check(SCALING_STATEMENTS, block_cache);
+    let large = fastest_v102_off_check(SCALING_STATEMENTS * SCALING_FACTOR, block_cache);
+    assert!(
+        large < small * SCALING_ASSERT_MULTIPLIER,
+        "a quadratic pass scales ~16x from N to 4N, a linear one ~4x: a V102-off check at \
+         N={SCALING_STATEMENTS} took {small:?}, at 4N={} took {large:?}, ratio {:.1}x, expected < \
+         {SCALING_ASSERT_MULTIPLIER}x",
+        SCALING_STATEMENTS * SCALING_FACTOR,
+        large.as_secs_f64() / small.as_secs_f64().max(f64::EPSILON)
+    );
+}
+
+#[test]
+fn test_v102_off_check_with_the_cache_disabled_does_not_scale_quadratically_in_method_length() {
+    assert_v102_off_scales_linearly(true);
+}
+
+#[test]
+fn test_v102_off_check_with_the_cache_active_does_not_scale_quadratically_in_method_length() {
+    assert_v102_off_scales_linearly(false);
+}
+
+#[test]
+fn test_v102_off_check_writes_no_cache_entry() {
+    let fx = fixture();
+    fx.commit(&[("Foo.java", one_method(1).as_bytes())]);
+    let staged = one_method(CLONE_BLOCK_LINES);
+    fx.stage("Foo.java", staged.as_bytes());
+    let (_config_dir, config) = write_v102_off_config();
+
+    let outcome = fx.check(Some(&config));
+
+    let staged_blob = Oid::hash_object(ObjectType::Blob, staged.as_bytes()).expect("hash");
+    assert!(outcome.warnings.is_empty(), "{:?}", outcome.warnings);
+    assert!(fx
+        .entry(staged_blob, Grammar::Java, DEFAULT_MIN_CLONE_LINES)
+        .is_none());
+    assert_eq!(fx.entry_files(), Vec::<PathBuf>::new());
 }
