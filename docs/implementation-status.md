@@ -11,7 +11,8 @@ Every agent that finishes a piece of work updates its rows here in the same
 round; see *How to update this file* at the bottom and the matching rule in
 [`AGENTS.md`](../AGENTS.md).
 
-Last updated: 2026-10-06 (run 2026-10-06-0915-m5-cache-codex-followup on
+Last updated: 2026-10-06 (branch map refreshed to `main@07e5132` after PR #6
+merged `feat/m5-cache`; earlier, run 2026-10-06-0915-m5-cache-codex-followup on
 `feat/m5-cache`: WS-1 symlinked cache root refusal (M5-2) and read-error
 hardening (M5-1) at `5ad97dd` `dee5cfa`, WS-2 V102-off payload gate (M5-1) at
 `0b197bb` `40af19e`; earlier, run 2026-10-05-1602-m5-cache-lru on `feat/m5-cache`,
@@ -66,7 +67,7 @@ repository proves it. "The code exists" is `[~]`, not `[x]`.
 
 | Branch / worktree | HEAD | Holds |
 |---|---|---|
-| `main` (`~/pet/nsd`) | `b8175eb` | M0a, M0b, M1–M2, M0c, plus M3-1..M3-4 and M4-1 via PR #3, M4-2 via PR #4, and M5-3/M5-4 via PR #5. The integration branch |
+| `main` (`~/pet/nsd`) | `07e5132` | M0a, M0b, M1–M2, M0c, plus M3-1..M3-4 and M4-1 via PR #3, M4-2 via PR #4, M5-3/M5-4 via PR #5, and M5-1/M5-2 with the check-scope JSON (M6-1, M6-2 partial) via PR #6. The integration branch |
 | `feat/m0a-import` (deleted) | merged into `main` at `a6b5037` | Was the M0a/M0b working branch; its worktree `~/pet/nsd-m0a-import` was removed with it |
 | `feat/m1-snapshots` (deleted) | merged into `main` at `5912e63` (`--no-ff`) | Was the M1–M2 working branch; its worktree `~/pet/nsd-m1-snapshots` was removed with it |
 | `feat/m0c-grammar` | merged into `main` at `4a36680` (`--no-ff`) | Was the M0c working branch; its worktree `~/pet/nsd-m0c-grammar` was removed |
@@ -74,14 +75,13 @@ repository proves it. "The code exists" is `[~]`, not `[x]`.
 | `feat/m4-v102` | merged into `main` at `7149ef7` (PR #4) | Was the M4-2 working branch (A102 ledger follow-ups, V102 comparison and its Codex follow-ups, consistent move credit) |
 | `feat/m5-check` (deleted) | merged into `main` at `b8175eb` (PR #5) | Was the M5-3/M5-4 working branch, including its ledger fixes; its worktree `~/pet/nsd-m5-check` was removed with it |
 | `feat/m5-check-ws1`..`ws5`, `ws7` (deleted) | merged into `feat/m5-check` at `729b125` (WS-1), `b40a84d` (WS-2), `c5f7c7a` (WS-3), `77c4402` (WS-4), `d23e4e5` (WS-5), `2408921` (WS-7); WS-6 landed on top, and all reached `main` with PR #5 | Stream branches of that run; their worktrees were removed with them |
-| `feat/m5-cache` (`~/pet/nsd-m5-cache`) | `32a4b69` (verified at WS-5 start) | M5-1, M5-2, check JSON output (M6-1) and its stream branches `feat/m5-cache-ws<N>`. Unmerged: agents never merge to `main` |
+| `feat/m5-cache` (deleted) | merged into `main` at `07e5132` (PR #6) | Was the M5-1/M5-2 working branch, including check JSON output (M6-1) and its stream branches `feat/m5-cache-ws<N>`; its worktree `~/pet/nsd-m5-cache` was removed with it |
 
-`feat/m5-cache` is this run's unmerged working branch; every other branch
-above is merged. M1–M2 and M0c both forked before the other landed, so
+Every branch above is merged; `main` is the only live branch. M1–M2 and M0c both forked before the other landed, so
 `4a36680` is the first commit where they are tested together.
 
-Test state on `main@4a36680`: `cargo test --locked` is green, 300 passed /
-0 failed / 1 ignored across 25 suites (local Homebrew toolchain; MSRV 1.90 is
+Test state on `main@07e5132` (re-run 2026-10-06): `cargo test --locked` is
+green, 807 passed / 0 failed / 1 ignored across 47 test targets (local Homebrew toolchain; MSRV 1.90 is
 declared, not exercised — A4). `cargo fmt --check` is clean.
 `scripts/neutrality_gate.sh` has not been re-run on the merged tree.
 

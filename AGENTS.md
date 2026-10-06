@@ -41,16 +41,22 @@ The engine was imported from `agent_slope` in M0a; that import is complete and
 is recorded in [README.md](README.md). Current position — see the status file
 for the per-step detail and evidence:
 
-- **M0a: done.** Import, `nsd` rename, D11 consolidation, versioned BLAKE3,
-  golden digest.
-- **M0b: done except its private-archive leg.** IR, both lowerings, all
-  analyzers retargeted, salvage, and the measurement-neutrality gate on the
-  suite fixtures. The `java-fixture-01` strict byte-identity leg is *pending*
-  on the private archive, and it blocks M0c.
-- **M0c, M3–M7: not started.** M1–M2 is partly done on `feat/m1-snapshots`,
-  which is 45 commits behind `main` and must merge it before its own work can
-  be judged against the current M0b baseline.
-- M0a and M0b are on `main`; `feat/m1-snapshots` is the only unmerged branch.
+- **M0a, M0b, M0c: done** (M0b-4 stays `[~]`: clone lowering was proven
+  after the IR shape, not prototyped ahead of it). Import, `nsd` rename, D11
+  consolidation, versioned BLAKE3, golden digest; IR, both lowerings,
+  analyzers retargeted, salvage, neutrality gate incl. the `java-fixture-01`
+  strict leg; Orchard grammar swap and the `nsd-v1` freeze.
+- **M1–M2: done except M1-8**, which is not started and moved into the M6 run
+  by user decision; M1-4 is `[~]` in its row. Snapshots, diffs, identity,
+  configuration and base policy trust.
+- **M3–M5: done.** All twelve diagnostics, suppressions, V102, exit
+  aggregation, the `nsd check` subcommand, and the per-blob cache with LRU
+  eviction.
+- **M6–M7: in progress.** Check-scope JSON is partly done (M6-1, M6-2); M1-8,
+  the scan-scope canonical report, renderers, HTML caps, nested-checkout
+  exclusion for `scan`, and the M7-2 delivery sweep remain.
+- Everything is merged to `main` (last: PR #6); there is no unmerged branch.
+  If this list disagrees with the status file, the status file wins.
 
 The import constraints still bind anything that touches imported material or
 reaches back into the archive:
