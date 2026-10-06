@@ -70,6 +70,27 @@ fn io_error(path: &Path) -> impl FnOnce(std::io::Error) -> CacheError + '_ {
     }
 }
 
+/// Makes `path` a real directory, creating it when missing; a symlink or any
+/// other non-directory is refused so nothing is created or removed through it.
+fn ensure_real_dir(path: &Path) -> std::io::Result<()> {
+    let is_real_dir = || fs::symlink_metadata(path).map(|meta| meta.is_dir());
+    match is_real_dir() {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(std::io::ErrorKind::NotADirectory.into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => match fs::create_dir(path) {
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                if is_real_dir()? {
+                    Ok(())
+                } else {
+                    Err(std::io::ErrorKind::NotADirectory.into())
+                }
+            }
+            created => created,
+        },
+        Err(error) => Err(error),
+    }
+}
+
 fn grammar_label(grammar: Grammar) -> &'static str {
     match grammar {
         Grammar::Java => "java",
@@ -159,10 +180,11 @@ impl Cache {
     }
 
     fn open_root(repo: &Repository) -> Result<Cache, CacheError> {
-        let root = ROOT_COMPONENTS
-            .iter()
-            .fold(repo.commondir().to_path_buf(), |path, part| path.join(part));
-        fs::create_dir_all(&root).map_err(io_error(&root))?;
+        let mut root = repo.commondir().to_path_buf();
+        for part in ROOT_COMPONENTS {
+            root.push(part);
+            ensure_real_dir(&root).map_err(io_error(&root))?;
+        }
         Ok(Cache { root })
     }
 
@@ -181,16 +203,23 @@ impl Cache {
             .join(format!("{id}.{ENTRY_EXTENSION}"))
     }
 
-    /// The payload stored under `key`, or `None` for a miss: no file, an
+    /// The payload stored under `key`; `Ok(None)` for a miss: no file, an
     /// unparsable one, another version, a header that is not this key's, or
-    /// a payload that does not match its digest.
+    /// a payload that does not match its digest. Any other read failure is
+    /// an I/O error.
     pub fn get(&self, key: &CacheKey) -> Result<Option<CachedAnalysis>, CacheError> {
-        Ok(self.read_entry(key))
+        let path = self.entry_path(key);
+        match fs::read(&path) {
+            Ok(bytes) => Ok(self.parse_entry(key, &path, &bytes)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(CacheError::Io {
+                path,
+                source: error,
+            }),
+        }
     }
 
-    fn read_entry(&self, key: &CacheKey) -> Option<CachedAnalysis> {
-        let path = self.entry_path(key);
-        let bytes = fs::read(&path).ok()?;
+    fn parse_entry(&self, key: &CacheKey, path: &Path, bytes: &[u8]) -> Option<CachedAnalysis> {
         let split = bytes.iter().position(|byte| *byte == HEADER_TERMINATOR)?;
         let payload_bytes = &bytes[split + 1..];
         let header: Header = serde_json::from_slice(&bytes[..split]).ok()?;
@@ -204,7 +233,7 @@ impl Cache {
             return None;
         }
         let analysis = serde_json::from_slice(payload_bytes).ok()?;
-        self.refresh_recency(&path);
+        self.refresh_recency(path);
         Some(analysis)
     }
 
