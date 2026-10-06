@@ -80,8 +80,9 @@ impl Cache {
 
     /// One eviction pass: removes entries older than `limits.max_age` and
     /// stale temp files, then the least recently used entries until the
-    /// total is at most `limits.max_bytes`. Returns how many files it found
-    /// gone after removal; a file it cannot remove is skipped.
+    /// total is at most `limits.max_bytes`. The total counts the temp files
+    /// still left, which are never evicted for size. Returns how many files
+    /// it found gone after removal; a file it cannot remove is skipped.
     pub fn evict(&self, limits: EvictionLimits, now: SystemTime) -> usize {
         self.run_pass(limits, now, &|path| fs::remove_file(path))
     }
@@ -98,15 +99,18 @@ impl Cache {
         };
         let (mut entries, temps) = self.walk();
         let mut removed = 0;
+        let mut total: u64 = 0;
         for temp in temps {
             if age_of(temp.modified, now) > limits.max_age && gone(remove(&temp.path)) {
                 removed += 1;
+            } else {
+                total = total.saturating_add(temp.len);
             }
         }
         entries.sort_by(|a, b| (a.modified, &a.path).cmp(&(b.modified, &b.path)));
-        let mut total: u64 = entries
+        total = entries
             .iter()
-            .fold(0, |sum, entry| u64::saturating_add(sum, entry.len));
+            .fold(total, |sum, entry| u64::saturating_add(sum, entry.len));
         for entry in entries {
             let expired = age_of(entry.modified, now) > limits.max_age;
             if (expired || total > limits.max_bytes) && gone(remove(&entry.path)) {
@@ -195,6 +199,8 @@ impl Cache {
     }
 
     /// Best effort: moves a hit entry's mtime to now once it is a day old.
+    /// The file is opened read-only: setting its times needs ownership,
+    /// not write access, so a read-only entry still keeps its recency.
     pub(super) fn refresh_recency(&self, path: &Path) {
         let Ok(meta) = fs::symlink_metadata(path) else {
             return;
@@ -205,9 +211,7 @@ impl Cache {
         if !meta.is_file() || !stale {
             return;
         }
-        let touched = File::options()
-            .write(true)
-            .open(path)
+        let touched = File::open(path)
             .and_then(|file| file.set_times(FileTimes::new().set_modified(SystemTime::now())));
         drop(touched);
     }
