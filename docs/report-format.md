@@ -163,7 +163,8 @@ Sections, in document order, each its own `<section id="...">`:
 It is the subset of M6-1/M6-2 that `check` needs now; fields may be added by
 M6-2, and these are not meant to be renamed. Keys are sorted at every level,
 every number is an integer, paths are repository-relative (`%XX` for non-UTF-8
-bytes), and nothing records time or the checkout's location.
+bytes), nothing records time, and no field except a pass-through `message`
+(see below) records the checkout's location.
 
 ```json
 {"diagnostics":[...],"exit_status":3,"result_scope":"check","schema_version":1}
