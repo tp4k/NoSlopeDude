@@ -100,7 +100,7 @@ fn test_entry_round_trips_every_payload_field() {
         let key = key_of(source);
         cache.put(&key, &built).expect("put");
 
-        let read = cache.get(&key).expect("hit");
+        let read = cache.get(&key).expect("read").expect("hit");
         assert_eq!(read, built);
         let hydrated = read
             .hydrate(Path::new("A.java"), LanguageFamily::Java)
@@ -148,9 +148,9 @@ fn test_tampered_payload_with_intact_header_is_a_miss() {
     serde_json::from_str::<serde_json::Value>(&forged).expect("still valid JSON");
     fs::write(&path, format!("{header}{forged}")).expect("write entry");
 
-    assert!(cache.get(&key).is_none());
+    assert!(cache.get(&key).expect("read").is_none());
     cache.put(&key, &built).expect("repair");
-    assert_eq!(cache.get(&key), Some(built));
+    assert_eq!(cache.get(&key).expect("read"), Some(built));
 }
 
 const MULTI_LINE_DAMAGE_SOURCE: &str = "class A {
@@ -183,6 +183,7 @@ fn test_multi_line_damage_span_round_trips() {
 
     let hydrated = cache
         .get(&key)
+        .expect("read")
         .expect("hit")
         .hydrate(Path::new("A.java"), LanguageFamily::Java)
         .expect("hydrates");
@@ -247,9 +248,9 @@ fn test_unknown_rule_id_is_a_miss() {
     bytes.extend_from_slice(&forged);
     fs::write(&path, bytes).expect("write entry");
 
-    assert!(cache.get(&key).is_none());
+    assert!(cache.get(&key).expect("read").is_none());
     cache.put(&key, &built).expect("repair");
-    assert_eq!(cache.get(&key), Some(built));
+    assert_eq!(cache.get(&key).expect("read"), Some(built));
 }
 
 #[test]

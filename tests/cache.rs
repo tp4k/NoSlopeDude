@@ -74,7 +74,7 @@ fn stored_and_read(cache: &Cache, source: &str) -> (CacheKey, CachedAnalysis) {
     cache
         .put(&key, &payload_of(&analysis, source))
         .expect("put an entry");
-    let read = cache.get(&key).expect("hit after put");
+    let read = cache.get(&key).expect("read").expect("hit after put");
     (key, read)
 }
 
@@ -144,15 +144,19 @@ fn test_same_blob_other_grammar_misses() {
 
     assert!(cache
         .get(&CacheKey::new(blob, Grammar::JavaScript, MIN_LINES))
+        .expect("read")
         .is_some());
     assert!(cache
         .get(&CacheKey::new(blob, Grammar::Java, MIN_LINES))
+        .expect("read")
         .is_none());
     assert!(cache
         .get(&CacheKey::new(blob, Grammar::Tsx, MIN_LINES))
+        .expect("read")
         .is_none());
     assert!(cache
         .get(&CacheKey::new(blob, Grammar::TypeScript, MIN_LINES))
+        .expect("read")
         .is_some());
 }
 
@@ -164,9 +168,11 @@ fn test_other_min_clone_lines_misses() {
 
     assert!(cache
         .get(&CacheKey::new(blob, Grammar::Java, MIN_LINES))
+        .expect("read")
         .is_some());
     assert!(cache
         .get(&CacheKey::new(blob, Grammar::Java, MIN_LINES_OTHER))
+        .expect("read")
         .is_none());
 }
 
@@ -188,9 +194,9 @@ fn test_corrupt_entry_is_a_miss_and_put_repairs_it() {
     ];
     for bytes in damaged {
         fs::write(&path, &bytes).expect("damage entry");
-        assert!(cache.get(&key).is_none());
+        assert!(cache.get(&key).expect("read").is_none());
         cache.put(&key, &payload).expect("repair");
-        assert_eq!(cache.get(&key), Some(payload.clone()));
+        assert_eq!(cache.get(&key).expect("read"), Some(payload.clone()));
     }
 }
 
@@ -208,9 +214,9 @@ fn test_other_cache_version_is_a_miss() {
     rewritten.extend_from_slice(&bytes[split..]);
     fs::write(&path, rewritten).expect("write entry");
 
-    assert!(cache.get(&key).is_none());
+    assert!(cache.get(&key).expect("read").is_none());
     cache.put(&key, &read).expect("repair");
-    assert_eq!(cache.get(&key), Some(read));
+    assert_eq!(cache.get(&key).expect("read"), Some(read));
 }
 
 #[test]
@@ -223,9 +229,9 @@ fn test_entry_under_another_keys_name_is_a_miss() {
     fs::create_dir_all(target.parent().expect("fan-out dir")).expect("mkdir");
     fs::copy(cache.entry_path(&key), &target).expect("copy entry");
 
-    assert!(cache.get(&other).is_none());
+    assert!(cache.get(&other).expect("read").is_none());
 
-    let payload = cache.get(&key).expect("stored entry");
+    let payload = cache.get(&key).expect("read").expect("stored entry");
     let other_blob = blob_oid("class Other {}\n");
     assert_ne!(blob, other_blob);
     let differing_in_one_part = [
@@ -237,9 +243,9 @@ fn test_entry_under_another_keys_name_is_a_miss() {
         fs::create_dir_all(target.parent().expect("fan-out dir")).expect("mkdir");
         fs::copy(cache.entry_path(&key), &target).expect("copy entry");
 
-        assert!(cache.get(other).is_none());
+        assert!(cache.get(other).expect("read").is_none());
         cache.put(other, &payload).expect("repair");
-        assert_eq!(cache.get(other), Some(payload.clone()));
+        assert_eq!(cache.get(other).expect("read"), Some(payload.clone()));
     }
 }
 
@@ -274,7 +280,7 @@ fn test_concurrent_writers_never_expose_a_partial_entry() {
             scope.spawn(|| {
                 for _ in 0..ROUNDS_PER_THREAD {
                     cache.put(&key, &payload).expect("concurrent put");
-                    assert_eq!(cache.get(&key), Some(payload.clone()));
+                    assert_eq!(cache.get(&key).expect("read"), Some(payload.clone()));
                 }
             });
         }
@@ -308,7 +314,7 @@ fn test_unwritable_cache_root_reports_an_io_error() {
 
     let result = cache.put(&key, &payload_of(&analysis, JAVA_SOURCE));
     assert!(matches!(result, Err(CacheError::Io { .. })));
-    assert!(cache.get(&key).is_none());
+    assert!(cache.get(&key).expect("read").is_none());
 }
 
 #[test]
@@ -384,7 +390,7 @@ fn test_unanalyzable_outcome_is_cached() {
     let payload = CachedAnalysis::unanalyzable(reason).expect("cacheable reason");
     cache.put(&key, &payload).expect("put");
 
-    let read = cache.get(&key).expect("hit");
+    let read = cache.get(&key).expect("read").expect("hit");
     assert_eq!(
         read.unanalyzable_reason(),
         Some(UnanalyzableReason::InvalidEncoding)
@@ -409,8 +415,8 @@ fn test_unparsable_header_line_is_a_miss() {
     cut_header.extend_from_slice(&good[split..]);
     for bytes in [cut_header, b"not json\n{}".to_vec()] {
         fs::write(&path, &bytes).expect("damage entry");
-        assert!(cache.get(&key).is_none());
+        assert!(cache.get(&key).expect("read").is_none());
         cache.put(&key, &read).expect("repair");
-        assert_eq!(cache.get(&key), Some(read.clone()));
+        assert_eq!(cache.get(&key).expect("read"), Some(read.clone()));
     }
 }

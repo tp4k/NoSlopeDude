@@ -448,7 +448,7 @@ impl CacheSession {
 
     fn get(&self, blob: Oid, grammar: Grammar) -> Option<CachedAnalysis> {
         let key = CacheKey::from_parts(blob, grammar, &self.fingerprint);
-        self.active()?.get(&key)
+        self.active()?.get(&key).ok().flatten()
     }
 
     fn put(&self, blob: Oid, grammar: Grammar, payload: &CachedAnalysis) {

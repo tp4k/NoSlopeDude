@@ -152,7 +152,7 @@ fn test_a_hit_refreshes_recency() {
         .len()
         .max(fs::metadata(&path_b).expect("size b").len());
 
-    assert!(cache.get(&key_a).is_some());
+    assert!(cache.get(&key_a).expect("read").is_some());
     cache.evict(
         EvictionLimits {
             max_bytes: cap,
@@ -357,7 +357,7 @@ fn test_a_hit_on_a_fresh_entry_keeps_its_mtime() {
         .modified()
         .expect("mtime");
 
-    assert!(cache.get(&key).is_some());
+    assert!(cache.get(&key).expect("read").is_some());
 
     let after = fs::metadata(&path)
         .expect("stat")

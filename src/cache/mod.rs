@@ -181,10 +181,14 @@ impl Cache {
             .join(format!("{id}.{ENTRY_EXTENSION}"))
     }
 
-    /// The payload stored under `key`, or `None` for any miss: no file, an
-    /// unreadable or unparsable one, another version, a header that is not
-    /// this key's, or a payload that does not match its digest.
-    pub fn get(&self, key: &CacheKey) -> Option<CachedAnalysis> {
+    /// The payload stored under `key`, or `None` for a miss: no file, an
+    /// unparsable one, another version, a header that is not this key's, or
+    /// a payload that does not match its digest.
+    pub fn get(&self, key: &CacheKey) -> Result<Option<CachedAnalysis>, CacheError> {
+        Ok(self.read_entry(key))
+    }
+
+    fn read_entry(&self, key: &CacheKey) -> Option<CachedAnalysis> {
         let path = self.entry_path(key);
         let bytes = fs::read(&path).ok()?;
         let split = bytes.iter().position(|byte| *byte == HEADER_TERMINATOR)?;

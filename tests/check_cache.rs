@@ -163,6 +163,7 @@ impl Fixture {
     fn entry(&self, blob: Oid, grammar: Grammar, min_clone_lines: u32) -> Option<CachedAnalysis> {
         self.cache()
             .get(&CacheKey::new(blob, grammar, min_clone_lines))
+            .expect("read the entry")
     }
 
     fn entry_files(&self) -> Vec<PathBuf> {
