@@ -206,6 +206,49 @@ fn test_fresh_temp_files_count_toward_the_size_cap() {
     assert!(temp.exists(), "a writer in flight keeps its temp file");
 }
 
+#[test]
+fn test_temp_files_over_the_cap_evict_no_entry_for_size() {
+    let (_dir, _repo, cache) = open_empty();
+    let now = SystemTime::now();
+    let older = plant_entry(cache.root(), 0, KIB, DAY * 2, now);
+    let newer = plant_entry(cache.root(), 1, KIB, DAY, now);
+    let temp = cache.root().join("ab").join(".tmpLarge");
+    plant_file(&temp, 3 * KIB, DAY, now);
+
+    let removed = cache.evict(
+        EvictionLimits {
+            max_bytes: 2 * KIB as u64,
+            ..UNLIMITED
+        },
+        now,
+    );
+
+    assert_eq!(removed, 0, "no entry removal can reach the cap");
+    assert!(older.exists());
+    assert!(newer.exists());
+    assert!(temp.exists());
+}
+
+#[test]
+fn test_temp_files_exactly_at_the_cap_still_evict_entries_for_size() {
+    let (_dir, _repo, cache) = open_empty();
+    let now = SystemTime::now();
+    let entry = plant_entry(cache.root(), 0, KIB, DAY, now);
+    let temp = cache.root().join("ab").join(".tmpExact");
+    plant_file(&temp, 2 * KIB, DAY, now);
+
+    cache.evict(
+        EvictionLimits {
+            max_bytes: 2 * KIB as u64,
+            ..UNLIMITED
+        },
+        now,
+    );
+
+    assert!(!entry.exists(), "removing the entry reaches the cap");
+    assert!(temp.exists());
+}
+
 #[cfg(unix)]
 #[test]
 fn test_only_entries_and_temp_files_in_real_fan_out_dirs_are_touched() {
