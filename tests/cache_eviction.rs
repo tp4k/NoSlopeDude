@@ -181,6 +181,31 @@ fn test_stale_temp_files_are_evicted_fresh_ones_kept() {
     assert!(fresh.exists(), "a writer in flight keeps its temp file");
 }
 
+#[test]
+fn test_fresh_temp_files_count_toward_the_size_cap() {
+    let (_dir, _repo, cache) = open_empty();
+    let now = SystemTime::now();
+    let older = plant_entry(cache.root(), 0, KIB, DAY * 2, now);
+    let newer = plant_entry(cache.root(), 1, KIB, DAY, now);
+    let temp = cache.root().join("ab").join(".tmpFresh3");
+    plant_file(&temp, KIB, DAY, now);
+
+    cache.evict(
+        EvictionLimits {
+            max_bytes: 2 * KIB as u64,
+            ..UNLIMITED
+        },
+        now,
+    );
+
+    assert!(
+        !older.exists(),
+        "the temp file's bytes push the total over the cap"
+    );
+    assert!(newer.exists());
+    assert!(temp.exists(), "a writer in flight keeps its temp file");
+}
+
 #[cfg(unix)]
 #[test]
 fn test_only_entries_and_temp_files_in_real_fan_out_dirs_are_touched() {
@@ -364,6 +389,32 @@ fn test_a_hit_on_a_fresh_entry_keeps_its_mtime() {
         .modified()
         .expect("mtime");
     assert_eq!(after, before, "an entry under a day old is not touched");
+}
+
+#[cfg(unix)]
+#[test]
+fn test_a_hit_on_a_read_only_entry_refreshes_recency() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (_dir, _repo, cache) = open_empty();
+    let now = SystemTime::now();
+    let (key, path) = real_entry(&cache, "function a(x) { return x; }\n");
+    age_to(&path, DAY * 10, now);
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o400)).expect("make it read-only");
+
+    assert!(cache.get(&key).expect("read").is_some());
+
+    let modified = fs::metadata(&path)
+        .expect("stat")
+        .modified()
+        .expect("mtime");
+    let age = SystemTime::now()
+        .duration_since(modified)
+        .unwrap_or_default();
+    assert!(
+        age < DAY,
+        "the owner's hit refreshes a read-only entry, age {age:?}"
+    );
 }
 
 #[cfg(unix)]
