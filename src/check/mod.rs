@@ -589,6 +589,7 @@ fn load_candidate(
     read: ReadBlob<'_>,
     cache: &CacheSession,
     min_clone_lines: u32,
+    v102: Severity,
 ) -> Load {
     let included = task.included;
     let grammar = path_grammar(&included.path);
@@ -611,7 +612,9 @@ fn load_candidate(
         }
     }
     let analysis = analyze_bytes(&included.path, &bytes);
+    let payload_wanted = !task.changed || (cache.active().is_some() && v102 != Severity::Off);
     let payload = match &analysis {
+        _ if !payload_wanted => None,
         Ok(analysis) => std::str::from_utf8(&bytes)
             .ok()
             .map(|source| CachedAnalysis::from_analysis(analysis, source, min_clone_lines)),
@@ -748,8 +751,16 @@ impl Sides<'_> {
         }
         let candidate_read = |repo: &Repository, entry: &Entry| self.candidate.read(repo, entry);
         let min_clone_lines = self.config.measurement.min_clone_lines;
+        let v102 = self.config.policy.nsd_v102;
         let results = load_in_parallel(self.repository, &candidate_tasks, |repo, task| {
-            load_candidate(repo, task, &candidate_read, self.cache, min_clone_lines)
+            load_candidate(
+                repo,
+                task,
+                &candidate_read,
+                self.cache,
+                min_clone_lines,
+                v102,
+            )
         });
         for (task, load) in candidate_tasks.iter().zip(results) {
             match load {
