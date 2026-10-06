@@ -582,7 +582,8 @@ fn unchanged_load(included: &IncludedEntry, found: CachedAnalysis) -> Load {
 /// A candidate-side file. An unchanged one is looked up first (by its entry's
 /// blob id when it has one, so a hit reads nothing), and only its payload's
 /// candidates and outcome survive. A miss, and every changed file, is read and
-/// analyzed, then written under the hash of the bytes actually analyzed.
+/// analyzed, then written under the hash of the bytes actually analyzed; a
+/// changed file is written only when the cache is active and V102 is not `off`.
 fn load_candidate(
     repo: &Repository,
     task: &LoadTask<'_>,
