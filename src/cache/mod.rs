@@ -175,6 +175,9 @@ pub struct Cache {
 
 impl Cache {
     /// Opens the cache of `repo`'s common Git directory, creating the root.
+    /// Each of `nsd`, `cache` and `v1` is created as a plain directory when
+    /// missing; a symlink or non-directory at any of them returns
+    /// `CacheError::Io` without creating or removing anything through it.
     pub fn open(repo: &Repository) -> Result<Cache, CacheError> {
         Cache::open_at(repo, EvictionLimits::DEFAULT, SystemTime::now())
     }
