@@ -35,6 +35,7 @@ const ZLIB_STORED_HEADER: [u8; 2] = [0x78, 0x01];
 const ZLIB_FINAL_STORED_BLOCK: u8 = 0x01;
 const ADLER_MODULUS: u32 = 65_521;
 const ADLER_SHIFT: u32 = 16;
+const SIXTY_DAYS_SECS: u64 = 60 * 24 * 60 * 60;
 
 struct Fixture {
     dir: TempDir,
@@ -668,4 +669,86 @@ fn test_failed_entry_write_warns_once_and_keeps_the_verdict() {
     assert_eq!(outcome.diagnostics, healthy.diagnostics);
     assert_eq!(outcome.exit_status, healthy.exit_status);
     assert_eq!(outcome.warnings.len(), 1, "{:?}", outcome.warnings);
+}
+
+fn tree_snapshot(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    let mut files = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for entry in fs::read_dir(&dir).expect("list a directory") {
+            let path = entry.expect("read an entry").path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                let bytes = fs::read(&path).expect("read a file");
+                files.push((path, bytes));
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+#[cfg(unix)]
+#[test]
+fn test_symlinked_cache_root_warns_once_and_keeps_the_verdict() {
+    let healthy = Fixture::scenario().staged();
+    let fx = Fixture::scenario();
+    let outside = fx.dir.path().join("outside");
+    let victim = outside
+        .join("ab")
+        .join("0123456789abcdef0123456789abcdef.json");
+    fs::create_dir_all(victim.parent().expect("fan-out")).expect("create the external dir");
+    fs::write(&victim, b"external bytes").expect("write the external entry");
+    let aged = std::time::SystemTime::now() - std::time::Duration::from_secs(SIXTY_DAYS_SECS);
+    fs::File::options()
+        .write(true)
+        .open(&victim)
+        .expect("open to age")
+        .set_modified(aged)
+        .expect("age the external entry");
+    let root = fx.cache_root();
+    fs::create_dir_all(root.parent().expect("cache dir")).expect("create the real parents");
+    std::os::unix::fs::symlink(&outside, &root).expect("symlink the cache root");
+    let before = tree_snapshot(&outside);
+
+    let outcome = fx.staged();
+
+    assert_eq!(outcome.diagnostics, healthy.diagnostics);
+    assert_eq!(outcome.exit_status, healthy.exit_status);
+    assert_eq!(outcome.warnings.len(), 1, "{:?}", outcome.warnings);
+    for path in [fx.dir.path(), outside.as_path()] {
+        let shown = path.to_string_lossy();
+        assert!(
+            !outcome.warnings[0].contains(shown.as_ref()),
+            "{:?}",
+            outcome.warnings
+        );
+    }
+    assert_eq!(tree_snapshot(&outside), before);
+}
+
+#[cfg(unix)]
+#[test]
+fn test_unreadable_cache_entry_warns_once_and_keeps_the_verdict() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let healthy = Fixture::scenario().staged();
+    let fx = Fixture::scenario();
+    let warm = fx.staged();
+    assert!(warm.warnings.is_empty(), "{:?}", warm.warnings);
+    let key = CacheKey::new(fx.blob("A.java"), Grammar::Java, DEFAULT_MIN_CLONE_LINES);
+    let path = fx.cache().entry_path(&key);
+    let bytes = fs::read(&path).expect("read the warm entry");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).expect("lock the entry");
+
+    let outcome = fx.staged();
+
+    let mode = fs::metadata(&path).map(|meta| meta.permissions().mode() & 0o777);
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("unlock the entry");
+    assert_eq!(outcome.diagnostics, healthy.diagnostics);
+    assert_eq!(outcome.exit_status, healthy.exit_status);
+    assert_eq!(outcome.warnings.len(), 1, "{:?}", outcome.warnings);
+    assert_eq!(mode.ok(), Some(0), "the unreadable entry was replaced");
+    assert_eq!(fs::read(&path).expect("read it again"), bytes);
 }

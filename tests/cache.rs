@@ -314,7 +314,34 @@ fn test_unwritable_cache_root_reports_an_io_error() {
 
     let result = cache.put(&key, &payload_of(&analysis, JAVA_SOURCE));
     assert!(matches!(result, Err(CacheError::Io { .. })));
-    assert!(cache.get(&key).expect("read").is_none());
+    assert!(matches!(cache.get(&key), Err(CacheError::Io { .. })));
+}
+
+#[cfg(unix)]
+#[test]
+fn test_unreadable_entry_is_an_io_error_not_a_miss() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (_dir, _repo, cache) = open_cache();
+    let (key, _read) = stored_and_read(&cache, JAVA_SOURCE);
+    let path = cache.entry_path(&key);
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).expect("lock the entry");
+
+    let locked = cache.get(&key);
+    let absent = cache.get(&CacheKey::new(
+        blob_oid("class Other {}\n"),
+        Grammar::Java,
+        MIN_LINES,
+    ));
+
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("unlock the entry");
+    match locked {
+        Err(CacheError::Io { source, .. }) => {
+            assert_eq!(source.kind(), std::io::ErrorKind::PermissionDenied)
+        }
+        other => panic!("expected a PermissionDenied I/O error, got {other:?}"),
+    }
+    assert!(matches!(absent, Ok(None)));
 }
 
 #[test]

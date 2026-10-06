@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 
 use git2::{ObjectType, Oid};
 use nsd::analysis::analyze_file;
-use nsd::cache::{Cache, CacheKey, CachedAnalysis, EvictionLimits};
+use nsd::cache::{Cache, CacheError, CacheKey, CachedAnalysis, EvictionLimits};
 use nsd::model::Grammar;
 
 const DAY: Duration = Duration::from_secs(24 * 60 * 60);
@@ -364,4 +364,38 @@ fn test_a_hit_on_a_fresh_entry_keeps_its_mtime() {
         .modified()
         .expect("mtime");
     assert_eq!(after, before, "an entry under a day old is not touched");
+}
+
+#[cfg(unix)]
+#[test]
+fn test_a_symlinked_cache_root_component_is_refused_and_nothing_outside_is_deleted() {
+    let now = SystemTime::now();
+    for linked in 0..ROOT_COMPONENTS.len() {
+        let (dir, repo) = common::init_repo();
+        let outside = dir.path().join("outside");
+        let below: PathBuf = ROOT_COMPONENTS[linked + 1..].iter().collect();
+        let victim = plant_entry(&outside.join(&below), 1, KIB, DAY * 60, now);
+        let before = fs::read(&victim).expect("read the victim");
+        let parent: PathBuf = ROOT_COMPONENTS[..linked]
+            .iter()
+            .fold(repo.commondir().to_path_buf(), |path, part| path.join(part));
+        fs::create_dir_all(&parent).expect("create the real parents");
+        let link = parent.join(ROOT_COMPONENTS[linked]);
+        std::os::unix::fs::symlink(&outside, &link).expect("symlink the component");
+
+        let opened = Cache::open_at(&repo, UNLIMITED, now);
+
+        assert!(
+            matches!(opened, Err(CacheError::Io { .. })),
+            "{}: {opened:?}",
+            ROOT_COMPONENTS[linked]
+        );
+        assert_eq!(
+            fs::read(&victim).ok(),
+            Some(before),
+            "{}",
+            ROOT_COMPONENTS[linked]
+        );
+        assert_eq!(fs::read_link(&link).ok(), Some(outside.clone()));
+    }
 }
