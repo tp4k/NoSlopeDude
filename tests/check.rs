@@ -652,6 +652,74 @@ fn test_unchanged_unanalyzable_file_raises_a102_only_while_v102_is_enabled() {
     assert_eq!(disabled.exit_status, EXIT_PASS);
 }
 
+/// A repository whose unchanged committed `Unchanged.java` has an unreadable
+/// loose blob, with a changed `Foo.java` staged.
+fn fixture_with_corrupt_unchanged_blob() -> Fixture {
+    let fx = fixture();
+    let unchanged = java_class("Unchanged", LOW_CC_IFS, 0);
+    let oid = fx.commit(&[
+        ("Foo.java", java_class("Foo", LOW_CC_IFS, 0).as_bytes()),
+        ("Unchanged.java", unchanged.as_bytes()),
+    ]);
+    let blob = fx
+        .repo
+        .find_commit(oid)
+        .and_then(|c| c.tree())
+        .expect("tree")
+        .get_name("Unchanged.java")
+        .expect("Unchanged.java entry")
+        .id();
+    let header = format!("blob {}\0", unchanged.len());
+    let forged = "x".repeat(unchanged.len());
+    corrupt_loose_object(&fx.repo, blob, format!("{header}{forged}").as_bytes());
+    fx.stage(
+        "Foo.java",
+        format!("// reviewed\n{}", java_class("Foo", LOW_CC_IFS, 0)).as_bytes(),
+    );
+    fx
+}
+
+#[test]
+fn test_unreadable_unchanged_blob_is_not_read_while_v102_is_off() {
+    let fx = fixture_with_corrupt_unchanged_blob();
+    let (_dir, off) = write_trusted_config(V102_OFF);
+
+    let outcome = fx.check_with(CheckMode::Staged, Some(&off), false);
+
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    assert_eq!(outcome.exit_status, EXIT_PASS);
+}
+
+#[test]
+fn test_unreadable_unchanged_blob_raises_g101_while_v102_is_enabled() {
+    let fx = fixture_with_corrupt_unchanged_blob();
+
+    let outcome = fx.staged();
+
+    assert_eq!(codes(&outcome), vec![G101]);
+    assert_eq!(outcome.exit_status, EXIT_ERROR);
+}
+
+#[test]
+fn test_staged_over_ceiling_and_invalid_encoding_files_raise_a102_while_v102_is_off() {
+    let fx = fixture();
+    fx.commit(&[("Foo.java", java_class("Foo", LOW_CC_IFS, 0).as_bytes())]);
+    fx.stage("Big.java", &java_of_length(ceiling() + 1));
+    fx.stage("util.ts", INVALID_UTF8_TS);
+    let (_dir, off) = write_trusted_config(V102_OFF);
+
+    let outcome = fx.check_with(CheckMode::Staged, Some(&off), false);
+
+    assert_eq!(
+        coverage_reasons(&outcome),
+        vec![
+            ("Big.java".to_string(), "too_large"),
+            ("util.ts".to_string(), "invalid_encoding"),
+        ]
+    );
+    assert_eq!(outcome.exit_status, EXIT_ERROR);
+}
+
 /// `text` followed by one padding comment, `length` bytes in all.
 fn padded_to(text: &str, length: usize) -> Vec<u8> {
     let mut bytes = format!("{text}// ").into_bytes();

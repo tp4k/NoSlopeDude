@@ -39,8 +39,8 @@ A scanned folder's own `.gitignore` is always respected, even when the folder is
 ## `check`
 
 ```
-nsd check --staged      [--config <path>]
-nsd check --base <ref> [--worktree] [--config <path>]
+nsd check --staged      [--config <path>] [--format terminal|json]
+nsd check --base <ref> [--worktree] [--config <path>] [--format terminal|json]
 ```
 
 Compares a candidate change with its base under the base's own policy and prints one line per diagnostic, uncapped, to stdout. Run it at the root of the repository.
@@ -48,6 +48,7 @@ Compares a candidate change with its base under the base's own policy and prints
 - `--staged` checks the Git index against `HEAD`; it never reads worktree source.
 - `--base <ref>` checks `HEAD` against `merge-base(HEAD, <ref>)`; with `--worktree` the candidate is the working tree instead of `HEAD`.
 - `--staged` and `--base` are mutually exclusive, one is required, and `--worktree` requires `--base`. A usage error exits `2` and prints nothing to stdout.
+- `--format <terminal|json>` picks the output, `terminal` by default. `json` prints one canonical JSON document instead of the lines below (see `docs/report-format.md` *Check JSON*); the exit code is the same for both. `agent` is not accepted yet: it is a usage error.
 - `--config <path>` replaces the repository policy with a trusted file. A path that resolves inside the checkout is refused with `NSD-C102` and exit `2`, and is never read. Inside means the absolute path as given, or its directory resolved, or its symlinks resolved, or the way the OS opens it (so `..` after a symlink counts), lies under the checkout root (`.git/` included), or an existing directory above any of those is the checkout root under another name (same device and inode). That covers an alias of the root or of one of its ancestors, such as `/System/Volumes/Data/…` on macOS, a bind mount of the root, or a case variant on a case-insensitive volume. A missing file is judged the same way. Two cases are not refused: a hard link outside the checkout to a file inside it, and a bind mount of a checkout subdirectory at a path outside it. Use a file outside the checkout. The same-device-and-inode test runs on unix only; elsewhere only the path forms are compared.
 
 Each line starts with the code. What follows depends on the code (`<span>` is `<repo-relative path>:<start>-<end>`):

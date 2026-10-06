@@ -91,6 +91,16 @@ fn owner_kind_tag(kind: OwnerKind) -> u8 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct OwnerDigest(u128);
 
+impl OwnerDigest {
+    pub(crate) fn to_bits(self) -> u128 {
+        self.0
+    }
+
+    pub(crate) fn from_bits(bits: u128) -> Self {
+        OwnerDigest(bits)
+    }
+}
+
 /// A callable's line-independent structural identity: owner chain + kind +
 /// name + signature. See this module's own doc comment for the no-ordinal,
 /// path-free, non-unique-within-a-file guarantees, and for A5's own
