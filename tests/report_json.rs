@@ -450,6 +450,30 @@ fn test_unparsed_file_makes_its_family_incomplete() {
     assert_eq!(java["complete"], false, "{java}");
     assert_eq!(js_ts["complete"], true, "{js_ts}");
     assert_eq!(overall["complete"], false, "{overall}");
+
+    let js_dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        js_dir.path().join("Good.java"),
+        "class Good {\n    int x = 1;\n}\n",
+    )
+    .expect("write Good.java");
+    fs::write(js_dir.path().join("good.js"), "const x = 1;\n").expect("write good.js");
+    fs::write(js_dir.path().join("bad.js"), [0xff_u8, 0xfe, 0xfd]).expect("write bad.js");
+
+    let (_out, output) = run_scan(js_dir.path(), |_| {});
+    let value = read_report(&output);
+    let bad = value["skipped_files"]
+        .as_array()
+        .expect("skipped_files array")
+        .iter()
+        .find(|row| row["relative_path"] == "bad.js")
+        .unwrap_or_else(|| panic!("bad.js is listed: {}", value["skipped_files"]));
+    assert_eq!(bad["reason"], "parse_unreadable");
+
+    let [java, js_ts, _overall] = verbosity_objects(&value);
+    assert_eq!(js_ts["unanalyzed_lines"], 0, "no count is known: {js_ts}");
+    assert_eq!(js_ts["complete"], false, "{js_ts}");
+    assert_eq!(java["complete"], true, "{java}");
 }
 
 #[test]
