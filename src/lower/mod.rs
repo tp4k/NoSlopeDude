@@ -108,6 +108,13 @@ pub fn lower_all(parsed_files: &[ParsedFile]) -> Vec<IrFile> {
     parsed_files.par_iter().map(lower_file).collect()
 }
 
+/// `lower_all`, with each file's `lower_file_inventoried` count alongside,
+/// index-aligned with `parsed_files`.
+pub fn lower_all_inventoried(parsed_files: &[ParsedFile]) -> (Vec<IrFile>, Vec<usize>) {
+    use rayon::prelude::*;
+    parsed_files.par_iter().map(lower_file_inventoried).unzip()
+}
+
 /// Lowers one parsed file's whole tree into its `IrNode` root.
 ///
 /// WS-6 salvage (*Architecture* -> salvage row): `parse::parse_one` no
@@ -143,6 +150,12 @@ pub fn lower_all(parsed_files: &[ParsedFile]) -> Vec<IrFile> {
 /// through `lowering_count()` below to observe that `pipeline::run` lowers
 /// each file exactly once.
 pub fn lower_file(file: &ParsedFile) -> IrFile {
+    lower_file_inventoried(file).0
+}
+
+/// `lower_file`, plus the count of executable lines pruning removed from the
+/// tree (M1-8's `unanalyzed_lines`).
+pub fn lower_file_inventoried(file: &ParsedFile) -> (IrFile, usize) {
     LOWERING_COUNT.fetch_add(1, Ordering::Relaxed);
     let mut damage = Vec::new();
     let mut callables = Vec::new();
@@ -242,7 +255,7 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
 
     let root = prune_damage(root, &redact_targets);
 
-    IrFile {
+    let ir_file = IrFile {
         relative_path: file.relative_path.clone(),
         language: file.language,
         root,
@@ -252,7 +265,8 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
         owners: kept_owners,
         excluded_callables,
         excluded_blocks,
-    }
+    };
+    (ir_file, 0)
 }
 
 /// One (callable, block, owner) entity table's final inclusion decision,

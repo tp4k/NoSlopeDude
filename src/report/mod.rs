@@ -51,7 +51,13 @@ pub struct ReportScan {
 #[derive(Debug, Clone, Serialize)]
 pub struct ReportVerbosity {
     pub flagged_lines: usize,
+    /// The analyzed executable lines, the ratio's denominator.
     pub scanned_lines: usize,
+    /// The executable lines lowering pruned, which stay out of the
+    /// denominator.
+    pub unanalyzed_lines: usize,
+    /// Whether every file of this family was analyzed in full.
+    pub complete: bool,
     pub ratio: f64,
 }
 
@@ -60,6 +66,8 @@ impl From<&VerbosityScore> for ReportVerbosity {
         ReportVerbosity {
             flagged_lines: score.flagged_lines,
             scanned_lines: score.scanned_lines,
+            unanalyzed_lines: score.unanalyzed_lines,
+            complete: true,
             ratio: score.ratio,
         }
     }
@@ -138,6 +146,21 @@ pub struct ReportSkippedFile {
     pub relative_path: PathBuf,
     pub reason: String,
     pub detail: Option<String>,
+    /// A salvaged file's mapped parser gaps, sorted by start line; absent on
+    /// every other row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gaps: Option<Vec<ReportGap>>,
+    /// A salvaged file's count of excluded (unmeasured) callables; absent on
+    /// every other row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unmeasured_callables: Option<usize>,
+}
+
+/// One mapped parser gap: an inclusive 1-based line range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ReportGap {
+    pub start_line: usize,
+    pub end_line: usize,
 }
 
 /// The Assumptions-mandated adaptation label: this scanner's CC/verbosity
@@ -392,6 +415,8 @@ fn build_skipped_files(input: &ReportInput) -> Vec<ReportSkippedFile> {
             relative_path: file.relative_path.clone(),
             reason: file.reason.label().to_string(),
             detail: None,
+            gaps: None,
+            unmeasured_callables: None,
         })
         .collect();
     skipped.extend(
@@ -402,6 +427,8 @@ fn build_skipped_files(input: &ReportInput) -> Vec<ReportSkippedFile> {
                 relative_path: failure.relative_path.clone(),
                 reason: format!("parse_{}", failure.reason.label()),
                 detail: skipped_detail(failure),
+                gaps: None,
+                unmeasured_callables: None,
             }),
     );
     skipped.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));

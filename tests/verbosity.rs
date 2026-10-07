@@ -54,6 +54,7 @@ fn test_verbosity_is_distinct_flagged_lines_over_scanned_lines() {
         relative_path: sample_path(),
         language: JAVA,
         scanned_lines: 100,
+        unanalyzed_lines: 0,
         executable_lines: (1..=100).collect(),
     }];
     let findings = vec![finding(
@@ -84,6 +85,7 @@ fn test_overlapping_rule_and_clone_lines_counted_once() {
         relative_path: sample_path(),
         language: JAVA,
         scanned_lines: 100,
+        unanalyzed_lines: 0,
         executable_lines: (1..=100).collect(),
     }];
     let findings = vec![finding(
@@ -113,6 +115,7 @@ fn test_first_clone_occurrence_contributes_no_lines() {
         relative_path: sample_path(),
         language: JAVA,
         scanned_lines: 100,
+        unanalyzed_lines: 0,
         executable_lines: (1..=100).collect(),
     }];
     let group = CloneGroup {
@@ -231,6 +234,7 @@ fn test_verbosity_zero_when_nothing_flagged() {
         relative_path: sample_path(),
         language: JAVA,
         scanned_lines: 100,
+        unanalyzed_lines: 0,
         executable_lines: (1..=100).collect(),
     }];
     let verbosity = rules::compute_verbosity(&files, &[], &[]);
@@ -262,6 +266,7 @@ fn test_executable_lines_are_sorted_and_distinct() {
         relative_path: sample_path(),
         language: JAVA,
         scanned_lines: 100,
+        unanalyzed_lines: 0,
         executable_lines,
     }];
     let group = CloneGroup {
@@ -288,12 +293,14 @@ fn test_per_family_and_overall_scores_are_computed_separately() {
             relative_path: PathBuf::from("A.java"),
             language: JAVA,
             scanned_lines: 50,
+            unanalyzed_lines: 0,
             executable_lines: (1..=50).collect(),
         },
         FileLanguageLines {
             relative_path: PathBuf::from("B.js"),
             language: JS_TS,
             scanned_lines: 50,
+            unanalyzed_lines: 0,
             executable_lines: (1..=50).collect(),
         },
     ];

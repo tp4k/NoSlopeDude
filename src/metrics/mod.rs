@@ -32,8 +32,8 @@ const TOP_CALLABLES: usize = 25;
 /// tests) stay untouched. `incomplete` marks the result D18-incomplete
 /// when at least one file failed to parse.
 pub fn run(parsed_files: &[ParsedFile], incomplete: bool) -> MetricsResult {
-    let ir_files = lower::lower_all(parsed_files);
-    run_with_ir(parsed_files, &ir_files, incomplete)
+    let (ir_files, unanalyzed_lines) = lower::lower_all_inventoried(parsed_files);
+    run_with_ir(parsed_files, &ir_files, &unanalyzed_lines, incomplete)
 }
 
 /// WS-9 (C1): identical to `run` above, but takes the pipeline's own
@@ -46,13 +46,16 @@ pub fn run(parsed_files: &[ParsedFile], incomplete: bool) -> MetricsResult {
 pub(crate) fn run_with_ir(
     parsed_files: &[ParsedFile],
     ir_files: &[lower::IrFile],
+    unanalyzed_lines: &[usize],
     incomplete: bool,
 ) -> MetricsResult {
     debug_assert_eq!(parsed_files.len(), ir_files.len());
+    debug_assert_eq!(parsed_files.len(), unanalyzed_lines.len());
     let per_file: Vec<(Vec<Callable>, Vec<SyntaxBlock>, FileScanSummary)> = parsed_files
         .par_iter()
         .zip(ir_files.par_iter())
-        .map(|(file, ir_file)| scan_file(file, ir_file))
+        .zip(unanalyzed_lines.par_iter())
+        .map(|((file, ir_file), unanalyzed)| scan_file(file, ir_file, *unanalyzed))
         .collect();
 
     let mut callables = Vec::new();
@@ -144,6 +147,7 @@ pub fn rank_top_callables(callables: &[Callable]) -> Vec<Callable> {
 fn scan_file(
     file: &ParsedFile,
     ir_file: &lower::IrFile,
+    unanalyzed_lines: usize,
 ) -> (Vec<Callable>, Vec<SyntaxBlock>, FileScanSummary) {
     let mut scanned_lines = 0usize;
     let mut last_counted_line = 0usize;
@@ -170,6 +174,9 @@ fn scan_file(
     let summary = FileScanSummary {
         relative_path: file.relative_path.clone(),
         scanned_lines,
+        unanalyzed_lines,
+        gaps: Vec::new(),
+        unmeasured_callables: 0,
     };
     (callables, syntax_blocks, summary)
 }
