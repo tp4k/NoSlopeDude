@@ -1258,7 +1258,8 @@ fn test_check_summary_clone_lines_follow_the_changed_scope() {
     both.stage(DUP_B_PATH, DUP_B.as_bytes());
     let both = both.staged_json_with(&off);
     assert_eq!(both["summaries"]["scope"], json!("changed"));
-    assert_dup_counts(&overall_verbosity(&both), DUP_FLAGGED_LINES);
+    let verbosity = overall_verbosity(&both);
+    assert_eq!(verbosity["flagged_lines"], json!(0), "{verbosity}");
 
     let one = fixture();
     one.commit(&[
