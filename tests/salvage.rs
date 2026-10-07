@@ -398,8 +398,9 @@ fn test_policy_skip_labels_are_byte_identical_to_the_legacy_labels() {
     assert_eq!(SkipReason::Unreadable.label(), "unreadable");
 }
 
-/// `report.json`'s top-level key set is exactly what it was before salvage:
-/// item 8's "retain legacy JSON serialization through this gate".
+/// `report.json`'s top-level key set is pinned: the M0b ban on new fields is
+/// lifted (D5), and the canonical scan document (M6-1) adds `schema_version`,
+/// `result_scope`, `snapshots`, `fingerprints`, `skipped` and `callables`.
 #[test]
 fn test_report_json_gains_no_new_top_level_field() {
     let (_dir, output) = run_scan(&salvage_fixture_root(), |_| {});
@@ -416,18 +417,24 @@ fn test_report_json_gains_no_new_top_level_field() {
     keys.sort_unstable();
     let mut expected_keys = vec![
         "adaptation",
+        "callables",
         "duplicates",
         "findings",
+        "fingerprints",
         "incomplete",
+        "result_scope",
         "scan",
+        "schema_version",
         "scores",
+        "skipped",
         "skipped_files",
+        "snapshots",
         "top25",
     ];
     expected_keys.sort_unstable();
     assert_eq!(
         keys, expected_keys,
-        "report.json must keep its exact pre-salvage top-level key set: {keys:?}"
+        "report.json must hold exactly the canonical scan top-level key set: {keys:?}"
     );
 }
 
