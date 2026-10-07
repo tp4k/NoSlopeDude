@@ -15,10 +15,13 @@ canonical writer as `nsd check --format json` (`format::canonical_document_prett
 keys sorted at every level, `-0.0` written as `0.0`; pretty-printed, ended by
 a newline). Nothing records time, no field holds an absolute path, and no
 field holds a source excerpt: `excerpt` is in the HTML only. A callable name
-that holds a line break, `[` or `(` (a computed-member assignment is named by
-its whole target expression) is published as `<computed>@<line>`, the callable's
-start line, in `callables`, `top25` and check `entities`; the HTML and the
-terminal keep the raw name.
+is published as is only when it is non-empty and made of letters, digits and
+`_ $ . #`, or is `<anonymous>@<digits>`; every other name (a computed-member
+assignment is named by its whole target expression, which can hold comments,
+patterns or arbitrary source) is published as `<computed>@<line>`, the
+callable's start line. The rule covers scan `callables` and `top25` and check
+`entities[].name` and `diagnostics[].callable`; the HTML and the terminal keep
+the raw name.
 
 ```json
 {
