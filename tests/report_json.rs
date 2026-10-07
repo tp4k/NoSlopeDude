@@ -1171,6 +1171,35 @@ fn test_scan_report_publishes_no_source_text_in_callable_names() {
     assert!(names.contains(&"<computed>@5"), "{names:?}");
 }
 
+fn callable_names(value: &serde_json::Value) -> Vec<String> {
+    value["callables"]
+        .as_array()
+        .expect("callables")
+        .iter()
+        .filter_map(|row| row["name"].as_str().map(str::to_string))
+        .collect()
+}
+
+#[test]
+fn test_scan_report_publishes_no_comment_or_pattern_text_in_callable_names() {
+    let corpus = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        corpus.path().join("names.js"),
+        "obj /* SECRET-COMMENT-5678 */ .handler = function (x) {\n  if (x) { return 1; }\n  return 2;\n};\nconst { k = \"SECRET-DEFAULT-9999\" } = function (x) {\n  if (x) { return 1; }\n  return 2;\n};\n",
+    )
+    .expect("write");
+
+    let (_dir, output) = run_scan(corpus.path(), |_| {});
+    let text = report_text(&output);
+    let value: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+
+    assert!(!text.contains("SECRET-COMMENT-5678"), "{text}");
+    assert!(!text.contains("SECRET-DEFAULT-9999"), "{text}");
+    let names = callable_names(&value);
+    assert!(names.contains(&"<computed>@1".to_string()), "{names:?}");
+    assert!(names.contains(&"<computed>@5".to_string()), "{names:?}");
+}
+
 #[test]
 fn test_scan_report_orders_callables_with_one_start_line_by_end_line() {
     let corpus = tempfile::tempdir().expect("tempdir");

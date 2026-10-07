@@ -1121,3 +1121,28 @@ fn test_check_json_publishes_no_source_text_in_entity_names() {
     assert!(!text.contains("SECRET-TOKEN-1234"), "{text}");
     assert!(text.contains("<computed>@5"), "{text}");
 }
+
+#[test]
+fn test_check_json_publishes_no_source_text_in_complexity_entries() {
+    let fx = fixture();
+    fx.commit(&[("Base.java", b"class Base {\n}\n".as_slice())]);
+    let branches = "  if (x === 1) { return 1; }\n".repeat(11);
+    fx.stage(
+        "reg.js",
+        format!(
+            "registry[(function () {{\n  const apiKey = \"SECRET-TOKEN-1234\";\n  return apiKey;\n}})()] =\nfunction (x) {{\n{branches}  return 2;\n}};\n"
+        )
+        .as_bytes(),
+    );
+
+    let output = fx.nsd(&["check", "--staged", "--format", "json"]);
+
+    let text = stdout(&output);
+    assert!(!text.contains("SECRET-TOKEN-1234"), "{text}");
+    let parsed = document(&output);
+    let complexity = entries(&parsed)
+        .iter()
+        .find(|entry| entry["code"] == json!("NSD-E101"))
+        .unwrap_or_else(|| panic!("an NSD-E101 entry: {text}"));
+    assert_eq!(complexity["callable"], json!("<computed>@5"), "{text}");
+}
