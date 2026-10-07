@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use crate::git::discovery::SkippedEntry;
 use crate::git::path::RepoPath;
 use crate::metrics;
-use crate::model::{Callable, FileLanguageLines, LanguageFamily, RuleFinding};
+use crate::model::{Callable, CloneGroup, FileLanguageLines, LanguageFamily, RuleFinding};
 use crate::policy::damage::MappedGap;
 use crate::rules;
 
@@ -199,11 +199,13 @@ fn normalize_zero(value: f64) -> f64 {
 }
 
 /// The summaries over `facts` (any order; sorted here by path so the erosion
-/// sums add in one fixed order). `incomplete` names the families that lost a
-/// file to an analysis failure.
+/// sums add in one fixed order). `clone_groups` are the groups over exactly
+/// this file set, so the numerator is scan's. `incomplete` names the
+/// families that lost a file to an analysis failure.
 pub(super) fn summarize(
     scope: &'static str,
     mut facts: Vec<&FileFacts>,
+    clone_groups: &[CloneGroup],
     incomplete: &[LanguageFamily],
 ) -> Summaries {
     facts.sort_by(|a, b| a.path.cmp(&b.path));
@@ -221,10 +223,7 @@ pub(super) fn summarize(
         .iter()
         .flat_map(|file| file.findings.iter().cloned())
         .collect();
-    // Clone groups need every file's candidates against each other, which a
-    // check does only for changed occurrences (V102); the summaries count
-    // rule findings alone.
-    let verbosity = rules::compute_verbosity(&lines, &findings, &[]);
+    let verbosity = rules::compute_verbosity(&lines, &findings, clone_groups);
     let family = |language: Option<LanguageFamily>| {
         let in_family = |file: &&&FileFacts| language.is_none_or(|wanted| file.language == wanted);
         let callables: Vec<Callable> = facts

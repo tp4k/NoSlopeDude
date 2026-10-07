@@ -21,6 +21,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
+use std::path::PathBuf;
 
 use rayon::prelude::*;
 #[cfg(test)]
@@ -87,13 +88,19 @@ impl GroupBuilder {
     }
 
     pub(crate) fn into_group(self, parsed_files: &[ParsedFile]) -> CloneGroup {
+        self.into_group_with_paths(|file_index| {
+            parsed_files[file_index as usize].relative_path.clone()
+        })
+    }
+
+    /// `into_group` for a caller whose files are not `ParsedFile`s:
+    /// `path_of` resolves a member's `file_index` to its path.
+    pub(crate) fn into_group_with_paths(self, path_of: impl Fn(u32) -> PathBuf) -> CloneGroup {
         let mut locations: Vec<CloneLocation> = self
             .members
             .into_iter()
             .map(|candidate| CloneLocation {
-                relative_path: parsed_files[candidate.file_index as usize]
-                    .relative_path
-                    .clone(),
+                relative_path: path_of(candidate.file_index),
                 start_line: candidate.start_line,
                 end_line: candidate.end_line,
                 source_lines: candidate.source_lines,

@@ -5,7 +5,7 @@
 mod details;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
 
@@ -14,7 +14,7 @@ use rayon::prelude::*;
 
 use crate::analysis::{analyze_file, FileAnalysis, UnanalyzableReason};
 use crate::cache::{Cache, CacheError, CacheKey, CachedAnalysis, CachedReason};
-use crate::clones::Candidate as CloneRun;
+use crate::clones::{enumerate_candidates, maximal_groups, Candidate as CloneRun};
 use crate::config::{Config, PolicyConfig, Severity};
 use crate::git::diff::{
     diff_commit_to_commit, diff_commit_to_index, diff_commit_to_worktree, Change,
@@ -27,7 +27,7 @@ use crate::git::snapshot_id::SnapshotId;
 use crate::git::{wrap_git_error, GitError, CODE_SNAPSHOT_UNAVAILABLE};
 use crate::identity::matching::{match_callables, FileCallables, MatchOutput};
 use crate::model::Grammar;
-use crate::model::LanguageFamily;
+use crate::model::{CloneGroup, LanguageFamily};
 use crate::policy;
 use crate::policy::clones::{evaluate_clones_precomputed, UnchangedCandidates};
 use crate::policy::complexity::{classify, FileMetrics};
@@ -904,9 +904,56 @@ impl Sides<'_> {
         Sections {
             skipped: skip_counts(&loads.discovery_skips, &reasons, damaged),
             entities,
-            summaries: summarize(if full { "full" } else { "changed" }, scoped, &lost),
+            summaries: summarize(
+                if full { "full" } else { "changed" },
+                scoped,
+                &self.summary_clone_groups(loads, full),
+                &lost,
+            ),
             coverage: coverage.into_iter().map(|(_, entry)| entry).collect(),
         }
+    }
+
+    /// The clone groups over the summary scope, grouped as `scan` groups
+    /// them: the changed files' candidates, plus every unchanged candidate
+    /// file's when the scope is full.
+    fn summary_clone_groups(&self, loads: &Loads, full: bool) -> Vec<CloneGroup> {
+        let min_clone_lines = self.config.measurement.min_clone_lines;
+        let mut paths: Vec<PathBuf> = Vec::new();
+        let mut per_file = Vec::new();
+        for loaded in &loads.changed {
+            let Ok(source) = std::str::from_utf8(&loaded.bytes) else {
+                continue;
+            };
+            let language = loaded.analysis.language;
+            let candidates = enumerate_candidates(
+                language,
+                source,
+                &loaded.analysis.ir,
+                paths.len() as u32,
+                min_clone_lines,
+            );
+            paths.push(PathBuf::from(loaded.path.render()));
+            per_file.push((language, candidates));
+        }
+        if full {
+            for unchanged in &loads.unchanged {
+                let file_index = paths.len() as u32;
+                let candidates = unchanged
+                    .candidates
+                    .iter()
+                    .map(|(key, run)| (*key, CloneRun { file_index, ..*run }))
+                    .collect();
+                paths.push(PathBuf::from(unchanged.path.render()));
+                per_file.push((unchanged.language, candidates));
+            }
+        }
+        maximal_groups(per_file)
+            .into_iter()
+            .map(|builder| {
+                builder.into_group_with_paths(|file_index| paths[file_index as usize].clone())
+            })
+            .collect()
     }
 
     fn load(&self) -> Loads {
