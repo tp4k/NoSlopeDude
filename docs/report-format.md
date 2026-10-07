@@ -206,9 +206,14 @@ neither the numerator nor the denominator.
   file or a directory, so a directory named `locked.ts` may hold Java. A policy
   exclusion (`--exclude`, `.gitignore`, test, generated or dependency paths)
   of a file or of a readable path never affects `complete`. An unreadable
-  directory is the exception: it is reported as `unreadable`, and so makes
-  `complete` false, even when it is also gitignored or otherwise excluded,
-  because discovery cannot tell what it would have held.
+  directory is the exception, because discovery cannot tell what it would
+  have held. It is reported as `unreadable`, and so makes `complete` false,
+  when it is gitignored or when an exclusion glob matches only its contents
+  (for example `--exclude 'locked/**'`). A directory that an exclusion glob
+  matches itself (for example `--exclude 'locked'`, or a dependency/build,
+  generated or test directory such as `node_modules/`) is pruned before
+  discovery reads it, produces no `skipped_files` row and leaves `complete`
+  unchanged.
 - An empty family has `scanned_lines` 0 and `ratio` `0.0`.
 
 ### Top-25 span
