@@ -24,6 +24,9 @@ const TARGET_NOT_GIT_ROOT: &str = "target_not_git_root";
 /// worktree snapshot could not be read.
 const WORKTREE_SNAPSHOT_FAILED: &str = "worktree_snapshot_failed";
 
+/// The published stand-in for a callable name that would quote source.
+const COMPUTED_NAME: &str = "<computed>";
+
 /// The `Digest` domain of `scan_configuration_fingerprint`; bump the suffix
 /// when the settings it covers change.
 const SCAN_CONFIGURATION_FAMILY_PREFIX: &str = "nsd-scan-config-v1";
@@ -68,6 +71,18 @@ pub struct ReportEntity {
     pub cc: u32,
     pub sloc: usize,
     pub mass: f64,
+}
+
+/// `name` as the canonical JSON publishes it. A computed-member callable is
+/// named by its whole assignment target, which can be arbitrary multi-line
+/// source, so a name holding a line break, `[` or `(` is replaced by a
+/// placeholder that locates the callable without quoting source.
+pub fn published_name(name: &str, start_line: usize) -> String {
+    if name.contains(['\n', '\r', '[', '(']) {
+        format!("{COMPUTED_NAME}@{start_line}")
+    } else {
+        name.to_string()
+    }
 }
 
 /// `root`'s snapshot ID when it is a git work-tree root (D21). A local
@@ -149,7 +164,7 @@ pub fn entities(callables: &[Callable]) -> Vec<ReportEntity> {
         .iter()
         .map(|callable| ReportEntity {
             path: callable.relative_path.to_string_lossy().into_owned(),
-            name: callable.name.clone(),
+            name: published_name(&callable.name, callable.start_line),
             start_line: callable.start_line,
             end_line: callable.end_line,
             cc: callable.cc,

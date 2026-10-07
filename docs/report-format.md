@@ -14,7 +14,11 @@ SLOC, mass, erosion), `docs/clone-detection.md` (clone groups), and
 canonical writer as `nsd check --format json` (`format::canonical_document_pretty`:
 keys sorted at every level, `-0.0` written as `0.0`; pretty-printed, ended by
 a newline). Nothing records time, no field holds an absolute path, and no
-field holds a source excerpt: `excerpt` is in the HTML only.
+field holds a source excerpt: `excerpt` is in the HTML only. A callable name
+that holds a line break, `[` or `(` (a computed-member assignment is named by
+its whole target expression) is published as `<computed>@<line>`, the callable's
+start line, in `callables`, `top25` and check `entities`; the HTML and the
+terminal keep the raw name.
 
 ```json
 {
@@ -119,15 +123,16 @@ repository-configured filter driver would execute. For a remote
 
 - `schema_version` is `1` and `result_scope` is `"scan"` (`"check"` for
   `nsd check --format json`).
-- `scan.target` is `null`: the target as typed can be an absolute path, and
-  the report names no absolute path. The terminal summary and the HTML still
-  show it.
+- `scan.target` is `null` for a local target: the target as typed can be an
+  absolute path, and the report names no absolute path. For a remote target
+  it is the URL. The terminal summary and the HTML still show the target as
+  typed.
 - `snapshots.scan` is the worktree snapshot ID (`blake3:<32 hex>`, the same
   ID `check` reports for a candidate) when the target is a git work-tree
   root, else `null` with `snapshots.unavailable_reason`: the
   `scan.revision` reason when there is one (`not_a_git_repository` for a plain
-  directory; a remote clone also has no ID, as it would name a temporary
-  checkout), `target_not_git_root` (a subtree of a checkout: a worktree ID
+  directory; a remote target's clone root is a work-tree root, so it carries
+  its worktree snapshot ID), `target_not_git_root` (a subtree of a checkout: a worktree ID
   covers the whole checkout, not the scanned subtree) or
   `worktree_snapshot_failed`.
 - `fingerprints.measurement` is the measurement-profile digest for the run's

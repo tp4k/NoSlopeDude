@@ -28,7 +28,9 @@ use crate::model::{
     VerbosityScore,
 };
 
-pub use canonical::{ReportEntity, ReportFingerprints, ReportSnapshots, SCAN_SKIP_KEYS};
+pub use canonical::{
+    published_name, ReportEntity, ReportFingerprints, ReportSnapshots, SCAN_SKIP_KEYS,
+};
 pub use html::render_html;
 
 /// The GitHub revision info a scan carries (D6), independent of `model`'s
@@ -146,7 +148,13 @@ pub struct ReportDuplicateGroup {
 /// body, not just its declaration's first line (M0c-13).
 #[derive(Debug, Clone, Serialize)]
 pub struct ReportCallable {
+    /// The raw name, kept for the HTML and terminal renderings; the
+    /// canonical JSON carries `published_name` instead.
+    #[serde(skip_serializing)]
     pub name: String,
+    /// `name` as `report.json` publishes it (see `published_name`).
+    #[serde(rename = "name")]
+    pub published_name: String,
     pub language: &'static str,
     pub cc: u32,
     pub sloc: usize,
@@ -451,6 +459,7 @@ fn build_callable(
 ) -> ReportCallable {
     ReportCallable {
         name: callable.name.clone(),
+        published_name: published_name(&callable.name, callable.start_line),
         language: family_label(callable.language),
         cc: callable.cc,
         sloc: callable.sloc,

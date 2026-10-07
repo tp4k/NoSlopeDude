@@ -9,6 +9,8 @@ use crate::check::{CheckDetails, CheckDiagnostic, Entity, FamilySummary, FileCov
 use crate::git::path::RepoPath;
 use crate::policy::diagnostics::BaseCallable;
 
+use crate::report::published_name;
+
 use super::CANDIDATE_CONFIG_FILE;
 
 /// The `schema_version` of both scopes' canonical documents.
@@ -144,7 +146,7 @@ fn detail_fields(details: &CheckDetails) -> Map<String, Value> {
 fn entity(entity: &Entity) -> Value {
     json!({
         "path": entity.path,
-        "name": entity.name,
+        "name": published_name(&entity.name, entity.start_line),
         "start_line": entity.start_line,
         "end_line": entity.end_line,
         "cc": entity.cc,
