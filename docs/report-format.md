@@ -192,7 +192,8 @@ Sections, in document order, each its own `<section id="...">`:
 `nsd check --format json` prints one compact JSON document followed by `\n`.
 It is the subset of M6-1/M6-2 that `check` needs now; fields may be added by
 M6-2, and these are not meant to be renamed. Keys are sorted at every level,
-every number is an integer, paths are repository-relative (`%XX` for non-UTF-8
+every number is an integer except the `ratio` and `erosion` floats, paths
+are repository-relative (`%XX` for non-UTF-8
 bytes), nothing records time, and no field except a pass-through `message`
 (see below) records the checkout's location.
 
@@ -216,10 +217,56 @@ bytes), nothing records time, and no field except a pass-through `message`
 | `NSD-C101`, `NSD-C102` about the candidate config | `path` (`"nsd.yml"`) |
 | `NSD-G101`, `NSD-C102` for a refused `--config` | `message` |
 
-Not in this document yet (M6-2): the complete entity set, snapshot IDs,
-configuration and measurement fingerprints, and per-reason skip counts. A
-`message` is passed through as the terminal listing prints it, so it is not
-guaranteed free of absolute paths. `scan`'s `report.json` is unchanged.
+`scan`'s `report.json` is unchanged.
+
+### The canonical check document (M6-2)
+
+A check that ran to a verdict adds these top-level keys (still sorted, still
+compact):
+
+- `snapshots`: `{base, candidate}`, each a snapshot ID (below).
+- `fingerprints`: `{configuration, measurement}`, each `blake3:` plus
+  lowercase hex. The configuration fingerprint covers the trusted config's
+  version, `include` (omitted differs from listed), `exclude`,
+  `measurement.min_clone_lines` and the five severities; output caps are
+  excluded. The measurement fingerprint uses the trusted `min_clone_lines`.
+- `skipped`: per-reason counts, always all 13 keys (zero when none),
+  including `parse_syntax_error`.
+- `entities`: every changed callable (`path`, `name`, `start_line`,
+  `end_line`, `cc`, `sloc`, and `base` (`{path, start_line, end_line, cc,
+  sloc}`) or `null`), sorted by path, start line, name.
+- `summaries`: `scope`, `files`, and `overall`, `java`, `js_ts`, each
+  `{erosion, verbosity: {ratio, flagged_lines, scanned_lines,
+  unanalyzed_lines, complete}}`. `flagged_lines` counts rule findings only;
+  clone-group lines are not in it. `scope` is `"changed"` while trusted V102
+  is off (unchanged files are not read) and `"full"` while it is on
+  (unchanged files contribute their cached facts); `files` counts the files
+  summarized.
+- `coverage`: one entry per changed file, sorted by path (`path`, `analyzed_lines`,
+  `unanalyzed_lines`, `complete`, `gaps`), each gap
+  `{base: {start_line, end_line} or null, candidate: {...}, tolerated}`.
+
+A failure document (a check that stopped before both sides exist, so
+`details` is absent) carries only the four base keys: `diagnostics`,
+`exit_status`, `result_scope`, `schema_version`.
+
+Numbers: counts and lines are integers. `ratio` and `erosion` are floats in the shortest round-trip form; `-0.0` is written `0.0`; non-finite
+values do not occur.
+
+Snapshot IDs: `blake3:` plus 32 lowercase hex digits. The digits are the
+little-endian `u128` of the first 16 BLAKE3 bytes, printed big-endian, so
+they are the byte-reverse of the raw hash's hex. Decision (ledger rows 57,
+60): 128 bits are kept; the birthday bound is about 2^64 snapshots, and the
+ID labels trusted local content rather than authenticating it.
+
+Free-text `message`s of `NSD-G101` and `NSD-C102` are path-free in JSON: the
+checkout, its git directories and the refused config path are replaced; the
+terminal listing still prints the original text. The document is
+byte-identical across checkout roots and thread counts.
+
+`--worktree` always computes the worktree snapshot ID, so it reads the
+changed files once more; a tracked entry under a non-directory or symlinked
+parent fails `NSD-G101` (ledger row 59; the check-then-read race remains).
 
 ## Terminal summary
 

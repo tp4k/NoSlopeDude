@@ -222,8 +222,8 @@ fn push_patterns(digest: &mut Digest, patterns: &[String]) {
     }
 }
 
-/// `measurement.min_clone_lines` (A2): parsed and exposed, not yet wired
-/// into any fingerprint or cache key.
+/// `measurement.min_clone_lines` (A2): parsed and exposed; `check` feeds the
+/// trusted value into the measurement fingerprint and its cache key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MeasurementConfig {
     pub min_clone_lines: u32,
