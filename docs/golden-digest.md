@@ -164,11 +164,13 @@ The archive checkout's cleanliness check opens the recipe target with
 the checkout passes it; a target outside any repository still fails loudly.
 M6 WS-4 did not run the recapture (`NSD_ARCHIVED_REPORT` unset): the
 committed digest is unchanged and the gate is pending (status row M6-2b).
-The expected field-by-field diff, to be confirmed at recapture, is `body_blake3`
-(the six WS-3 top-level keys, dropped `excerpt` keys and null `scan.target`)
-and, if the digest copies the whole `scores.*.verbosity` object, the
-`unanalyzed_lines`/`complete` keys WS-1 added; any other moved field needs its
-own explanation (no silent re-baseline).
+The expected field-by-field diff, to be confirmed at recapture, is
+`body_blake3` (the six WS-3 top-level keys, `scan.revision.dirty` false to
+null, and the WS-1 `scores.*.verbosity.{unanalyzed_lines, complete}` keys) and
+the `scores` component (those same two added keys per family and overall).
+Removed excerpts and the null `scan.target` cannot move the digest, because
+`normalize` erases both before the body is hashed. Any other moved field needs
+its own explanation (no silent re-baseline).
 
 Re-capturing (implementer-only; overwrites the committed file) sets a
 second, separate opt-in alongside the archive path:
