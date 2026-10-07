@@ -1201,6 +1201,30 @@ fn test_scan_report_publishes_no_comment_or_pattern_text_in_callable_names() {
 }
 
 #[test]
+fn test_scan_report_replaces_bracket_only_and_line_break_only_names() {
+    let corpus = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        corpus.path().join("one.js"),
+        "registry[\"SECRET-TOKEN-5678\"] = function (x) {\n  if (x) { return 1; }\n  return 2;\n};\n",
+    )
+    .expect("write");
+    fs::write(
+        corpus.path().join("two.js"),
+        "registry\n  .handler = function (x) {\n  if (x) { return 1; }\n  return 2;\n};\n",
+    )
+    .expect("write");
+
+    let (_dir, output) = run_scan(corpus.path(), |_| {});
+    let text = report_text(&output);
+    let value: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+
+    assert!(!text.contains("SECRET-TOKEN-5678"), "{text}");
+    let names = callable_names(&value);
+    assert!(names.contains(&"<computed>@1".to_string()), "{names:?}");
+    assert!(names.contains(&"<computed>@2".to_string()), "{names:?}");
+}
+
+#[test]
 fn test_scan_report_orders_callables_with_one_start_line_by_end_line() {
     let corpus = tempfile::tempdir().expect("tempdir");
     fs::write(
