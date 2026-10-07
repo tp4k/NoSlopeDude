@@ -371,3 +371,46 @@ fn test_clone_occurrence_excludes_comment_and_blank_lines_from_numerator() {
     assert_eq!(rules_result.verbosity.overall.scanned_lines, 8);
     assert_eq!(rules_result.verbosity.overall.ratio, 0.25);
 }
+
+/// M1-8: lowering already prunes damage, so `scanned_lines` is the analyzed
+/// count and `unanalyzed_lines` the pruned remainder. The executable lines of
+/// `tests/fixtures/salvage/Mixed.java`: analyzed are 1 (package), 3 (class)
+/// and 5, 6, 7, 9 (`safe`), so 6; pruned are 12 (`void broken(int a {`) and
+/// 13 (`return;`), so 2. Lines 6 and 7 are flagged through a clone
+/// occurrence, so a denominator that subtracted the damage a second time, or
+/// counted the pruned lines back in, changes the ratio.
+#[test]
+fn test_verbosity_denominator_excludes_unanalyzed_lines() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/salvage");
+    let discovered = vec![DiscoveredFile {
+        relative_path: PathBuf::from("Mixed.java"),
+        language: JAVA,
+    }];
+    let (parsed, failures) = parse::parse_all(&root, &discovered);
+    assert_eq!(failures.len(), 1, "{failures:?}");
+
+    let metrics_result = metrics::run(&parsed, !failures.is_empty());
+    let group = CloneGroup {
+        language: JAVA,
+        locations: vec![
+            clone_location("Other.java", 1, 2, 2),
+            clone_location("Mixed.java", 6, 7, 2),
+        ],
+        redundant_lines: 2,
+    };
+    let clones_result = ClonesResult {
+        groups: vec![group],
+    };
+    let rules_result = rules::run(&parsed, &metrics_result, &clones_result);
+
+    for score in [
+        &rules_result.verbosity.overall,
+        &rules_result.verbosity.java,
+    ] {
+        assert_eq!(score.scanned_lines, 6, "{score:?}");
+        assert_eq!(score.unanalyzed_lines, 2, "{score:?}");
+        assert_eq!(score.flagged_lines, 2, "{score:?}");
+        assert_eq!(score.ratio, 2.0 / 6.0, "{score:?}");
+    }
+    assert_eq!(rules_result.verbosity.js_ts.unanalyzed_lines, 0);
+}

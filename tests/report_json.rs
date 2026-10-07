@@ -362,6 +362,96 @@ fn test_incomplete_marker_set_on_parse_failure() {
     );
 }
 
+fn read_report(output: &PipelineOutput) -> serde_json::Value {
+    let json_text =
+        fs::read_to_string(output.settings.output.join("report.json")).expect("report.json exists");
+    serde_json::from_str(&json_text).expect("valid JSON")
+}
+
+/// The families' verbosity objects, `overall` last.
+fn verbosity_objects(value: &serde_json::Value) -> [&serde_json::Value; 3] {
+    ["java", "js_ts", "overall"].map(|family| &value["scores"][family]["verbosity"])
+}
+
+/// M1-8: every family and the overall score carry `unanalyzed_lines` and
+/// `complete` beside `scanned_lines`. `tests/fixtures/report/src` without its
+/// `Broken.java` is the clean corpus; with it, the Java family is salvaged.
+#[test]
+fn test_scores_carry_completeness_metadata() {
+    let clean_dir = tempfile::tempdir().expect("tempdir");
+    for entry in fs::read_dir(fixture_root().join("src")).expect("fixture dir") {
+        let entry = entry.expect("dir entry");
+        if entry.file_name() == "Broken.java" {
+            continue;
+        }
+        fs::copy(entry.path(), clean_dir.path().join(entry.file_name())).expect("copy fixture");
+    }
+    let (_clean_out, clean) = run_scan(clean_dir.path(), |_| {});
+    let clean_value = read_report(&clean);
+    let parse_rows: Vec<&serde_json::Value> = clean_value["skipped_files"]
+        .as_array()
+        .expect("skipped_files array")
+        .iter()
+        .filter(|row| {
+            row["reason"]
+                .as_str()
+                .is_some_and(|r| r.starts_with("parse_"))
+        })
+        .collect();
+    assert!(
+        parse_rows.is_empty(),
+        "the clean copy must parse: {parse_rows:?}"
+    );
+    for verbosity in verbosity_objects(&clean_value) {
+        assert_eq!(verbosity["unanalyzed_lines"], 0, "{verbosity}");
+        assert_eq!(verbosity["complete"], true, "{verbosity}");
+    }
+
+    let (_salvaged_out, salvaged) = run_scan(&fixture_root(), |_| {});
+    let value = read_report(&salvaged);
+    let [java, js_ts, overall] = verbosity_objects(&value);
+    let java_unanalyzed = java["unanalyzed_lines"].as_u64().expect("java count");
+    assert!(java_unanalyzed > 0, "Broken.java's pruned lines: {java}");
+    assert_eq!(java["complete"], false, "{java}");
+    assert_eq!(js_ts["unanalyzed_lines"], 0, "{js_ts}");
+    assert_eq!(
+        js_ts["complete"], true,
+        "a Java damage must not taint js_ts: {js_ts}"
+    );
+    assert_eq!(overall["unanalyzed_lines"], java_unanalyzed, "{overall}");
+    assert_eq!(overall["complete"], false, "{overall}");
+}
+
+/// M1-8: a file lost in parsing entirely (no IR, so no line count) still
+/// makes its own family `complete: false`, and only its own.
+#[test]
+fn test_unparsed_file_makes_its_family_incomplete() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        dir.path().join("Good.java"),
+        "class Good {\n    int x = 1;\n}\n",
+    )
+    .expect("write Good.java");
+    fs::write(dir.path().join("good.js"), "const x = 1;\n").expect("write good.js");
+    fs::write(dir.path().join("Bad.java"), [0xff_u8, 0xfe, 0xfd]).expect("write Bad.java");
+
+    let (_out, output) = run_scan(dir.path(), |_| {});
+    let value = read_report(&output);
+    let bad = value["skipped_files"]
+        .as_array()
+        .expect("skipped_files array")
+        .iter()
+        .find(|row| row["relative_path"] == "Bad.java")
+        .unwrap_or_else(|| panic!("Bad.java is listed: {}", value["skipped_files"]));
+    assert_eq!(bad["reason"], "parse_unreadable");
+
+    let [java, js_ts, overall] = verbosity_objects(&value);
+    assert_eq!(java["unanalyzed_lines"], 0, "no count is known: {java}");
+    assert_eq!(java["complete"], false, "{java}");
+    assert_eq!(js_ts["complete"], true, "{js_ts}");
+    assert_eq!(overall["complete"], false, "{overall}");
+}
+
 #[test]
 fn test_terminal_summary_carries_the_scores() {
     // The terminal summary (main.rs prints `report::terminal_summary`) had
