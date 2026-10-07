@@ -486,6 +486,79 @@ fn test_unparsed_file_makes_its_family_incomplete() {
     assert_eq!(java["complete"], true, "{java}");
 }
 
+/// D3': a discovery-time analysis failure (an unreadable path) makes `overall`
+/// and every family incomplete, whatever the skipped path's suffix: the walk
+/// records the path before it knows what the directory holds.
+#[cfg(unix)]
+#[test]
+fn test_unreadable_directory_makes_overall_incomplete() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for locked_name in ["locked", "locked.ts"] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::write(
+            dir.path().join("Good.java"),
+            "class Good {\n    int x = 1;\n}\n",
+        )
+        .expect("write Good.java");
+        let locked = dir.path().join(locked_name);
+        fs::create_dir(&locked).expect("create locked dir");
+        fs::write(locked.join("Lost.java"), "class Lost {}\n").expect("write Lost.java");
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).expect("chmod 000");
+
+        if fs::read_dir(&locked).is_ok() {
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).expect("restore");
+            eprintln!("skipping {locked_name}: chmod 000 does not block this user (root?)");
+            continue;
+        }
+        let (_out, output) = run_scan(dir.path(), |_| {});
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).expect("restore");
+
+        let value = read_report(&output);
+        assert_eq!(value["incomplete"], true, "{locked_name}");
+        let row = value["skipped_files"]
+            .as_array()
+            .expect("skipped_files array")
+            .iter()
+            .find(|row| row["relative_path"] == locked_name)
+            .unwrap_or_else(|| panic!("{locked_name} is listed: {}", value["skipped_files"]));
+        assert_eq!(row["reason"], "unreadable");
+        let [java, js_ts, overall] = verbosity_objects(&value);
+        assert_eq!(overall["complete"], false, "{locked_name}: {overall}");
+        assert_eq!(java["complete"], false, "{locked_name}: {java}");
+        assert_eq!(js_ts["complete"], false, "{locked_name}: {js_ts}");
+    }
+}
+
+/// A policy exclusion is not an analysis failure: every `complete` stays true.
+#[test]
+fn test_policy_exclusion_keeps_scores_complete() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        dir.path().join("Good.java"),
+        "class Good {\n    int x = 1;\n}\n",
+    )
+    .expect("write Good.java");
+    fs::write(dir.path().join("Skip.java"), "class Skip {}\n").expect("write Skip.java");
+    fs::write(dir.path().join("good.js"), "const x = 1;\n").expect("write good.js");
+
+    let (_out, output) = run_scan(dir.path(), |settings| {
+        settings.exclude = vec!["Skip.java".to_string()];
+    });
+    let value = read_report(&output);
+    let excluded = value["skipped_files"]
+        .as_array()
+        .expect("skipped_files array")
+        .iter()
+        .find(|row| row["relative_path"] == "Skip.java")
+        .unwrap_or_else(|| panic!("Skip.java is listed: {}", value["skipped_files"]));
+    assert_eq!(excluded["reason"], "user_exclude");
+    assert_eq!(value["incomplete"], false);
+    for verbosity in verbosity_objects(&value) {
+        assert_eq!(verbosity["complete"], true, "{verbosity}");
+    }
+}
+
 #[test]
 fn test_terminal_summary_carries_the_scores() {
     // The terminal summary (main.rs prints `report::terminal_summary`) had
