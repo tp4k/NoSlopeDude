@@ -26,10 +26,8 @@ use crate::git::snapshot::{CommitSnapshot, Entry, IndexSnapshot, WorktreeSnapsho
 use crate::git::snapshot_id::SnapshotId;
 use crate::git::{wrap_git_error, GitError, CODE_SNAPSHOT_UNAVAILABLE};
 use crate::identity::matching::{match_callables, FileCallables, MatchOutput};
-use crate::lower;
 use crate::model::Grammar;
 use crate::model::LanguageFamily;
-use crate::parse;
 use crate::policy;
 use crate::policy::clones::{evaluate_clones_precomputed, UnchangedCandidates};
 use crate::policy::complexity::{classify, FileMetrics};
@@ -439,25 +437,6 @@ fn required_bytes(
     }
 }
 
-/// The executable lines lowering pruned from `analysis`'s file. Zero without
-/// a re-parse unless the IR records damage or an excluded callable or block;
-/// otherwise the file is parsed and lowered once more for the inventory
-/// `analyze_file` drops.
-fn unanalyzed_lines_of(path: &RepoPath, bytes: &[u8], analysis: &FileAnalysis) -> usize {
-    let ir = &analysis.ir;
-    if ir.damage.is_empty() && ir.excluded_callables.is_empty() && ir.excluded_blocks.is_empty() {
-        return 0;
-    }
-    let (Ok(text), Ok(source)) = (
-        std::str::from_utf8(path.as_bytes()),
-        String::from_utf8(bytes.to_vec()),
-    ) else {
-        return 0;
-    };
-    let (parsed, _failure) = parse::parse_source(Path::new(text), analysis.language, source);
-    parsed.map_or(0, |parsed| lower::lower_file_inventoried(&parsed).1)
-}
-
 /// Analyzes one file's bytes under its repository path.
 fn analyze_bytes(path: &RepoPath, bytes: &[u8]) -> Result<FileAnalysis, UnanalyzableReason> {
     match std::str::from_utf8(path.as_bytes()) {
@@ -728,9 +707,9 @@ fn load_candidate(
         }
     }
     let analysis = analyze_bytes(&included.path, &bytes);
-    let unanalyzed_lines = analysis.as_ref().map_or(0, |analysis| {
-        unanalyzed_lines_of(&included.path, &bytes, analysis)
-    });
+    let unanalyzed_lines = analysis
+        .as_ref()
+        .map_or(0, |analysis| analysis.unanalyzed_lines);
     let payload_wanted = !task.changed || (cache.active().is_some() && v102 != Severity::Off);
     let payload = match &analysis {
         _ if !payload_wanted => None,
