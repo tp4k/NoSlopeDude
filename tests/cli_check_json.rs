@@ -763,7 +763,11 @@ fn test_check_json_counts_skips_per_reason() {
     let fx = fixture();
     fx.commit_modes(&[
         ("A.java", MODE_REGULAR, simple_class("A", "").as_bytes()),
-        ("gen/G.java", MODE_REGULAR, simple_class("G", "").as_bytes()),
+        (
+            "legacy/G.java",
+            MODE_REGULAR,
+            simple_class("G", "").as_bytes(),
+        ),
         ("link.java", MODE_SYMLINK, b"A.java"),
         ("node_modules/n.js", MODE_REGULAR, b"let n = 1;\n"),
         ("vendor/lib", MODE_SUBMODULE, &[0xCCu8; 20]),
@@ -772,7 +776,7 @@ fn test_check_json_counts_skips_per_reason() {
         "A.java",
         simple_class("A", "        y = y * 2;\n").as_bytes(),
     );
-    let (_keep, config) = trusted_config("version: 1\nexclude:\n  - \"gen/**\"\n");
+    let (_keep, config) = trusted_config("version: 1\nexclude:\n  - \"legacy/**\"\n");
 
     let parsed = fx.staged_json_with(&config);
 

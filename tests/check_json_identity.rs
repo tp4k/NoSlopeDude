@@ -103,6 +103,17 @@ fn test_check_json_is_byte_identical_across_checkout_roots() {
     for clone in [&first, &second] {
         stage(clone, "File1.java", class_text("File1", "4 * ").as_bytes());
     }
+    // The staged leg needs more than two changed entities for `checked`;
+    // File1 alone yields one. These two edits add to the fixture only.
+    for clone in [&first, &second] {
+        for name in ["File3", "File5"] {
+            stage(
+                clone,
+                &format!("{name}.java"),
+                class_text(name, "4 * ").as_bytes(),
+            );
+        }
+    }
 
     let base = ["check", "--base", "HEAD~1", "--format", "json"];
     let staged = ["check", "--staged", "--format", "json"];
