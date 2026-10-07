@@ -85,8 +85,9 @@ pub fn published_name(name: &str, start_line: usize) -> String {
     }
 }
 
-/// `root`'s snapshot ID when it is a git work-tree root (D21). A local
-/// target outside git carries `revision`'s own reason.
+/// `root`'s snapshot ID when it is a git work-tree root (D22): tracked
+/// entries plus untracked entries git does not ignore. A local target
+/// outside git carries `revision`'s own reason.
 pub fn scan_snapshots(root: &Path, revision: &Revision) -> ReportSnapshots {
     let unavailable = |reason: &str| ReportSnapshots {
         scan: None,
@@ -109,7 +110,7 @@ pub fn scan_snapshots(root: &Path, revision: &Revision) -> ReportSnapshots {
     if !is_root {
         return unavailable(TARGET_NOT_GIT_ROOT);
     }
-    match WorktreeSnapshot::open(&repository)
+    match WorktreeSnapshot::open_respecting_ignores(&repository)
         .and_then(|snapshot| SnapshotId::of_worktree(&repository, &snapshot))
     {
         Ok(id) => ReportSnapshots {

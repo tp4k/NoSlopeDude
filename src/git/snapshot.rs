@@ -186,6 +186,20 @@ const GIT_DIR_NAME: &str = ".git";
 
 impl WorktreeSnapshot {
     pub fn open(repo: &Repository) -> Result<WorktreeSnapshot, GitError> {
+        Self::open_with(repo, None)
+    }
+
+    /// Like `open`, but untracked entries the repository's ignore rules
+    /// match are left out and an ignored untracked directory is pruned
+    /// without being read (D22). Tracked entries always stay.
+    pub fn open_respecting_ignores(repo: &Repository) -> Result<WorktreeSnapshot, GitError> {
+        Self::open_with(repo, Some(repo))
+    }
+
+    fn open_with(
+        repo: &Repository,
+        ignore_rules: Option<&Repository>,
+    ) -> Result<WorktreeSnapshot, GitError> {
         let workdir = worktree_dir(repo)?;
 
         // No ODB pass here (perf MEDIUM): every size is re-derived from disk
@@ -223,7 +237,14 @@ impl WorktreeSnapshot {
             }
         }
 
-        walk_worktree(&workdir, &[], &tracked, &tracked_submodules, &mut by_path)?;
+        walk_worktree(
+            &workdir,
+            &[],
+            &tracked,
+            &tracked_submodules,
+            ignore_rules,
+            &mut by_path,
+        )?;
 
         let mut entries: Vec<Entry> = by_path.into_values().collect();
         entries.sort_by(|a, b| a.path.cmp(&b.path));
@@ -591,12 +612,15 @@ fn has_git_marker(dir: &Path) -> bool {
 /// already handled by the index overlay and any path with a `.git`
 /// component (built-in exclusion, D7 defence in depth). A directory is
 /// skipped only when it is a `tracked_submodules` path; a directory that
-/// replaced a tracked blob is descended like any untracked one.
+/// replaced a tracked blob is descended like any untracked one. With
+/// `ignore_rules`, an untracked entry those rules ignore is dropped, and an
+/// ignored directory is not read (D22).
 fn walk_worktree(
     workdir: &Path,
     prefix: &[u8],
     tracked: &BTreeSet<RepoPath>,
     tracked_submodules: &BTreeSet<RepoPath>,
+    ignore_rules: Option<&Repository>,
     by_path: &mut BTreeMap<RepoPath, Entry>,
 ) -> Result<(), GitError> {
     let dir_path = repo_path_to_fs(workdir, prefix);
@@ -643,6 +667,9 @@ fn walk_worktree(
             if tracked_submodules.contains(&relative) {
                 continue; // A tracked submodule directory: already handled by the overlay step.
             }
+            if is_ignored(ignore_rules, &child_bytes, true)? {
+                continue; // D22: pruned without reading the directory.
+            }
             let child_fs_path = repo_path_to_fs(workdir, &child_bytes);
             if has_git_marker(&child_fs_path) {
                 by_path.insert(
@@ -656,12 +683,22 @@ fn walk_worktree(
                 );
                 continue; // D7: surfaced, not descended.
             }
-            walk_worktree(workdir, &child_bytes, tracked, tracked_submodules, by_path)?;
+            walk_worktree(
+                workdir,
+                &child_bytes,
+                tracked,
+                tracked_submodules,
+                ignore_rules,
+                by_path,
+            )?;
             continue;
         }
 
         if tracked.contains(&relative) {
             continue; // Already handled by the overlay step.
+        }
+        if is_ignored(ignore_rules, &child_bytes, false)? {
+            continue; // D22: an ignored untracked file.
         }
         if file_type.is_symlink() {
             by_path.insert(
@@ -706,6 +743,25 @@ fn walk_worktree(
         );
     }
     Ok(())
+}
+
+/// Whether `ignore_rules` (when present) ignores the untracked worktree path
+/// `path`. A directory is asked with a trailing slash so a `dir/` pattern
+/// matches it.
+fn is_ignored(
+    ignore_rules: Option<&Repository>,
+    path: &[u8],
+    is_dir: bool,
+) -> Result<bool, GitError> {
+    let Some(repo) = ignore_rules else {
+        return Ok(false);
+    };
+    let mut query = path.to_vec();
+    if is_dir {
+        query.push(b'/');
+    }
+    repo.is_path_ignored(repo_path_to_fs(Path::new(""), &query))
+        .map_err(|err| wrap_git_error("cannot evaluate the ignore rules", &err))
 }
 
 #[cfg(unix)]
