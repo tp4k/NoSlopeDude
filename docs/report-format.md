@@ -194,11 +194,18 @@ neither the numerator nor the denominator.
   pruning removed (pre-prune distinct lines minus surviving distinct lines),
   summed over the family's files. A line is in exactly one of the analyzed and
   unanalyzed sets.
-- `complete` — `true` only when `unanalyzed_lines` is `0` **and** no file of
-  that family failed to parse. `overall` is `complete` only when no file at all
-  failed to parse. A file that fails to parse at all contributes no lines, so
+- `complete` — `true` only when `unanalyzed_lines` is `0`, no file of that
+  family failed to parse, **and** no discovery-time analysis failure occurred
+  (a `skipped_files` row with reason `unreadable`). `overall` is `complete`
+  only when no file at all failed to parse and no discovery-time analysis
+  failure occurred. A file that fails to parse at all contributes no lines, so
   it makes its family incomplete through this flag rather than through
-  `unanalyzed_lines`.
+  `unanalyzed_lines`. A discovery-time analysis failure makes `overall` and
+  **every** family (`java` and `js_ts`) incomplete, whatever the skipped
+  path's suffix: discovery records the path before it knows whether it is a
+  file or a directory, so a directory named `locked.ts` may hold Java. A policy
+  exclusion (`--exclude`, `.gitignore`, test, generated or dependency paths)
+  never affects `complete`.
 - An empty family has `scanned_lines` 0 and `ratio` `0.0`.
 
 ### Top-25 span
