@@ -9,9 +9,10 @@
 //! not a second implementation of it, since `MetricsResult.erosion` itself
 //! is overall-only.
 
+mod canonical;
 mod html;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -19,6 +20,7 @@ use anyhow::Context;
 use serde::Serialize;
 
 use crate::discover::DiscoverResult;
+use crate::format::{canonical_document_pretty, SCAN_RESULT_SCOPE, SCHEMA_VERSION};
 use crate::metrics;
 use crate::model::{
     Callable, CloneGroup, ClonesResult, FileScanSummary, LanguageFamily, MetricsResult,
@@ -26,6 +28,7 @@ use crate::model::{
     VerbosityScore,
 };
 
+pub use canonical::{ReportEntity, ReportFingerprints, ReportSnapshots, SCAN_SKIP_KEYS};
 pub use html::render_html;
 
 /// The GitHub revision info a scan carries (D6), independent of `model`'s
@@ -41,7 +44,14 @@ pub struct ReportRevision {
 /// target string and its resolved revision (D6).
 #[derive(Debug, Clone, Serialize)]
 pub struct ReportScan {
+    /// The raw target string, kept for the HTML and terminal renderings; the
+    /// canonical JSON never carries it (see `published_target`).
+    #[serde(skip_serializing)]
     pub target: String,
+    /// `target` as `report.json` publishes it: `null` for a local target (an
+    /// absolute checkout path is not canonical), the URL for a remote one.
+    #[serde(rename = "target")]
+    pub published_target: Option<String>,
     pub revision: ReportRevision,
     pub include_tests: bool,
     pub exclude: Vec<String>,
@@ -103,6 +113,8 @@ pub struct SourceLocation {
     pub relative_path: PathBuf,
     pub start_line: usize,
     pub end_line: usize,
+    /// Read for the HTML rendering only; `report.json` carries no excerpt.
+    #[serde(skip_serializing)]
     pub excerpt: String,
     pub link: String,
     pub is_remote_link: bool,
@@ -195,7 +207,15 @@ impl Default for ReportAdaptation {
 /// Everything one scan produces, in the shape every rendering shares.
 #[derive(Debug, Clone, Serialize)]
 pub struct Report {
+    pub schema_version: u64,
+    pub result_scope: &'static str,
     pub scan: ReportScan,
+    pub snapshots: ReportSnapshots,
+    pub fingerprints: ReportFingerprints,
+    /// `skipped_files` tallied per reason, every reason present.
+    pub skipped: BTreeMap<String, usize>,
+    /// Every measured callable, uncapped (`top25` keeps the first 25 by cc).
+    pub callables: Vec<ReportEntity>,
     pub scores: ReportScores,
     pub findings: Vec<ReportFinding>,
     pub duplicates: Vec<ReportDuplicateGroup>,
@@ -228,8 +248,15 @@ pub fn aggregate(input: &ReportInput) -> Report {
     // this call (a stack-local `HashMap`, threaded down by `&mut`
     // reference), not a `ReportInput` field or anything cached across runs.
     let mut excerpt_cache: ExcerptCache = HashMap::new();
+    let skipped_files = build_skipped_files(input);
     Report {
+        schema_version: SCHEMA_VERSION,
+        result_scope: SCAN_RESULT_SCOPE,
         scan: build_scan(input),
+        snapshots: canonical::scan_snapshots(input.root, input.revision),
+        fingerprints: canonical::scan_fingerprints(input.settings),
+        skipped: canonical::skip_counts(&skipped_files),
+        callables: canonical::entities(&input.metrics.callables),
         scores: build_scores(input),
         findings: input
             .rules
@@ -249,7 +276,7 @@ pub fn aggregate(input: &ReportInput) -> Report {
             .iter()
             .map(|c| build_callable(input, c, &mut excerpt_cache))
             .collect(),
-        skipped_files: build_skipped_files(input),
+        skipped_files,
         // WS-6's `SkipReason` split: a discovery-time skip only marks the
         // scan incomplete when it is an analysis failure (`Unreadable` --
         // the walk tried this path and could not read it), never a policy
@@ -283,14 +310,21 @@ pub fn run(input: &ReportInput) -> anyhow::Result<Report> {
     Ok(report)
 }
 
-/// D17: `report.json` as pretty-printed JSON.
+/// D17: `report.json`, the canonical scan document (sorted keys, no
+/// excerpts), pretty-printed by the writer the check scope shares (D13).
 pub fn render_json(report: &Report) -> anyhow::Result<String> {
-    serde_json::to_string_pretty(report).context("failed to serialize the report to JSON")
+    let document =
+        serde_json::to_value(report).context("failed to serialize the report to JSON")?;
+    Ok(canonical_document_pretty(document))
 }
 
 fn build_scan(input: &ReportInput) -> ReportScan {
     ReportScan {
         target: input.target_input.to_string(),
+        published_target: match input.target {
+            Target::Remote(_) => Some(input.target_input.to_string()),
+            Target::Local(_) => None,
+        },
         revision: ReportRevision {
             sha: input.revision.sha.clone(),
             dirty: input.revision.dirty,

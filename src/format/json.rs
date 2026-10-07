@@ -11,8 +11,11 @@ use crate::policy::diagnostics::BaseCallable;
 
 use super::CANDIDATE_CONFIG_FILE;
 
-const SCHEMA_VERSION: u64 = 1;
+/// The `schema_version` of both scopes' canonical documents.
+pub const SCHEMA_VERSION: u64 = 1;
 const RESULT_SCOPE: &str = "check";
+/// The `result_scope` of the scan document (`report.json`).
+pub const SCAN_RESULT_SCOPE: &str = "scan";
 
 /// The placeholder a hidden checkout path is replaced with in a message.
 const HIDDEN_REPOSITORY: &str = "<repository>";
@@ -70,6 +73,14 @@ fn base_document(diagnostics: &[CheckDiagnostic], exit_status: u8) -> Value {
 pub fn canonical_document(mut document: Value) -> String {
     normalize_floats(&mut document);
     format!("{document}\n")
+}
+
+/// The scan scope's canonical writer: the same normalized tree as
+/// `canonical_document`, pretty-printed (stable layout, one key per line) and
+/// ended by a newline.
+pub fn canonical_document_pretty(mut document: Value) -> String {
+    normalize_floats(&mut document);
+    format!("{document:#}\n")
 }
 
 /// A float for a canonical document. Callers hold finite values only.
