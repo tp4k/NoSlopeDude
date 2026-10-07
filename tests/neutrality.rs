@@ -539,7 +539,8 @@ fn test_clean_corpus_report_is_byte_identical_to_the_pre_ir_baseline() {
     let baseline_text =
         fs::read_to_string(&baseline_path).expect("committed clean baseline exists");
     assert_eq!(
-        actual_text, baseline_text.as_str(),
+        actual_text,
+        baseline_text.as_str(),
         "clean corpus report.json diverged from the committed pre-IR baseline"
     );
 }
