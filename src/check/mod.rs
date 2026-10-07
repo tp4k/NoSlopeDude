@@ -713,10 +713,9 @@ fn load_candidate(
     let payload_wanted = !task.changed || (cache.active().is_some() && v102 != Severity::Off);
     let payload = match &analysis {
         _ if !payload_wanted => None,
-        Ok(analysis) => std::str::from_utf8(&bytes).ok().map(|source| {
-            CachedAnalysis::from_analysis(analysis, source, min_clone_lines)
-                .with_unanalyzed_lines(unanalyzed_lines)
-        }),
+        Ok(analysis) => std::str::from_utf8(&bytes)
+            .ok()
+            .map(|source| CachedAnalysis::from_analysis(analysis, source, min_clone_lines)),
         Err(reason) => CachedAnalysis::unanalyzable(*reason),
     };
     if let (Some(payload), Some(grammar), Some(blob)) = (&payload, grammar, analyzed_blob) {
