@@ -1146,3 +1146,113 @@ fn test_check_json_publishes_no_source_text_in_complexity_entries() {
         .unwrap_or_else(|| panic!("an NSD-E101 entry: {text}"));
     assert_eq!(complexity["callable"], json!("<computed>@5"), "{text}");
 }
+
+const DUP_A: &str = include_str!("fixtures/clones/src/main/java/DupA.java");
+const DUP_B: &str = include_str!("fixtures/clones/src/main/java/DupB.java");
+const DUP_A_PATH: &str = "app/DupA.java";
+const DUP_B_PATH: &str = "app/DupB.java";
+const DUP_FLAGGED_LINES: u64 = 12;
+const DUP_SCANNED_LINES: u64 = 30;
+const DUP_B_SCANNED_LINES: u64 = 15;
+
+fn overall_verbosity(document: &Value) -> Value {
+    document["summaries"]["overall"]["verbosity"].clone()
+}
+
+/// `scores.overall.verbosity` of `nsd scan` over a directory holding the two
+/// duplicate fixtures at the same relative paths.
+fn scan_overall_verbosity() -> Value {
+    let target = TempDir::new().expect("create a scan target");
+    std::fs::create_dir(target.path().join("app")).expect("create the app directory");
+    std::fs::write(target.path().join(DUP_A_PATH), DUP_A).expect("write DupA.java");
+    std::fs::write(target.path().join(DUP_B_PATH), DUP_B).expect("write DupB.java");
+    let output = TempDir::new().expect("create a scan output directory");
+    let scan = Command::new(env!("CARGO_BIN_EXE_nsd"))
+        .arg("scan")
+        .arg(target.path())
+        .arg("--output")
+        .arg(output.path())
+        .output()
+        .expect("run nsd scan");
+    assert!(
+        scan.status.success(),
+        "{}",
+        String::from_utf8_lossy(&scan.stderr)
+    );
+    let report: Value = serde_json::from_slice(
+        &std::fs::read(output.path().join("report.json")).expect("read report.json"),
+    )
+    .expect("report.json is JSON");
+    report["scores"]["overall"]["verbosity"].clone()
+}
+
+fn committed_duplicates() -> Fixture {
+    let fx = fixture();
+    fx.commit(&[
+        (DUP_A_PATH, DUP_A.as_bytes()),
+        (DUP_B_PATH, DUP_B.as_bytes()),
+    ]);
+    fx
+}
+
+fn assert_dup_counts(verbosity: &Value, flagged: u64) {
+    assert_eq!(verbosity["flagged_lines"], json!(flagged), "{verbosity}");
+    assert_eq!(
+        verbosity["scanned_lines"],
+        json!(DUP_SCANNED_LINES),
+        "{verbosity}"
+    );
+}
+
+#[test]
+fn test_check_summary_ratio_counts_clone_lines_like_scan() {
+    let fx = committed_duplicates();
+    let scan = scan_overall_verbosity();
+    assert_dup_counts(&scan, DUP_FLAGGED_LINES);
+
+    let check = overall_verbosity(&fx.staged_json());
+
+    assert_dup_counts(&check, DUP_FLAGGED_LINES);
+    assert_eq!(check["ratio"], scan["ratio"], "check {check} scan {scan}");
+    assert_eq!(check["ratio"], json!(0.4));
+}
+
+#[test]
+fn test_check_summary_clone_lines_survive_a_warm_cache() {
+    let fx = committed_duplicates();
+
+    let cold = fx.staged_json();
+    let warm = fx.staged_json();
+
+    assert_dup_counts(&overall_verbosity(&warm), DUP_FLAGGED_LINES);
+    assert_eq!(cold["summaries"], warm["summaries"]);
+}
+
+#[test]
+fn test_check_summary_clone_lines_follow_the_changed_scope() {
+    let (_keep, off) = trusted_config(V102_OFF);
+
+    let both = fixture();
+    both.commit(&[("Base.java", b"class Base {\n}\n".as_slice())]);
+    both.stage(DUP_A_PATH, DUP_A.as_bytes());
+    both.stage(DUP_B_PATH, DUP_B.as_bytes());
+    let both = both.staged_json_with(&off);
+    assert_eq!(both["summaries"]["scope"], json!("changed"));
+    assert_dup_counts(&overall_verbosity(&both), DUP_FLAGGED_LINES);
+
+    let one = fixture();
+    one.commit(&[
+        ("Base.java", b"class Base {\n}\n".as_slice()),
+        (DUP_B_PATH, DUP_B.as_bytes()),
+    ]);
+    one.stage(DUP_A_PATH, DUP_A.as_bytes());
+    let one = one.staged_json_with(&off);
+    assert_eq!(one["summaries"]["scope"], json!("changed"));
+    let verbosity = overall_verbosity(&one);
+    assert_eq!(verbosity["flagged_lines"], json!(0), "{verbosity}");
+    assert_eq!(
+        verbosity["scanned_lines"],
+        json!(DUP_B_SCANNED_LINES),
+        "{verbosity}"
+    );
+}
