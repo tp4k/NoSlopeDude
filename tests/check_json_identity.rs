@@ -144,3 +144,42 @@ fn test_check_json_is_byte_identical_across_thread_counts() {
     assert_eq!(checked(&single), checked(&many));
     assert_eq!(single.status.code(), many.status.code());
 }
+
+/// Each analyzed file is lowered once, damaged or not. Every other test in
+/// this binary runs the `nsd` child process, so the in-process lowering
+/// counter moves only inside this test.
+#[test]
+fn test_check_lowers_each_analyzed_file_once_including_damaged_ones() {
+    let (dir, repo) = common::init_repo();
+    common::commit_entries(
+        &repo,
+        &[(
+            b"Mixed.java".to_vec(),
+            MODE_REGULAR,
+            include_bytes!("fixtures/salvage/Mixed.java").to_vec(),
+        )],
+    );
+    let head = repo
+        .head()
+        .and_then(|head| head.peel_to_tree())
+        .expect("read the head tree");
+    let mut index = repo.index().expect("open the index");
+    index.read_tree(&head).expect("mirror the head tree");
+    index.write().expect("write the index");
+    stage(&repo, "A.java", class_text("A", "").as_bytes());
+    let config_dir = TempDir::new().expect("create a config directory");
+    let config = config_dir.path().join("trusted.yml");
+    std::fs::write(&config, "version: 1\n").expect("write the config");
+
+    let before = nsd::lower::lowering_count();
+    let outcome = nsd::check::run_check(&nsd::check::CheckRequest {
+        repository: dir.path(),
+        mode: nsd::check::CheckMode::Staged,
+        config_path: Some(&config),
+        allow_new_suppressions: false,
+    });
+    let lowered = nsd::lower::lowering_count() - before;
+
+    assert!(outcome.details.is_some(), "{:?}", outcome.diagnostics);
+    assert_eq!(lowered, 2, "the damaged Mixed.java and the new A.java");
+}
