@@ -292,11 +292,7 @@ pub fn aggregate(input: &ReportInput) -> Report {
         // configured against.
         incomplete: input.metrics.incomplete
             || input.rules.incomplete
-            || input
-                .discover
-                .skipped
-                .iter()
-                .any(|file| file.reason.is_analysis_failure()),
+            || discovery_analysis_failed(input),
         adaptation: ReportAdaptation::default(),
     }
 }
@@ -344,6 +340,17 @@ fn build_scan(input: &ReportInput) -> ReportScan {
     }
 }
 
+/// D3': whether discovery hit an analysis failure. Discovery records a path
+/// before it knows whether it is a file or a directory, so the failure is
+/// attributed to no family by suffix.
+fn discovery_analysis_failed(input: &ReportInput) -> bool {
+    input
+        .discover
+        .skipped
+        .iter()
+        .any(|file| file.reason.is_analysis_failure())
+}
+
 fn build_scores(input: &ReportInput) -> ReportScores {
     let java_callables: Vec<Callable> = input
         .metrics
@@ -371,26 +378,28 @@ fn build_scores(input: &ReportInput) -> ReportScores {
         })
     };
 
+    let discovery_failed = discovery_analysis_failed(input);
+
     ReportScores {
         overall: ReportFamilyScores {
             erosion: normalize_zero(input.metrics.erosion),
             verbosity: ReportVerbosity::new(
                 &input.rules.verbosity.overall,
-                !input.parse_failures.is_empty(),
+                !input.parse_failures.is_empty() || discovery_failed,
             ),
         },
         java: ReportFamilyScores {
             erosion: normalize_zero(metrics::erosion(&java_callables)),
             verbosity: ReportVerbosity::new(
                 &input.rules.verbosity.java,
-                parse_failed(LanguageFamily::Java),
+                parse_failed(LanguageFamily::Java) || discovery_failed,
             ),
         },
         js_ts: ReportFamilyScores {
             erosion: normalize_zero(metrics::erosion(&js_ts_callables)),
             verbosity: ReportVerbosity::new(
                 &input.rules.verbosity.js_ts,
-                parse_failed(LanguageFamily::JsTs),
+                parse_failed(LanguageFamily::JsTs) || discovery_failed,
             ),
         },
     }
