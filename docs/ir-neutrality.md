@@ -435,7 +435,10 @@ from each `parse_syntax_error` `skipped_files` row. No other key or subtree is
 normalized, and the malformed corpus still passed its then-declared WS-6
 deltas. It passed on the old baselines, so M1-8 moved no measurement
 (`cc`, `sloc`, `mass`, `scanned_lines`, `flagged_lines`, `ratio`, `erosion`,
-findings, duplicates, `top25`) on either corpus.
+findings, duplicates, `top25`) on either corpus. The malformed comparison
+could not see the pointers its then-declared WS-6 deltas masked
+(`/skipped_files` and `/scores/{overall,java}/verbosity/scanned_lines`);
+those were checked separately by the recapture diff listed below.
 `test_format_delta_comparator_catches_a_planted_measurement_mutation` proves
 the comparator reports a planted `top25/0/cc`, `top25/0/sloc`,
 `verbosity.scanned_lines`, `verbosity.ratio` and `erosion` change at exactly
