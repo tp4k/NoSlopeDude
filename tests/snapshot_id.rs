@@ -499,3 +499,74 @@ fn count_odb_objects(repo: &Repository) -> usize {
     .expect("walk odb");
     count
 }
+
+/// Ledger row 59: a tracked parent directory swapped for a symlink to an
+/// outside directory must not make the ID hash the outside file.
+#[test]
+#[cfg(unix)]
+fn test_worktree_id_does_not_follow_a_symlinked_tracked_parent() {
+    let (dir, repo) = common::init_repo();
+    let commit_oid = common::commit_entries(
+        &repo,
+        &[(b"pkg/a.ts".to_vec(), MODE_REGULAR, b"one\n".to_vec())],
+    );
+    sync_index_to_commit(&repo, commit_oid);
+    let outside = tempfile::TempDir::new().expect("create the outside directory");
+    std::fs::write(outside.path().join("a.ts"), b"outside one\n").expect("write the outside file");
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("pkg"))
+        .expect("replace the tracked parent with a symlink");
+
+    let first = SnapshotId::of_worktree(
+        &repo,
+        &WorktreeSnapshot::open(&repo).expect("open the worktree snapshot"),
+    )
+    .map(|id| id.to_string())
+    .map_err(|error| error.code());
+    std::fs::write(outside.path().join("a.ts"), b"outside two, different\n")
+        .expect("change the outside file");
+    let second = SnapshotId::of_worktree(
+        &repo,
+        &WorktreeSnapshot::open(&repo).expect("re-open the worktree snapshot"),
+    )
+    .map(|id| id.to_string())
+    .map_err(|error| error.code());
+
+    assert_eq!(
+        first, second,
+        "the ID must not depend on a file outside the checkout"
+    );
+}
+
+/// Ledger row 59: a FIFO at a tracked path must not block the ID.
+#[test]
+#[cfg(unix)]
+fn test_worktree_id_does_not_block_on_a_fifo() {
+    let (dir, repo) = common::init_repo();
+    let commit_oid = common::commit_entries(
+        &repo,
+        &[(b"a.ts".to_vec(), MODE_REGULAR, b"one\n".to_vec())],
+    );
+    sync_index_to_commit(&repo, commit_oid);
+    std::fs::remove_file(dir.path().join("a.ts")).ok();
+    let made = std::process::Command::new("mkfifo")
+        .arg(dir.path().join("a.ts"))
+        .status()
+        .expect("run mkfifo");
+    assert!(made.success(), "mkfifo failed");
+
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let path = dir.path().to_path_buf();
+    std::thread::spawn(move || {
+        let repo = Repository::open(&path).expect("open the repository");
+        let outcome = WorktreeSnapshot::open(&repo)
+            .and_then(|snapshot| SnapshotId::of_worktree(&repo, &snapshot))
+            .map(|id| id.to_string())
+            .map_err(|error| error.code());
+        let _ = sender.send(outcome);
+    });
+
+    let outcome = receiver
+        .recv_timeout(std::time::Duration::from_secs(20))
+        .expect("the worktree ID computation blocked on a FIFO");
+    assert!(outcome.is_ok(), "a FIFO is a special file, not a failure");
+}

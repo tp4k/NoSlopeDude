@@ -16,6 +16,8 @@ use nsd::check::CheckDiagnostic;
 use nsd::config::{CODE_CONFIG_CHANGED, CODE_INVALID_CONFIG};
 use nsd::format::render_json;
 use nsd::git::path::RepoPath;
+use nsd::git::snapshot::{CommitSnapshot, IndexSnapshot};
+use nsd::git::snapshot_id::SnapshotId;
 use nsd::policy::diagnostics::{
     BaseCallable, CloneDiagnostic, CoverageDiagnostic, DamageDiagnostic, FindingDiagnostic,
     PolicyDiagnostic, SuppressionDiagnostic, CODE_ANALYSIS_UNAVAILABLE, CODE_CLONE_REGRESSION,
@@ -23,8 +25,27 @@ use nsd::policy::diagnostics::{
     CODE_MATCH_AMBIGUITY, CODE_NEW_SUPPRESSION, CODE_PARSE_DAMAGE, CODE_UNMATCHED_FINDING,
 };
 use nsd::policy::Diagnostic;
+use nsd::profile::{fingerprint, MeasurementProfileInputs};
 
 const MODE_REGULAR: i32 = 0o100644;
+const MODE_SYMLINK: i32 = 0o120000;
+const MODE_SUBMODULE: i32 = 0o160000;
+const V102_OFF: &str = "version: 1\npolicy:\n  NSD-V102: off\n";
+const SKIP_KEYS: [&str; 13] = [
+    "builtin_exclusion",
+    "config_exclude",
+    "invalid_encoding",
+    "nested_checkout",
+    "non_utf8_path",
+    "outside_include",
+    "parse_syntax_error",
+    "parser_unavailable",
+    "special_file",
+    "submodule",
+    "symlink",
+    "too_large",
+    "unsupported_extension",
+];
 const RENDERED_STATUS: u8 = 1;
 const EXIT_ERROR: i32 = 2;
 const EXIT_BOTH: i32 = 3;
@@ -64,6 +85,33 @@ impl Fixture {
             .read_tree(&tree)
             .expect("mirror the tree into the index");
         index.write().expect("write the index");
+    }
+
+    fn commit_modes(&self, files: &[(&str, i32, &[u8])]) {
+        let entries: Vec<(Vec<u8>, i32, Vec<u8>)> = files
+            .iter()
+            .map(|(path, mode, bytes)| (path.as_bytes().to_vec(), *mode, bytes.to_vec()))
+            .collect();
+        let oid = common::commit_entries(&self.repo, &entries);
+        let tree = self
+            .repo
+            .find_commit(oid)
+            .and_then(|commit| commit.tree())
+            .expect("read the committed tree");
+        let mut index = self.repo.index().expect("open the index");
+        index
+            .read_tree(&tree)
+            .expect("mirror the tree into the index");
+        index.write().expect("write the index");
+    }
+
+    fn staged_json(&self) -> Value {
+        document(&self.nsd(&["check", "--staged", "--format", "json"]))
+    }
+
+    fn staged_json_with(&self, config: &Path) -> Value {
+        let config = config.to_str().expect("UTF-8 path");
+        document(&self.nsd(&["check", "--staged", "--format", "json", "--config", config]))
     }
 
     fn stage(&self, path: &str, bytes: &[u8]) {
@@ -199,11 +247,22 @@ fn key_orders(text: &str) -> Vec<Vec<String>> {
     finished
 }
 
-fn assert_integers_only(value: &Value) {
+/// D6: every number is an integer except the `erosion` and `ratio` scores,
+/// which are finite shortest round-trip floats.
+fn assert_integers_except_ratios(value: &Value, key: &str) {
     match value {
-        Value::Number(number) => assert!(!number.is_f64(), "{number}"),
-        Value::Array(items) => items.iter().for_each(assert_integers_only),
-        Value::Object(fields) => fields.values().for_each(assert_integers_only),
+        Value::Number(number) if matches!(key, "ratio" | "erosion") => {
+            let float = number.as_f64().expect("a float score");
+            assert!(float.is_finite() && !(float == 0.0 && float.is_sign_negative()));
+        }
+        Value::Null if matches!(key, "ratio" | "erosion") => panic!("{key} is not a number"),
+        Value::Number(number) => assert!(!number.is_f64(), "{key}: {number}"),
+        Value::Array(items) => items
+            .iter()
+            .for_each(|item| assert_integers_except_ratios(item, key)),
+        Value::Object(fields) => fields
+            .iter()
+            .for_each(|(name, item)| assert_integers_except_ratios(item, name)),
         _ => {}
     }
 }
@@ -229,6 +288,43 @@ fn test_check_format_json_prints_one_canonical_document() {
         .map(|entry| entry["code"].as_str().expect("a code"))
         .collect();
     assert_eq!(codes, SCENARIO_CODES);
+    let keys: Vec<&str> = parsed
+        .as_object()
+        .expect("an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "coverage",
+            "diagnostics",
+            "entities",
+            "exit_status",
+            "fingerprints",
+            "result_scope",
+            "schema_version",
+            "skipped",
+            "snapshots",
+            "summaries"
+        ]
+    );
+    for id in [
+        &parsed["snapshots"]["base"],
+        &parsed["snapshots"]["candidate"],
+        &parsed["fingerprints"]["measurement"],
+        &parsed["fingerprints"]["configuration"],
+    ] {
+        let text = id.as_str().expect("a hash string");
+        let hex = text.strip_prefix("blake3:").expect("a blake3 prefix");
+        assert!(
+            hex.len() >= 32 && hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')),
+            "{text}"
+        );
+    }
+    assert!(parsed["entities"].is_array());
+    assert_eq!(parsed["summaries"]["scope"], json!("full"));
+    assert!(parsed["coverage"].is_array());
     let terminal = fx.nsd(&["check", "--staged"]);
     let terminal_codes: Vec<String> = stdout(&terminal)
         .lines()
@@ -440,7 +536,8 @@ fn test_check_format_json_keys_are_sorted_and_numbers_are_integers() {
         sorted.sort();
         assert_eq!(keys, &sorted, "{text}");
     }
-    assert_integers_only(&document(&output));
+    assert_integers_except_ratios(&document(&output), "");
+    assert!(!text.contains("-0.0") && !text.contains("NaN"), "{text}");
 }
 
 #[test]
@@ -527,4 +624,340 @@ fn test_refused_config_renders_as_json() {
         parsed["diagnostics"],
         json!([{"code": CODE_INVALID_CONFIG, "message": REFUSAL}])
     );
+}
+
+const MIXED_JAVA: &str = include_str!("fixtures/salvage/Mixed.java");
+
+fn simple_class(name: &str, extra: &str) -> String {
+    format!(
+        "package p;\n\nclass {name} {{\n    int f(int x) {{\n        int y = x + 1;\n{extra}        return y;\n    }}\n}}\n"
+    )
+}
+
+fn trusted_config(text: &str) -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().expect("create a temp dir for the trusted config");
+    let path = dir.path().join("trusted.yml");
+    std::fs::write(&path, text).expect("write the trusted config");
+    (dir, path)
+}
+
+fn text_of<'a>(value: &'a Value, what: &str) -> &'a str {
+    value
+        .as_str()
+        .unwrap_or_else(|| panic!("{what} is a string"))
+}
+
+fn range(start: u64, end: u64) -> Value {
+    json!({"start_line": start, "end_line": end})
+}
+
+#[test]
+fn test_check_json_carries_snapshot_ids_and_fingerprints() {
+    let fx = fixture();
+    fx.commit(&[("A.java", simple_class("A", "").as_bytes())]);
+    fx.stage(
+        "A.java",
+        simple_class("A", "        y = y * 2;\n").as_bytes(),
+    );
+    let base_id = SnapshotId::of_commit(&CommitSnapshot::head_or_empty(&fx.repo).expect("head"));
+    let candidate_id = SnapshotId::of_index(&IndexSnapshot::open(&fx.repo).expect("index"));
+    let measured = |lines: u32| {
+        fingerprint(&MeasurementProfileInputs {
+            min_clone_lines: lines,
+            ..MeasurementProfileInputs::current()
+        })
+    };
+    let ten = "version: 1\nmeasurement:\n  min_clone_lines: 10\npolicy:\n  NSD-V102: warn\n";
+    let ten_reformatted =
+        "# a comment\npolicy: {NSD-V102: warn}\n\n\nmeasurement: {min_clone_lines: 10}\nversion: 1\n";
+    let twenty = "version: 1\nmeasurement:\n  min_clone_lines: 20\npolicy:\n  NSD-V102: warn\n";
+    let stricter = "version: 1\nmeasurement:\n  min_clone_lines: 10\npolicy:\n  NSD-V102: deny\n";
+    let (_keep_a, config_ten) = trusted_config(ten);
+    let (_keep_b, config_ten_elsewhere) = trusted_config(ten_reformatted);
+    let (_keep_c, config_twenty) = trusted_config(twenty);
+    let (_keep_d, config_stricter) = trusted_config(stricter);
+
+    let with_ten = fx.staged_json_with(&config_ten);
+    let reformatted = fx.staged_json_with(&config_ten_elsewhere);
+    let with_twenty = fx.staged_json_with(&config_twenty);
+    let with_stricter = fx.staged_json_with(&config_stricter);
+
+    assert_eq!(with_ten["snapshots"]["base"], json!(base_id.to_string()));
+    assert_eq!(
+        with_ten["snapshots"]["candidate"],
+        json!(candidate_id.to_string())
+    );
+    assert_ne!(
+        with_ten["snapshots"]["base"],
+        with_ten["snapshots"]["candidate"]
+    );
+    assert_eq!(with_ten["fingerprints"]["measurement"], json!(measured(10)));
+    assert_eq!(
+        with_twenty["fingerprints"]["measurement"],
+        json!(measured(20))
+    );
+    assert_ne!(measured(10), measured(20));
+    let configuration = |document: &Value| document["fingerprints"]["configuration"].clone();
+    assert!(configuration(&with_ten)
+        .as_str()
+        .is_some_and(|text| text.starts_with("blake3:")));
+    assert_eq!(configuration(&with_ten), configuration(&reformatted));
+    assert_ne!(configuration(&with_ten), configuration(&with_twenty));
+    assert_ne!(configuration(&with_ten), configuration(&with_stricter));
+    assert_eq!(
+        with_ten["fingerprints"]["measurement"],
+        with_stricter["fingerprints"]["measurement"]
+    );
+}
+
+#[test]
+fn test_check_json_lists_changed_callables_with_base_matches() {
+    let fx = fixture();
+    let base = "class A {\n    int g(int x) {\n        return x;\n    }\n\n    int f(int x) {\n        int y = x + 1;\n        return y;\n    }\n}\n";
+    let other = "class Z {\n    int z(int x) {\n        return x;\n    }\n}\n";
+    fx.commit(&[("A.java", base.as_bytes()), ("Z.java", other.as_bytes())]);
+    let edited = "class A {\n    int g(int x) {\n        return x;\n    }\n\n    int f(int x) {\n        int y = x + 1;\n        y = y * 2;\n        return y;\n    }\n\n    int h(int x) {\n        return x * 3;\n    }\n}\n";
+    fx.stage("A.java", edited.as_bytes());
+    fx.stage(
+        "B.java",
+        "class B {\n    int b() {\n        return 1;\n    }\n}\n".as_bytes(),
+    );
+
+    let parsed = fx.staged_json();
+
+    let entities = parsed["entities"].as_array().expect("an entities array");
+    let summary: Vec<(String, String, u64)> = entities
+        .iter()
+        .map(|entity| {
+            (
+                text_of(&entity["path"], "path").to_string(),
+                text_of(&entity["name"], "name").to_string(),
+                entity["start_line"].as_u64().expect("start_line"),
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            ("A.java".to_string(), "f".to_string(), 6),
+            ("A.java".to_string(), "h".to_string(), 12),
+            ("B.java".to_string(), "b".to_string(), 2),
+        ],
+        "{entities:?}"
+    );
+    assert_eq!(entities[0]["end_line"], json!(10));
+    assert_eq!(entities[0]["cc"], json!(1));
+    assert!(entities[0]["sloc"].as_u64().is_some_and(|sloc| sloc > 0));
+    let matched = &entities[0]["base"];
+    assert_eq!(matched["path"], json!("A.java"));
+    assert_eq!(matched["start_line"], json!(6));
+    assert_eq!(matched["end_line"], json!(9));
+    assert_eq!(matched["cc"], json!(1));
+    assert!(matched["sloc"].as_u64().is_some());
+    assert_eq!(entities[1]["base"], Value::Null);
+    assert_eq!(entities[2]["base"], Value::Null);
+}
+
+#[test]
+fn test_check_json_counts_skips_per_reason() {
+    let fx = fixture();
+    fx.commit_modes(&[
+        ("A.java", MODE_REGULAR, simple_class("A", "").as_bytes()),
+        ("gen/G.java", MODE_REGULAR, simple_class("G", "").as_bytes()),
+        ("link.java", MODE_SYMLINK, b"A.java"),
+        ("node_modules/n.js", MODE_REGULAR, b"let n = 1;\n"),
+        ("vendor/lib", MODE_SUBMODULE, &[0xCCu8; 20]),
+    ]);
+    fx.stage(
+        "A.java",
+        simple_class("A", "        y = y * 2;\n").as_bytes(),
+    );
+    let (_keep, config) = trusted_config("version: 1\nexclude:\n  - \"gen/**\"\n");
+
+    let parsed = fx.staged_json_with(&config);
+
+    let skipped = parsed["skipped"].as_object().expect("a skipped object");
+    let keys: Vec<&str> = skipped.keys().map(String::as_str).collect();
+    assert_eq!(keys, SKIP_KEYS, "{skipped:?}");
+    for key in SKIP_KEYS {
+        let expected = match key {
+            "symlink" | "submodule" | "config_exclude" | "builtin_exclusion" => 1,
+            _ => 0,
+        };
+        assert_eq!(skipped[key], json!(expected), "{key}: {skipped:?}");
+    }
+}
+
+#[test]
+fn test_check_json_summaries_follow_the_settled_scope() {
+    let fx = fixture();
+    fx.commit(&[
+        ("A.java", simple_class("A", "").as_bytes()),
+        ("B.java", simple_class("B", "").as_bytes()),
+    ]);
+    fx.stage(
+        "A.java",
+        simple_class("A", "        y = y * 2;\n").as_bytes(),
+    );
+    let (_keep, off) = trusted_config(V102_OFF);
+
+    let changed_only = fx.staged_json_with(&off);
+    let full = fx.staged_json();
+
+    assert_eq!(changed_only["summaries"]["scope"], json!("changed"));
+    assert_eq!(changed_only["summaries"]["files"], json!(1));
+    assert_eq!(full["summaries"]["scope"], json!("full"));
+    assert_eq!(full["summaries"]["files"], json!(2));
+    let lines = |document: &Value, family: &str| document["summaries"][family]["verbosity"].clone();
+    for (document, scanned) in [(&changed_only, 6), (&full, 11)] {
+        let overall = lines(document, "overall");
+        assert_eq!(overall["scanned_lines"], json!(scanned), "{overall}");
+        assert_eq!(overall["unanalyzed_lines"], json!(0));
+        assert_eq!(overall["complete"], json!(true));
+        assert_eq!(overall["flagged_lines"], json!(0));
+        assert_eq!(overall["ratio"], json!(0.0));
+        assert_eq!(lines(document, "java")["scanned_lines"], json!(scanned));
+        assert_eq!(lines(document, "js_ts")["scanned_lines"], json!(0));
+        assert_eq!(lines(document, "js_ts")["complete"], json!(true));
+        assert!(document["summaries"]["overall"]["erosion"].is_number());
+    }
+    let only_b = TempDir::new().expect("create a scan target");
+    std::fs::write(only_b.path().join("B.java"), simple_class("B", "")).expect("write B.java");
+    let output = TempDir::new().expect("create a scan output directory");
+    let scan = Command::new(env!("CARGO_BIN_EXE_nsd"))
+        .arg("scan")
+        .arg(only_b.path())
+        .arg("--output")
+        .arg(output.path())
+        .output()
+        .expect("run nsd scan");
+    assert!(
+        scan.status.success(),
+        "{}",
+        String::from_utf8_lossy(&scan.stderr)
+    );
+    let report: Value = serde_json::from_slice(
+        &std::fs::read(output.path().join("report.json")).expect("read report.json"),
+    )
+    .expect("report.json is JSON");
+    let b_alone = report["scores"]["overall"]["verbosity"]["scanned_lines"]
+        .as_u64()
+        .expect("scanned_lines");
+    assert_eq!(b_alone, 5, "B.java alone must scan to the pinned 5 lines");
+    assert_eq!(11 - 6, b_alone);
+}
+
+#[test]
+fn test_check_json_surfaces_tolerated_parser_gaps() {
+    let fx = fixture();
+    fx.commit(&[("Mixed.java", MIXED_JAVA.as_bytes())]);
+    let edited = MIXED_JAVA.replace("return 1;", "return 2;");
+    fx.stage("Mixed.java", edited.as_bytes());
+
+    let output = fx.nsd(&["check", "--staged", "--format", "json"]);
+
+    assert_eq!(output.status.code(), Some(0), "{}", stdout(&output));
+    let parsed = document(&output);
+    assert_eq!(parsed["diagnostics"], json!([]));
+    assert_eq!(parsed["skipped"]["parse_syntax_error"], json!(1));
+    let coverage = parsed["coverage"].as_array().expect("a coverage array");
+    assert_eq!(coverage.len(), 1, "{coverage:?}");
+    assert_eq!(coverage[0]["path"], json!("Mixed.java"));
+    assert_eq!(coverage[0]["complete"], json!(false));
+    assert!(coverage[0]["unanalyzed_lines"]
+        .as_u64()
+        .is_some_and(|n| n > 0));
+    assert!(coverage[0]["analyzed_lines"]
+        .as_u64()
+        .is_some_and(|n| n > 0));
+    assert_eq!(
+        coverage[0]["gaps"],
+        json!([{"base": range(12, 12), "candidate": range(12, 12), "tolerated": true}])
+    );
+    assert_eq!(
+        parsed["summaries"]["overall"]["verbosity"]["complete"],
+        json!(false)
+    );
+
+    let shifted = edited.replacen(
+        "    }\n\n    void broken",
+        "    }\n    // one\n    // two\n\n    void broken",
+        1,
+    );
+    assert_ne!(shifted, edited);
+    fx.stage("Mixed.java", shifted.as_bytes());
+
+    let output = fx.nsd(&["check", "--staged", "--format", "json"]);
+
+    assert_eq!(output.status.code(), Some(0), "{}", stdout(&output));
+    let parsed = document(&output);
+    assert_eq!(parsed["diagnostics"], json!([]));
+    assert_eq!(
+        parsed["coverage"][0]["gaps"],
+        json!([{"base": range(12, 12), "candidate": range(14, 14), "tolerated": true}])
+    );
+}
+
+#[test]
+fn test_failure_messages_hold_no_absolute_path() {
+    let outside = TempDir::new().expect("create a directory that is no repository");
+    let output = Command::new(env!("CARGO_BIN_EXE_nsd"))
+        .args(["check", "--staged", "--format", "json"])
+        .current_dir(outside.path())
+        .output()
+        .expect("run the nsd binary");
+    let text = stdout(&output);
+    assert_eq!(output.status.code(), Some(EXIT_ERROR), "{text}");
+    assert_eq!(
+        document(&output)["diagnostics"][0]["code"],
+        json!("NSD-G101")
+    );
+    let canonical = outside.path().canonicalize().expect("canonicalize");
+    for form in [outside.path(), canonical.as_path()] {
+        assert!(!text.contains(form.to_str().expect("UTF-8 path")), "{text}");
+    }
+
+    let fx = Fixture::scenario();
+    let raw = fx.root().to_str().expect("UTF-8 path").to_string();
+    let canonical = fx
+        .root()
+        .canonicalize()
+        .expect("canonicalize")
+        .to_str()
+        .expect("UTF-8 path")
+        .to_string();
+    let config_dir = TempDir::new().expect("create a config directory");
+    let missing = config_dir.path().join("missing-trusted.yml");
+    let inside = fx.root().join("trusted.yml");
+    std::fs::write(&inside, "version: 1\n").expect("write the config");
+    for config in [&missing, &inside] {
+        let output = fx.nsd(&[
+            "check",
+            "--staged",
+            "--format",
+            "json",
+            "--config",
+            config.to_str().expect("UTF-8 path"),
+        ]);
+        let text = stdout(&output);
+        assert!(!text.is_empty());
+        assert!(!text.contains(&raw) && !text.contains(&canonical), "{text}");
+        let config_text = config.to_str().expect("UTF-8 path");
+        let config_canonical = config
+            .parent()
+            .and_then(|parent| parent.canonicalize().ok())
+            .zip(config.file_name())
+            .map(|(parent, name)| parent.join(name).to_string_lossy().into_owned());
+        assert!(!text.contains(config_text), "{text}");
+        if let Some(form) = config_canonical {
+            assert!(!text.contains(&form), "{text}");
+        }
+    }
+    let output = fx.nsd(&["check", "--base", "no-such-ref", "--format", "json"]);
+    let text = stdout(&output);
+    assert_eq!(
+        document(&output)["diagnostics"][0]["code"],
+        json!("NSD-G101")
+    );
+    assert!(!text.contains(&raw) && !text.contains(&canonical), "{text}");
 }
