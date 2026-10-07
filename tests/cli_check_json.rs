@@ -1277,3 +1277,35 @@ fn test_check_summary_clone_lines_follow_the_changed_scope() {
         "{verbosity}"
     );
 }
+
+#[test]
+fn test_check_summary_counts_staged_clone_lines_like_scan() {
+    let scan = scan_overall_verbosity();
+    assert_dup_counts(&scan, DUP_FLAGGED_LINES);
+
+    let both = fixture();
+    both.commit(&[("Base.java", b"class Base {\n}\n".as_slice())]);
+    both.stage(DUP_A_PATH, DUP_A.as_bytes());
+    both.stage(DUP_B_PATH, DUP_B.as_bytes());
+    let both = both.staged_json();
+    assert_eq!(both["summaries"]["scope"], json!("full"));
+    assert_eq!(
+        overall_verbosity(&both)["flagged_lines"],
+        scan["flagged_lines"],
+        "{both}"
+    );
+
+    let one = fixture();
+    one.commit(&[
+        ("Base.java", b"class Base {\n}\n".as_slice()),
+        (DUP_B_PATH, DUP_B.as_bytes()),
+    ]);
+    one.stage(DUP_A_PATH, DUP_A.as_bytes());
+    let one = one.staged_json();
+    assert_eq!(one["summaries"]["scope"], json!("full"));
+    assert_eq!(
+        overall_verbosity(&one)["flagged_lines"],
+        scan["flagged_lines"],
+        "{one}"
+    );
+}
