@@ -695,6 +695,45 @@ fn archive_checkout_is_clean(target: &Path) -> bool {
     statuses.is_empty()
 }
 
+/// A recipe target that is a subdirectory of a clean checkout passes the
+/// cleanliness check, a dirty checkout still fails it, and a target outside
+/// any repository is refused loudly (ledger row 124).
+#[test]
+fn test_archive_cleanliness_accepts_a_subdirectory_target() -> Result<()> {
+    let repo_dir = tempfile::tempdir().context("creating the repository tempdir")?;
+    let repo = git2::Repository::init(repo_dir.path()).context("initialising the repository")?;
+    let target = repo_dir.path().join("module");
+    fs::create_dir(&target).context("creating the target subdirectory")?;
+    fs::write(target.join("A.java"), "class A {}\n").context("writing a tracked file")?;
+    let mut index = repo.index().context("opening the index")?;
+    index
+        .add_all(["*"], git2::IndexAddOption::DEFAULT, None)
+        .context("staging the file")?;
+    index.write().context("writing the index")?;
+    let tree = repo.find_tree(index.write_tree()?)?;
+    let signature = git2::Signature::now("nsd test", "nsd@example.invalid")?;
+    repo.commit(Some("HEAD"), &signature, &signature, "init", &tree, &[])?;
+
+    assert!(
+        archive_checkout_is_clean(&target),
+        "a subdirectory of a clean checkout must pass the cleanliness check"
+    );
+
+    fs::write(target.join("B.java"), "class B {}\n").context("writing an untracked file")?;
+    assert!(
+        !archive_checkout_is_clean(&target),
+        "an untracked file must make the checkout dirty"
+    );
+
+    let outside = tempfile::tempdir().context("creating the non-repository tempdir")?;
+    let refused = std::panic::catch_unwind(|| archive_checkout_is_clean(outside.path()));
+    assert!(
+        refused.is_err(),
+        "a target outside any repository must be refused"
+    );
+    Ok(())
+}
+
 /// D15: re-scans the archive's own recorded target with its own recorded
 /// settings -- exactly as the retired strict leg did -- and asserts the
 /// live `nsd-v1` digest equals the committed `tests/golden/java-fixture-01.
