@@ -209,11 +209,14 @@ neither the numerator nor the denominator.
   directory is the exception, because discovery cannot tell what it would
   have held. It is reported as `unreadable`, and so makes `complete` false,
   when it is gitignored or when an exclusion glob matches only its contents
-  (for example `--exclude 'locked/**'`). A directory that an exclusion glob
-  matches itself (for example `--exclude 'locked'`, or a dependency/build,
-  generated or test directory such as `node_modules/`) is pruned before
-  discovery reads it, produces no `skipped_files` row and leaves `complete`
-  unchanged.
+  (for example `--exclude 'locked/**'`). The generated and test globs match
+  only contents, so an unreadable generated or test directory itself (for
+  example `test/`, `generated/`) is also reported `unreadable`. A directory
+  that an exclusion glob matches itself (for example `--exclude 'locked'`, or
+  a dependency/build directory such as `node_modules/`, or any directory
+  below a generated or test directory such as `test/locked/`) is pruned
+  before discovery reads it, produces no `skipped_files` row and leaves
+  `complete` unchanged.
 - An empty family has `scanned_lines` 0 and `ratio` `0.0`.
 
 ### Top-25 span
