@@ -127,9 +127,14 @@ repository-configured filter driver would execute. For a remote
   absolute path, and the report names no absolute path. For a remote target
   it is the URL. The terminal summary and the HTML still show the target as
   typed.
-- `snapshots.scan` is the worktree snapshot ID (`blake3:<32 hex>`, the same
-  ID `check` reports for a candidate) when the target is a git work-tree
-  root, else `null` with `snapshots.unavailable_reason`: the
+- `snapshots.scan` is the worktree snapshot ID (`blake3:<32 hex>`) over the
+  tracked entries plus the untracked entries git does not ignore
+  (`.gitignore` files, `.git/info/exclude`, `core.excludesFile`; an ignored
+  directory is never read, and a tracked file stays counted even when an
+  ignore pattern matches it) when the target is a git work-tree root. It
+  equals the ID `check` reports for a worktree candidate only when the
+  checkout holds no ignored untracked entry; otherwise they differ. For any
+  other target it is `null` with `snapshots.unavailable_reason`: the
   `scan.revision` reason when there is one (`not_a_git_repository` for a plain
   directory; a remote target's clone root is a work-tree root, so it carries
   its worktree snapshot ID), `target_not_git_root` (a subtree of a checkout: a worktree ID
