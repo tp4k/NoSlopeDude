@@ -19,7 +19,8 @@ use rayon::prelude::*;
 use crate::ir::{DecisionKind, IrCallable, IrNode, Span};
 use crate::lower;
 use crate::model::{
-    Callable, FileScanSummary, LanguageFamily, MetricsResult, SyntaxBlock, CC_EROSION_THRESHOLD,
+    Callable, FileScanSummary, LanguageFamily, LineRange, MetricsResult, SyntaxBlock,
+    CC_EROSION_THRESHOLD,
 };
 use crate::parse::ParsedFile;
 
@@ -175,10 +176,26 @@ fn scan_file(
         relative_path: file.relative_path.clone(),
         scanned_lines,
         unanalyzed_lines,
-        gaps: Vec::new(),
-        unmeasured_callables: 0,
+        gaps: mapped_gaps(ir_file),
+        unmeasured_callables: ir_file.excluded_callables.len(),
     };
     (callables, syntax_blocks, summary)
+}
+
+/// The file's mapped parser gaps: each damage span's line range, ascending
+/// and without repeats.
+fn mapped_gaps(ir_file: &lower::IrFile) -> Vec<LineRange> {
+    let mut gaps: Vec<LineRange> = ir_file
+        .damage
+        .iter()
+        .map(|damage| LineRange {
+            start_line: damage.span.start_line as usize,
+            end_line: damage.span.end_line as usize,
+        })
+        .collect();
+    gaps.sort_unstable();
+    gaps.dedup();
+    gaps
 }
 
 /// One `Callable` per `IrFile::callables` entry, index-aligned with it.

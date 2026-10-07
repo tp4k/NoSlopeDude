@@ -21,8 +21,9 @@ use serde::Serialize;
 use crate::discover::DiscoverResult;
 use crate::metrics;
 use crate::model::{
-    Callable, CloneGroup, ClonesResult, LanguageFamily, MetricsResult, ParseFailure,
-    ParseFailureReason, RuleFinding, RuleId, RulesResult, ScanSettings, Target, VerbosityScore,
+    Callable, CloneGroup, ClonesResult, FileScanSummary, LanguageFamily, MetricsResult,
+    ParseFailure, ParseFailureReason, RuleFinding, RuleId, RulesResult, ScanSettings, Target,
+    VerbosityScore,
 };
 
 pub use html::render_html;
@@ -61,13 +62,17 @@ pub struct ReportVerbosity {
     pub ratio: f64,
 }
 
-impl From<&VerbosityScore> for ReportVerbosity {
-    fn from(score: &VerbosityScore) -> Self {
+impl ReportVerbosity {
+    /// `score` plus completeness: every executable line analyzed
+    /// (`unanalyzed_lines == 0`) and no file of the scope lost to a parse
+    /// failure (`parse_failed`). A total parse loss has no line count, so
+    /// the count alone cannot tell.
+    fn new(score: &VerbosityScore, parse_failed: bool) -> Self {
         ReportVerbosity {
             flagged_lines: score.flagged_lines,
             scanned_lines: score.scanned_lines,
             unanalyzed_lines: score.unanalyzed_lines,
-            complete: true,
+            complete: score.unanalyzed_lines == 0 && !parse_failed,
             ratio: score.ratio,
         }
     }
@@ -313,18 +318,38 @@ fn build_scores(input: &ReportInput) -> ReportScores {
         .cloned()
         .collect();
 
+    let parse_failed = |family: LanguageFamily| {
+        input.parse_failures.iter().any(|failure| {
+            failure
+                .relative_path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .and_then(LanguageFamily::from_extension)
+                == Some(family)
+        })
+    };
+
     ReportScores {
         overall: ReportFamilyScores {
             erosion: normalize_zero(input.metrics.erosion),
-            verbosity: (&input.rules.verbosity.overall).into(),
+            verbosity: ReportVerbosity::new(
+                &input.rules.verbosity.overall,
+                !input.parse_failures.is_empty(),
+            ),
         },
         java: ReportFamilyScores {
             erosion: normalize_zero(metrics::erosion(&java_callables)),
-            verbosity: (&input.rules.verbosity.java).into(),
+            verbosity: ReportVerbosity::new(
+                &input.rules.verbosity.java,
+                parse_failed(LanguageFamily::Java),
+            ),
         },
         js_ts: ReportFamilyScores {
             erosion: normalize_zero(metrics::erosion(&js_ts_callables)),
-            verbosity: (&input.rules.verbosity.js_ts).into(),
+            verbosity: ReportVerbosity::new(
+                &input.rules.verbosity.js_ts,
+                parse_failed(LanguageFamily::JsTs),
+            ),
         },
     }
 }
@@ -419,18 +444,32 @@ fn build_skipped_files(input: &ReportInput) -> Vec<ReportSkippedFile> {
             unmeasured_callables: None,
         })
         .collect();
-    skipped.extend(
-        input
-            .parse_failures
-            .iter()
-            .map(|failure| ReportSkippedFile {
-                relative_path: failure.relative_path.clone(),
-                reason: format!("parse_{}", failure.reason.label()),
-                detail: skipped_detail(failure),
-                gaps: None,
-                unmeasured_callables: None,
+    let summaries: HashMap<&Path, &FileScanSummary> = input
+        .metrics
+        .file_scan_summaries
+        .iter()
+        .map(|summary| (summary.relative_path.as_path(), summary))
+        .collect();
+    skipped.extend(input.parse_failures.iter().map(|failure| {
+        // Only a salvaged file has a summary to name its gaps from.
+        let summary = summaries.get(failure.relative_path.as_path());
+        ReportSkippedFile {
+            relative_path: failure.relative_path.clone(),
+            reason: format!("parse_{}", failure.reason.label()),
+            detail: skipped_detail(failure),
+            gaps: summary.map(|summary| {
+                summary
+                    .gaps
+                    .iter()
+                    .map(|gap| ReportGap {
+                        start_line: gap.start_line,
+                        end_line: gap.end_line,
+                    })
+                    .collect()
             }),
-    );
+            unmeasured_callables: summary.map(|summary| summary.unmeasured_callables),
+        }
+    }));
     skipped.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
     skipped
 }

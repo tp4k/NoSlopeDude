@@ -14,7 +14,7 @@
 mod java;
 mod jsts;
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -253,7 +253,12 @@ pub fn lower_file_inventoried(file: &ParsedFile) -> (IrFile, usize) {
             .and_then(|old_index| owner_remap[old_index as usize]);
     }
 
+    let lines_before_pruning = (!redact_targets.is_empty()).then(|| executable_line_set(&root));
     let root = prune_damage(root, &redact_targets);
+    let unanalyzed_lines = lines_before_pruning.map_or(0, |before| {
+        let surviving = executable_line_set(&root);
+        before.difference(&surviving).count()
+    });
 
     let ir_file = IrFile {
         relative_path: file.relative_path.clone(),
@@ -266,7 +271,22 @@ pub fn lower_file_inventoried(file: &ParsedFile) -> (IrFile, usize) {
         excluded_callables,
         excluded_blocks,
     };
-    (ir_file, 0)
+    (ir_file, unanalyzed_lines)
+}
+
+/// Every distinct 1-based line carrying an executable node anywhere in
+/// `root`'s tree, by an explicit work-list so tree depth cannot overflow
+/// the stack (D18).
+fn executable_line_set(root: &IrNode) -> BTreeSet<u32> {
+    let mut lines = BTreeSet::new();
+    let mut pending = vec![root];
+    while let Some(node) = pending.pop() {
+        if node.executable {
+            lines.extend(node.span.start_line..=node.span.end_line);
+        }
+        pending.extend(node.children.iter());
+    }
+    lines
 }
 
 /// One (callable, block, owner) entity table's final inclusion decision,
