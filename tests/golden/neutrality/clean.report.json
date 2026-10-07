@@ -1,1092 +1,2439 @@
 {
-  "scan": {
-    "target": "<neutrality-corpus>",
-    "revision": {
-      "sha": null,
-      "dirty": null,
-      "unavailable_reason": "not_a_git_repository"
-    },
-    "include_tests": true,
-    "exclude": [],
-    "min_clone_lines": 10
+  "adaptation": {
+    "cc_rules_doc": "docs/cc-rules.md",
+    "summary": "CC, SLOC, mass, erosion and verbosity are computed from this scanner's own Java/JS-TS AST rules, adapted from scb-check's Python-only formulas. No numerical equivalence to scb-check's own scores is claimed.",
+    "wasteful_rules_doc": "docs/wasteful-rules.md"
   },
-  "scores": {
-    "overall": {
-      "erosion": 0.3033434146761384,
-      "verbosity": {
-        "flagged_lines": 227,
-        "scanned_lines": 1032,
-        "unanalyzed_lines": 5,
-        "complete": false,
-        "ratio": 0.21996124031007752
-      }
-    },
-    "java": {
-      "erosion": 0.36341828999901393,
-      "verbosity": {
-        "flagged_lines": 154,
-        "scanned_lines": 650,
-        "unanalyzed_lines": 2,
-        "complete": false,
-        "ratio": 0.23692307692307693
-      }
-    },
-    "js_ts": {
-      "erosion": 0.21627892399648804,
-      "verbosity": {
-        "flagged_lines": 73,
-        "scanned_lines": 382,
-        "unanalyzed_lines": 3,
-        "complete": false,
-        "ratio": 0.19109947643979058
-      }
-    }
-  },
-  "findings": [
+  "callables": [
     {
-      "rule_id": "JSTS-UNREACHABLE-AFTER-RETURN",
-      "language": "js_ts",
-      "location": {
-        "relative_path": "report/src/\"><img onerror=1>.js",
-        "start_line": 3,
-        "end_line": 4,
-        "excerpt": "  console.log(\"<script>alert(1)</script>\");\n  console.log(\"\\\"><img onerror=1>\");",
-        "link": "report/src/\"><img onerror=1>.js#L3-L4",
-        "is_remote_link": false
-      },
-      "flagged_lines": [
-        3,
-        4
-      ]
+      "cc": 1,
+      "end_line": 13,
+      "mass": 3.0,
+      "name": "run",
+      "path": "clones/__tests__/CommentInStatementA.java",
+      "sloc": 9,
+      "start_line": 2
     },
     {
-      "rule_id": "JAVA-REDUNDANT-ELSE-AFTER-RETURN",
-      "language": "java",
-      "location": {
-        "relative_path": "report/src/Sample.java",
-        "start_line": 5,
-        "end_line": 7,
-        "excerpt": "        } else {\n            return -1;\n        }",
-        "link": "report/src/Sample.java#L5-L7",
-        "is_remote_link": false
-      },
-      "flagged_lines": [
-        6
-      ]
+      "cc": 1,
+      "end_line": 13,
+      "mass": 3.0,
+      "name": "run",
+      "path": "clones/__tests__/CommentInStatementB.java",
+      "sloc": 9,
+      "start_line": 2
     },
     {
-      "rule_id": "JAVA-EMPTY-CATCH",
-      "language": "java",
-      "location": {
-        "relative_path": "report/src/Sample.java",
-        "start_line": 13,
-        "end_line": 14,
-        "excerpt": "        } catch (Exception e) {\n        }",
-        "link": "report/src/Sample.java#L13-L14",
-        "is_remote_link": false
-      },
-      "flagged_lines": [
-        13
-      ]
+      "cc": 1,
+      "end_line": 15,
+      "mass": 3.4641016151377544,
+      "name": "ConstructorBodyA",
+      "path": "clones/__tests__/ConstructorBodyA.java",
+      "sloc": 12,
+      "start_line": 2
     },
     {
-      "rule_id": "JAVA-UNREACHABLE-AFTER-RETURN",
-      "language": "java",
-      "location": {
-        "relative_path": "rules/__tests__/JavaRulesFixture.java",
-        "start_line": 8,
-        "end_line": 9,
-        "excerpt": "        System.out.println(\"b\");\n        System.out.println(\"c\");",
-        "link": "rules/__tests__/JavaRulesFixture.java#L8-L9",
-        "is_remote_link": false
-      },
-      "flagged_lines": [
-        8,
-        9
-      ]
+      "cc": 1,
+      "end_line": 15,
+      "mass": 3.4641016151377544,
+      "name": "ConstructorBodyB",
+      "path": "clones/__tests__/ConstructorBodyB.java",
+      "sloc": 12,
+      "start_line": 2
     },
     {
-      "rule_id": "JAVA-EMPTY-CATCH",
-      "language": "java",
-      "location": {
-        "relative_path": "rules/__tests__/JavaRulesFixture.java",
-        "start_line": 15,
-        "end_line": 16,
-        "excerpt": "        } catch (Exception e) {\n        }",
-        "link": "rules/__tests__/JavaRulesFixture.java#L15-L16",
-        "is_remote_link": false
-      },
-      "flagged_lines": [
-        15
-      ]
+      "cc": 1,
+      "end_line": 15,
+      "mass": 3.4641016151377544,
+      "name": "run",
+      "path": "clones/__tests__/CrossLangJava.java",
+      "sloc": 12,
+      "start_line": 2
     },
     {
-      "rule_id": "JAVA-REDUNDANT-ELSE-AFTER-RETURN",
-      "language": "java",
-      "location": {
-        "relative_path": "rules/__tests__/JavaRulesFixture.java",
-        "start_line": 22,
-        "end_line": 24,
-        "excerpt": "        } else {\n            return 0;\n        }",
-        "link": "rules/__tests__/JavaRulesFixture.java#L22-L24",
-        "is_remote_link": false
-      },
-      "flagged_lines": [
-        23
-      ]
+      "cc": 1,
+      "end_line": 14,
+      "mass": 3.4641016151377544,
+      "name": "run",
+      "path": "clones/__tests__/CrossLangJs.js",
+      "sloc": 12,
+      "start_line": 1
     },
     {
-      "rule_id": "JSTS-UNREACHABLE-AFTER-RETURN",
-      "language": "js_ts",
-      "location": {
-        "relative_path": "rules/__tests__/JsRulesFixture.js",
-        "start_line": 4,
-        "end_line": 5,
-        "excerpt": "    console.log(\"b\");\n    console.log(\"c\");",
-        "link": "rules/__tests__/JsRulesFixture.js#L4-L5",
-        "is_remote_link": false
-      },
-      "flagged_lines": [
-        4,
-        5
-      ]
+      "cc": 1,
+      "end_line": 15,
+      "mass": 3.4641016151377544,
+      "name": "run",
+      "path": "clones/__tests__/DupIdenticalA.java",
+      "sloc": 12,
+      "start_line": 2
     },
     {
-      "rule_id": "JSTS-EMPTY-CATCH",
-      "language": "js_ts",
-      "location": {
-        "relative_path": "rules/__tests__/JsRulesFixture.js",
-        "start_line": 11,
-        "end_line": 12,
-        "excerpt": "    } catch (e) {\n    }",
-        "link": "rules/__tests__/JsRulesFixture.js#L11-L12",
-        "is_remote_link": false
-      },
-      "flagged_lines": [
-        11
-      ]
+      "cc": 1,
+      "end_line": 20,
+      "mass": 3.4641016151377544,
+      "name": "run",
+      "path": "clones/__tests__/DupIdenticalB.java",
+      "sloc": 12,
+      "start_line": 2
     },
     {
-      "rule_id": "JSTS-REDUNDANT-ELSE-AFTER-RETURN",
-      "language": "js_ts",
-      "location": {
-        "relative_path": "rules/__tests__/JsRulesFixture.js",
-        "start_line": 18,
-        "end_line": 20,
-        "excerpt": "    } else {\n        return 0;\n    }",
-        "link": "rules/__tests__/JsRulesFixture.js#L18-L20",
-        "is_remote_link": false
-      },
-      "flagged_lines": [
-        19
-      ]
+      "cc": 1,
+      "end_line": 5,
+      "mass": 1.4142135623730951,
+      "name": "run",
+      "path": "clones/__tests__/FamilyPrefixJavaA.java",
+      "sloc": 2,
+      "start_line": 2
     },
     {
-      "rule_id": "JSTS-UNREACHABLE-AFTER-RETURN",
-      "language": "js_ts",
-      "location": {
-        "relative_path": "rules/__tests__/JsRulesFixture.js",
-        "start_line": 28,
-        "end_line": 29,
-        "excerpt": "    console.log(\"dead1\");\n    console.log(\"dead2\");",
-        "link": "rules/__tests__/JsRulesFixture.js#L28-L29",
-        "is_remote_link": false
-      },
-      "flagged_lines": [
-        28,
-        29
-      ]
+      "cc": 1,
+      "end_line": 5,
+      "mass": 1.4142135623730951,
+      "name": "run",
+      "path": "clones/__tests__/FamilyPrefixJavaB.java",
+      "sloc": 2,
+      "start_line": 2
     },
     {
-      "rule_id": "JAVA-UNREACHABLE-AFTER-RETURN",
-      "language": "java",
-      "location": {
-        "relative_path": "rules/src/RulesTrigger.java",
-        "start_line": 8,
-        "end_line": 9,
-        "excerpt": "        System.out.println(\"b\");\n        System.out.println(\"c\");",
-        "link": "rules/src/RulesTrigger.java#L8-L9",
-        "is_remote_link": false
-      },
-      "flagged_lines": [
-        8,
-        9
-      ]
+      "cc": 1,
+      "end_line": 4,
+      "mass": 1.4142135623730951,
+      "name": "run",
+      "path": "clones/__tests__/FamilyPrefixJsA.js",
+      "sloc": 2,
+      "start_line": 1
     },
     {
-      "rule_id": "JAVA-EMPTY-CATCH",
-      "language": "java",
-      "location": {
-        "relative_path": "rules/src/RulesTrigger.java",
-        "start_line": 15,
-        "end_line": 16,
-        "excerpt": "        } catch (Exception e) {\n        }",
-        "link": "rules/src/RulesTrigger.java#L15-L16",
-        "is_remote_link": false
-      },
-      "flagged_lines": [
-        15
-      ]
+      "cc": 1,
+      "end_line": 4,
+      "mass": 1.4142135623730951,
+      "name": "run",
+      "path": "clones/__tests__/FamilyPrefixJsB.js",
+      "sloc": 2,
+      "start_line": 1
     },
     {
-      "rule_id": "JAVA-REDUNDANT-ELSE-AFTER-RETURN",
-      "language": "java",
-      "location": {
-        "relative_path": "rules/src/RulesTrigger.java",
-        "start_line": 22,
-        "end_line": 24,
-        "excerpt": "        } else {\n            return 0;\n        }",
-        "link": "rules/src/RulesTrigger.java#L22-L24",
-        "is_remote_link": false
-      },
-      "flagged_lines": [
-        23
-      ]
+      "cc": 1,
+      "end_line": 15,
+      "mass": 3.4641016151377544,
+      "name": "run",
+      "path": "clones/__tests__/IdentifierA.java",
+      "sloc": 12,
+      "start_line": 2
     },
     {
-      "rule_id": "JSTS-UNREACHABLE-AFTER-RETURN",
-      "language": "js_ts",
-      "location": {
-        "relative_path": "rules/src/rulesTrigger.js",
-        "start_line": 4,
-        "end_line": 5,
-        "excerpt": "    console.log(\"b\");\n    console.log(\"c\");",
-        "link": "rules/src/rulesTrigger.js#L4-L5",
-        "is_remote_link": false
-      },
-      "flagged_lines": [
-        4,
-        5
-      ]
+      "cc": 1,
+      "end_line": 15,
+      "mass": 3.4641016151377544,
+      "name": "run",
+      "path": "clones/__tests__/IdentifierB.java",
+      "sloc": 12,
+      "start_line": 2
     },
     {
-      "rule_id": "JSTS-EMPTY-CATCH",
-      "language": "js_ts",
-      "location": {
-        "relative_path": "rules/src/rulesTrigger.js",
-        "start_line": 11,
-        "end_line": 12,
-        "excerpt": "    } catch (e) {\n    }",
-        "link": "rules/src/rulesTrigger.js#L11-L12",
-        "is_remote_link": false
-      },
-      "flagged_lines": [
-        11
-      ]
+      "cc": 1,
+      "end_line": 15,
+      "mass": 3.4641016151377544,
+      "name": "run",
+      "path": "clones/__tests__/LiteralA.java",
+      "sloc": 12,
+      "start_line": 2
     },
     {
-      "rule_id": "JSTS-REDUNDANT-ELSE-AFTER-RETURN",
-      "language": "js_ts",
-      "location": {
-        "relative_path": "rules/src/rulesTrigger.js",
-        "start_line": 18,
-        "end_line": 20,
-        "excerpt": "    } else {\n        return 0;\n    }",
-        "link": "rules/src/rulesTrigger.js#L18-L20",
-        "is_remote_link": false
-      },
-      "flagged_lines": [
-        19
-      ]
+      "cc": 1,
+      "end_line": 15,
+      "mass": 3.4641016151377544,
+      "name": "run",
+      "path": "clones/__tests__/LiteralB.java",
+      "sloc": 12,
+      "start_line": 2
+    },
+    {
+      "cc": 1,
+      "end_line": 17,
+      "mass": 3.7416573867739413,
+      "name": "methodA",
+      "path": "clones/__tests__/PartialRun.java",
+      "sloc": 14,
+      "start_line": 2
+    },
+    {
+      "cc": 1,
+      "end_line": 34,
+      "mass": 3.7416573867739413,
+      "name": "methodB",
+      "path": "clones/__tests__/PartialRun.java",
+      "sloc": 14,
+      "start_line": 19
+    },
+    {
+      "cc": 1,
+      "end_line": 13,
+      "mass": 3.1622776601683795,
+      "name": "run",
+      "path": "clones/__tests__/RankGX1.java",
+      "sloc": 10,
+      "start_line": 2
+    },
+    {
+      "cc": 1,
+      "end_line": 13,
+      "mass": 3.1622776601683795,
+      "name": "run",
+      "path": "clones/__tests__/RankGX2.java",
+      "sloc": 10,
+      "start_line": 2
+    },
+    {
+      "cc": 1,
+      "end_line": 13,
+      "mass": 3.1622776601683795,
+      "name": "run",
+      "path": "clones/__tests__/RankGX3.java",
+      "sloc": 10,
+      "start_line": 2
+    },
+    {
+      "cc": 1,
+      "end_line": 18,
+      "mass": 3.872983346207417,
+      "name": "run",
+      "path": "clones/__tests__/RankGY1.java",
+      "sloc": 15,
+      "start_line": 2
+    },
+    {
+      "cc": 1,
+      "end_line": 18,
+      "mass": 3.872983346207417,
+      "name": "run",
+      "path": "clones/__tests__/RankGY2.java",
+      "sloc": 15,
+      "start_line": 2
+    },
+    {
+      "cc": 1,
+      "end_line": 13,
+      "mass": 3.1622776601683795,
+      "name": "run",
+      "path": "clones/__tests__/SingleStatementDupA.java",
+      "sloc": 10,
+      "start_line": 2
+    },
+    {
+      "cc": 1,
+      "end_line": 13,
+      "mass": 3.1622776601683795,
+      "name": "run",
+      "path": "clones/__tests__/SingleStatementDupB.java",
+      "sloc": 10,
+      "start_line": 2
+    },
+    {
+      "cc": 1,
+      "end_line": 18,
+      "mass": 3.872983346207417,
+      "name": "run",
+      "path": "clones/__tests__/SubsumedA.java",
+      "sloc": 15,
+      "start_line": 2
+    },
+    {
+      "cc": 1,
+      "end_line": 18,
+      "mass": 3.872983346207417,
+      "name": "run",
+      "path": "clones/__tests__/SubsumedB.java",
+      "sloc": 15,
+      "start_line": 2
+    },
+    {
+      "cc": 3,
+      "end_line": 29,
+      "mass": 14.696938456699067,
+      "name": "run",
+      "path": "clones/__tests__/SwitchDupJava.java",
+      "sloc": 24,
+      "start_line": 2
+    },
+    {
+      "cc": 3,
+      "end_line": 37,
+      "mass": 17.233687939614086,
+      "name": "run",
+      "path": "clones/__tests__/SwitchDupJs.js",
+      "sloc": 33,
+      "start_line": 1
+    },
+    {
+      "cc": 1,
+      "end_line": 17,
+      "mass": 3.4641016151377544,
+      "name": "run",
+      "path": "clones/src/main/java/DupA.java",
+      "sloc": 12,
+      "start_line": 4
+    },
+    {
+      "cc": 1,
+      "end_line": 18,
+      "mass": 3.4641016151377544,
+      "name": "run",
+      "path": "clones/src/main/java/DupB.java",
+      "sloc": 12,
+      "start_line": 5
+    },
+    {
+      "cc": 1,
+      "end_line": 12,
+      "mass": 3.1622776601683795,
+      "name": "run",
+      "path": "clones/src/widgetA.js",
+      "sloc": 10,
+      "start_line": 1
+    },
+    {
+      "cc": 1,
+      "end_line": 12,
+      "mass": 3.1622776601683795,
+      "name": "run",
+      "path": "clones/src/widgetB.js",
+      "sloc": 10,
+      "start_line": 1
+    },
+    {
+      "cc": 1,
+      "end_line": 3,
+      "mass": 1.0,
+      "name": "View",
+      "path": "discover/sample/src/View.tsx",
+      "sloc": 1,
+      "start_line": 1
+    },
+    {
+      "cc": 1,
+      "end_line": 5,
+      "mass": 1.0,
+      "name": "<anonymous>@3",
+      "path": "discover/sample/src/__tests__/helper.spec.ts",
+      "sloc": 1,
+      "start_line": 3
+    },
+    {
+      "cc": 1,
+      "end_line": 3,
+      "mass": 1.0,
+      "name": "greet",
+      "path": "discover/sample/src/api/svc.ts",
+      "sloc": 1,
+      "start_line": 1
+    },
+    {
+      "cc": 1,
+      "end_line": 3,
+      "mass": 1.0,
+      "name": "triple",
+      "path": "discover/sample/src/legacy.cjs",
+      "sloc": 1,
+      "start_line": 1
+    },
+    {
+      "cc": 1,
+      "end_line": 6,
+      "mass": 1.0,
+      "name": "main",
+      "path": "discover/sample/src/main/java/App.java",
+      "sloc": 1,
+      "start_line": 4
+    },
+    {
+      "cc": 1,
+      "end_line": 3,
+      "mass": 1.0,
+      "name": "double",
+      "path": "discover/sample/src/mod.mjs",
+      "sloc": 1,
+      "start_line": 1
+    },
+    {
+      "cc": 1,
+      "end_line": 8,
+      "mass": 0.0,
+      "name": "testMain",
+      "path": "discover/sample/src/test/java/AppTest.java",
+      "sloc": 0,
+      "start_line": 6
+    },
+    {
+      "cc": 1,
+      "end_line": 3,
+      "mass": 1.0,
+      "name": "add",
+      "path": "discover/sample/src/util.js",
+      "sloc": 1,
+      "start_line": 1
+    },
+    {
+      "cc": 1,
+      "end_line": 5,
+      "mass": 1.0,
+      "name": "<anonymous>@3",
+      "path": "discover/sample/src/util.test.js",
+      "sloc": 1,
+      "start_line": 3
+    },
+    {
+      "cc": 1,
+      "end_line": 3,
+      "mass": 1.0,
+      "name": "Widget",
+      "path": "discover/sample/src/widget.jsx",
+      "sloc": 1,
+      "start_line": 1
+    },
+    {
+      "cc": 10,
+      "end_line": 19,
+      "mass": 33.166247903553995,
+      "name": "classify",
+      "path": "erosion_boundary/Boundary.java",
+      "sloc": 11,
+      "start_line": 7
+    },
+    {
+      "cc": 1,
+      "end_line": 5,
+      "mass": 1.4142135623730951,
+      "name": "ContainerSet",
+      "path": "ir/ContainerSet.java",
+      "sloc": 2,
+      "start_line": 2
+    },
+    {
+      "cc": 2,
+      "end_line": 13,
+      "mass": 4.0,
+      "name": "m",
+      "path": "ir/ContainerSet.java",
+      "sloc": 4,
+      "start_line": 7
+    },
+    {
+      "cc": 9,
+      "end_line": 28,
+      "mass": 38.18376618407356,
+      "name": "m",
+      "path": "ir/Decisions.java",
+      "sloc": 18,
+      "start_line": 2
+    },
+    {
+      "cc": 1,
+      "end_line": 5,
+      "mass": 1.4142135623730951,
+      "name": "m",
+      "path": "ir/DifferA.java",
+      "sloc": 2,
+      "start_line": 2
+    },
+    {
+      "cc": 1,
+      "end_line": 5,
+      "mass": 1.4142135623730951,
+      "name": "m",
+      "path": "ir/DifferB.java",
+      "sloc": 2,
+      "start_line": 2
+    },
+    {
+      "cc": 1,
+      "end_line": 2,
+      "mass": 0.0,
+      "name": "m",
+      "path": "ir/JavaVarargsAnnotation.java",
+      "sloc": 0,
+      "start_line": 2
+    },
+    {
+      "cc": 2,
+      "end_line": 10,
+      "mass": 4.47213595499958,
+      "name": "m",
+      "path": "ir/StructuralPredicates.java",
+      "sloc": 5,
+      "start_line": 2
+    },
+    {
+      "cc": 2,
+      "end_line": 10,
+      "mass": 4.0,
+      "name": "m",
+      "path": "ir/container_set.ts",
+      "sloc": 4,
+      "start_line": 4
+    },
+    {
+      "cc": 9,
+      "end_line": 27,
+      "mass": 38.18376618407356,
+      "name": "m",
+      "path": "ir/decisions.ts",
+      "sloc": 18,
+      "start_line": 1
+    },
+    {
+      "cc": 2,
+      "end_line": 9,
+      "mass": 4.47213595499958,
+      "name": "m",
+      "path": "ir/structural_predicates.ts",
+      "sloc": 5,
+      "start_line": 1
+    },
+    {
+      "cc": 4,
+      "end_line": 11,
+      "mass": 9.797958971132712,
+      "name": "loopy",
+      "path": "metrics/__tests__/BareControlFlow.js",
+      "sloc": 6,
+      "start_line": 1
+    },
+    {
+      "cc": 2,
+      "end_line": 14,
+      "mass": 2.8284271247461903,
+      "name": "Point",
+      "path": "metrics/__tests__/CallableKinds.java",
+      "sloc": 2,
+      "start_line": 10
+    },
+    {
+      "cc": 1,
+      "end_line": 20,
+      "mass": 1.0,
+      "name": "<anonymous>@18",
+      "path": "metrics/__tests__/CallableKinds.java",
+      "sloc": 1,
+      "start_line": 18
+    },
+    {
+      "cc": 1,
+      "end_line": 24,
+      "mass": 1.0,
+      "name": "CallableKinds",
+      "path": "metrics/__tests__/CallableKinds.java",
+      "sloc": 1,
+      "start_line": 22
+    },
+    {
+      "cc": 1,
+      "end_line": 31,
+      "mass": 1.4142135623730951,
+      "name": "compute",
+      "path": "metrics/__tests__/CallableKinds.java",
+      "sloc": 2,
+      "start_line": 26
+    },
+    {
+      "cc": 1,
+      "end_line": 29,
+      "mass": 1.0,
+      "name": "r",
+      "path": "metrics/__tests__/CallableKinds.java",
+      "sloc": 1,
+      "start_line": 27
+    },
+    {
+      "cc": 1,
+      "end_line": 3,
+      "mass": 1.0,
+      "name": "regular",
+      "path": "metrics/__tests__/CallableKinds.ts",
+      "sloc": 1,
+      "start_line": 1
+    },
+    {
+      "cc": 1,
+      "end_line": 7,
+      "mass": 1.0,
+      "name": "genFn",
+      "path": "metrics/__tests__/CallableKinds.ts",
+      "sloc": 1,
+      "start_line": 5
+    },
+    {
+      "cc": 1,
+      "end_line": 13,
+      "mass": 1.0,
+      "name": "fnExpr",
+      "path": "metrics/__tests__/CallableKinds.ts",
+      "sloc": 1,
+      "start_line": 11
+    },
+    {
+      "cc": 1,
+      "end_line": 15,
+      "mass": 1.0,
+      "name": "arrow",
+      "path": "metrics/__tests__/CallableKinds.ts",
+      "sloc": 1,
+      "start_line": 15
+    },
+    {
+      "cc": 1,
+      "end_line": 20,
+      "mass": 1.0,
+      "name": "method",
+      "path": "metrics/__tests__/CallableKinds.ts",
+      "sloc": 1,
+      "start_line": 18
+    },
+    {
+      "cc": 15,
+      "end_line": 44,
+      "mass": 82.15838362577492,
+      "name": "decide",
+      "path": "metrics/__tests__/Decisions.java",
+      "sloc": 30,
+      "start_line": 2
+    },
+    {
+      "cc": 3,
+      "end_line": 9,
+      "mass": 7.348469228349534,
+      "name": "forOfOptional",
+      "path": "metrics/__tests__/ForOfOptional.js",
+      "sloc": 6,
+      "start_line": 1
+    },
+    {
+      "cc": 13,
+      "end_line": 39,
+      "mass": 66.2872536767062,
+      "name": "decide",
+      "path": "metrics/__tests__/JsDecisions.js",
+      "sloc": 26,
+      "start_line": 1
+    },
+    {
+      "cc": 1,
+      "end_line": 3,
+      "mass": 1.0,
+      "name": "named",
+      "path": "metrics/__tests__/NameResolution.js",
+      "sloc": 1,
+      "start_line": 1
+    },
+    {
+      "cc": 1,
+      "end_line": 5,
+      "mass": 1.0,
+      "name": "f",
+      "path": "metrics/__tests__/NameResolution.js",
+      "sloc": 1,
+      "start_line": 5
+    },
+    {
+      "cc": 1,
+      "end_line": 10,
+      "mass": 1.0,
+      "name": "handler",
+      "path": "metrics/__tests__/NameResolution.js",
+      "sloc": 1,
+      "start_line": 8
+    },
+    {
+      "cc": 1,
+      "end_line": 15,
+      "mass": 1.0,
+      "name": "<anonymous>@13",
+      "path": "metrics/__tests__/NameResolution.js",
+      "sloc": 1,
+      "start_line": 13
+    },
+    {
+      "cc": 2,
+      "end_line": 7,
+      "mass": 4.0,
+      "name": "outer",
+      "path": "metrics/__tests__/NestedCallable.js",
+      "sloc": 4,
+      "start_line": 1
+    },
+    {
+      "cc": 2,
+      "end_line": 2,
+      "mass": 2.0,
+      "name": "inner",
+      "path": "metrics/__tests__/NestedCallable.js",
+      "sloc": 1,
+      "start_line": 2
+    },
+    {
+      "cc": 3,
+      "end_line": 1,
+      "mass": 3.0,
+      "name": "<anonymous>@1",
+      "path": "metrics/__tests__/NestedExpressionCallable.js",
+      "sloc": 1,
+      "start_line": 1
+    },
+    {
+      "cc": 1,
+      "end_line": 1,
+      "mass": 0.0,
+      "name": "curried",
+      "path": "metrics/__tests__/NestedExpressionCallable.js",
+      "sloc": 0,
+      "start_line": 1
+    },
+    {
+      "cc": 1,
+      "end_line": 5,
+      "mass": 0.0,
+      "name": "outer",
+      "path": "metrics/__tests__/NestedExpressionCallable.js",
+      "sloc": 0,
+      "start_line": 3
+    },
+    {
+      "cc": 2,
+      "end_line": 4,
+      "mass": 2.0,
+      "name": "<anonymous>@4",
+      "path": "metrics/__tests__/NestedExpressionCallable.js",
+      "sloc": 1,
+      "start_line": 4
+    },
+    {
+      "cc": 2,
+      "end_line": 12,
+      "mass": 4.898979485566356,
+      "name": "sloc",
+      "path": "metrics/__tests__/SlocLines.js",
+      "sloc": 6,
+      "start_line": 1
+    },
+    {
+      "cc": 3,
+      "end_line": 12,
+      "mass": 7.937253933193772,
+      "name": "colonForm",
+      "path": "metrics/__tests__/SwitchForms.java",
+      "sloc": 7,
+      "start_line": 2
+    },
+    {
+      "cc": 3,
+      "end_line": 21,
+      "mass": 6.708203932499369,
+      "name": "arrowForm",
+      "path": "metrics/__tests__/SwitchForms.java",
+      "sloc": 5,
+      "start_line": 14
+    },
+    {
+      "cc": 1,
+      "end_line": 7,
+      "mass": 1.0,
+      "name": "plain",
+      "path": "metrics/__tests__/TopLevelBlock.js",
+      "sloc": 1,
+      "start_line": 5
+    },
+    {
+      "cc": 1,
+      "end_line": 3,
+      "mass": 1.0,
+      "name": "Widget",
+      "path": "metrics/__tests__/Widget.jsx",
+      "sloc": 1,
+      "start_line": 1
+    },
+    {
+      "cc": 1,
+      "end_line": 3,
+      "mass": 1.0,
+      "name": "Widget",
+      "path": "metrics/__tests__/Widget.tsx",
+      "sloc": 1,
+      "start_line": 1
+    },
+    {
+      "cc": 1,
+      "end_line": 3,
+      "mass": 1.0,
+      "name": "run",
+      "path": "metrics/__tests__/mod.cjs",
+      "sloc": 1,
+      "start_line": 1
+    },
+    {
+      "cc": 1,
+      "end_line": 3,
+      "mass": 1.0,
+      "name": "run",
+      "path": "metrics/__tests__/mod.mjs",
+      "sloc": 1,
+      "start_line": 1
+    },
+    {
+      "cc": 12,
+      "end_line": 12,
+      "mass": 36.0,
+      "name": "compute",
+      "path": "metrics/erosion/HighComplexity.java",
+      "sloc": 9,
+      "start_line": 2
+    },
+    {
+      "cc": 8,
+      "end_line": 11,
+      "mass": 24.0,
+      "name": "lowComplexity",
+      "path": "metrics/erosion/LowComplexity.js",
+      "sloc": 9,
+      "start_line": 1
+    },
+    {
+      "cc": 2,
+      "end_line": 8,
+      "mass": 3.4641016151377544,
+      "name": "ifConstruct",
+      "path": "parity/Constructs.java",
+      "sloc": 3,
+      "start_line": 2
+    },
+    {
+      "cc": 2,
+      "end_line": 14,
+      "mass": 2.8284271247461903,
+      "name": "forConstruct",
+      "path": "parity/Constructs.java",
+      "sloc": 2,
+      "start_line": 10
+    },
+    {
+      "cc": 2,
+      "end_line": 20,
+      "mass": 2.8284271247461903,
+      "name": "whileConstruct",
+      "path": "parity/Constructs.java",
+      "sloc": 2,
+      "start_line": 16
+    },
+    {
+      "cc": 2,
+      "end_line": 29,
+      "mass": 4.0,
+      "name": "switchConstruct",
+      "path": "parity/Constructs.java",
+      "sloc": 4,
+      "start_line": 22
+    },
+    {
+      "cc": 2,
+      "end_line": 39,
+      "mass": 4.0,
+      "name": "catchConstruct",
+      "path": "parity/Constructs.java",
+      "sloc": 4,
+      "start_line": 31
+    },
+    {
+      "cc": 2,
+      "end_line": 43,
+      "mass": 2.0,
+      "name": "ternaryConstruct",
+      "path": "parity/Constructs.java",
+      "sloc": 1,
+      "start_line": 41
+    },
+    {
+      "cc": 2,
+      "end_line": 47,
+      "mass": 2.0,
+      "name": "andConstruct",
+      "path": "parity/Constructs.java",
+      "sloc": 1,
+      "start_line": 45
+    },
+    {
+      "cc": 2,
+      "end_line": 51,
+      "mass": 2.0,
+      "name": "orConstruct",
+      "path": "parity/Constructs.java",
+      "sloc": 1,
+      "start_line": 49
+    },
+    {
+      "cc": 2,
+      "end_line": 7,
+      "mass": 3.4641016151377544,
+      "name": "ifConstruct",
+      "path": "parity/constructs.ts",
+      "sloc": 3,
+      "start_line": 1
+    },
+    {
+      "cc": 2,
+      "end_line": 13,
+      "mass": 2.8284271247461903,
+      "name": "forConstruct",
+      "path": "parity/constructs.ts",
+      "sloc": 2,
+      "start_line": 9
+    },
+    {
+      "cc": 2,
+      "end_line": 19,
+      "mass": 2.8284271247461903,
+      "name": "whileConstruct",
+      "path": "parity/constructs.ts",
+      "sloc": 2,
+      "start_line": 15
+    },
+    {
+      "cc": 2,
+      "end_line": 28,
+      "mass": 4.0,
+      "name": "switchConstruct",
+      "path": "parity/constructs.ts",
+      "sloc": 4,
+      "start_line": 21
+    },
+    {
+      "cc": 2,
+      "end_line": 38,
+      "mass": 4.0,
+      "name": "catchConstruct",
+      "path": "parity/constructs.ts",
+      "sloc": 4,
+      "start_line": 30
+    },
+    {
+      "cc": 2,
+      "end_line": 42,
+      "mass": 2.0,
+      "name": "ternaryConstruct",
+      "path": "parity/constructs.ts",
+      "sloc": 1,
+      "start_line": 40
+    },
+    {
+      "cc": 2,
+      "end_line": 46,
+      "mass": 2.0,
+      "name": "andConstruct",
+      "path": "parity/constructs.ts",
+      "sloc": 1,
+      "start_line": 44
+    },
+    {
+      "cc": 2,
+      "end_line": 50,
+      "mass": 2.0,
+      "name": "orConstruct",
+      "path": "parity/constructs.ts",
+      "sloc": 1,
+      "start_line": 48
+    },
+    {
+      "cc": 1,
+      "end_line": 5,
+      "mass": 1.7320508075688772,
+      "name": "unreachableDemo",
+      "path": "report/src/\"><img onerror=1>.js",
+      "sloc": 3,
+      "start_line": 1
+    },
+    {
+      "cc": 1,
+      "end_line": 3,
+      "mass": 1.0,
+      "name": "<anonymous>@1",
+      "path": "report/src/Anonymous.js",
+      "sloc": 1,
+      "start_line": 1
+    },
+    {
+      "cc": 2,
+      "end_line": 8,
+      "mass": 3.4641016151377544,
+      "name": "classify",
+      "path": "report/src/Sample.java",
+      "sloc": 3,
+      "start_line": 2
+    },
+    {
+      "cc": 2,
+      "end_line": 15,
+      "mass": 2.8284271247461903,
+      "name": "risky",
+      "path": "report/src/Sample.java",
+      "sloc": 2,
+      "start_line": 10
+    },
+    {
+      "cc": 1,
+      "end_line": 19,
+      "mass": 1.0,
+      "name": "doSomething",
+      "path": "report/src/Sample.java",
+      "sloc": 1,
+      "start_line": 17
+    },
+    {
+      "cc": 2,
+      "end_line": 12,
+      "mass": 6.324555320336759,
+      "name": "orderSummary",
+      "path": "report/src/sample.js",
+      "sloc": 10,
+      "start_line": 1
+    },
+    {
+      "cc": 2,
+      "end_line": 12,
+      "mass": 6.324555320336759,
+      "name": "invoiceSummary",
+      "path": "report/src/sample2.js",
+      "sloc": 10,
+      "start_line": 1
+    },
+    {
+      "cc": 12,
+      "end_line": 16,
+      "mass": 43.26661530556787,
+      "name": "classify",
+      "path": "report_erosion/src/HighComplexity.java",
+      "sloc": 13,
+      "start_line": 2
+    },
+    {
+      "cc": 2,
+      "end_line": 14,
+      "mass": 3.4641016151377544,
+      "name": "classify",
+      "path": "rules/__tests__/CleanJava.java",
+      "sloc": 3,
+      "start_line": 9
+    },
+    {
+      "cc": 2,
+      "end_line": 22,
+      "mass": 3.4641016151377544,
+      "name": "safeCatch",
+      "path": "rules/__tests__/CleanJava.java",
+      "sloc": 3,
+      "start_line": 16
+    },
+    {
+      "cc": 2,
+      "end_line": 30,
+      "mass": 2.8284271247461903,
+      "name": "ignoredCatch",
+      "path": "rules/__tests__/CleanJava.java",
+      "sloc": 2,
+      "start_line": 24
+    },
+    {
+      "cc": 2,
+      "end_line": 39,
+      "mass": 4.0,
+      "name": "compute",
+      "path": "rules/__tests__/CleanJava.java",
+      "sloc": 4,
+      "start_line": 32
+    },
+    {
+      "cc": 1,
+      "end_line": 42,
+      "mass": 0.0,
+      "name": "risky",
+      "path": "rules/__tests__/CleanJava.java",
+      "sloc": 0,
+      "start_line": 41
+    },
+    {
+      "cc": 2,
+      "end_line": 6,
+      "mass": 3.4641016151377544,
+      "name": "classify",
+      "path": "rules/__tests__/CleanJs.js",
+      "sloc": 3,
+      "start_line": 1
+    },
+    {
+      "cc": 2,
+      "end_line": 14,
+      "mass": 3.4641016151377544,
+      "name": "safeCatch",
+      "path": "rules/__tests__/CleanJs.js",
+      "sloc": 3,
+      "start_line": 8
+    },
+    {
+      "cc": 2,
+      "end_line": 22,
+      "mass": 2.8284271247461903,
+      "name": "ignoredCatch",
+      "path": "rules/__tests__/CleanJs.js",
+      "sloc": 2,
+      "start_line": 16
+    },
+    {
+      "cc": 2,
+      "end_line": 31,
+      "mass": 4.0,
+      "name": "compute",
+      "path": "rules/__tests__/CleanJs.js",
+      "sloc": 4,
+      "start_line": 24
+    },
+    {
+      "cc": 1,
+      "end_line": 33,
+      "mass": 0.0,
+      "name": "risky",
+      "path": "rules/__tests__/CleanJs.js",
+      "sloc": 0,
+      "start_line": 33
+    },
+    {
+      "cc": 1,
+      "end_line": 41,
+      "mass": 1.0,
+      "name": "withHoistedFunction",
+      "path": "rules/__tests__/CleanJs.js",
+      "sloc": 1,
+      "start_line": 35
+    },
+    {
+      "cc": 1,
+      "end_line": 40,
+      "mass": 1.0,
+      "name": "helper",
+      "path": "rules/__tests__/CleanJs.js",
+      "sloc": 1,
+      "start_line": 38
+    },
+    {
+      "cc": 1,
+      "end_line": 49,
+      "mass": 1.0,
+      "name": "withHoistedGenerator",
+      "path": "rules/__tests__/CleanJs.js",
+      "sloc": 1,
+      "start_line": 43
+    },
+    {
+      "cc": 1,
+      "end_line": 48,
+      "mass": 1.0,
+      "name": "helperGenerator",
+      "path": "rules/__tests__/CleanJs.js",
+      "sloc": 1,
+      "start_line": 46
+    },
+    {
+      "cc": 1,
+      "end_line": 7,
+      "mass": 1.7320508075688772,
+      "name": "withInterfaceAfterReturn",
+      "path": "rules/__tests__/CleanTs.ts",
+      "sloc": 3,
+      "start_line": 1
+    },
+    {
+      "cc": 1,
+      "end_line": 13,
+      "mass": 1.4142135623730951,
+      "name": "withTypeAliasAfterReturn",
+      "path": "rules/__tests__/CleanTs.ts",
+      "sloc": 2,
+      "start_line": 9
+    },
+    {
+      "cc": 1,
+      "end_line": 8,
+      "mass": 1.4142135623730951,
+      "name": "first",
+      "path": "rules/__tests__/ClonedBlockWithGaps.java",
+      "sloc": 2,
+      "start_line": 5
+    },
+    {
+      "cc": 1,
+      "end_line": 15,
+      "mass": 1.4142135623730951,
+      "name": "second",
+      "path": "rules/__tests__/ClonedBlockWithGaps.java",
+      "sloc": 2,
+      "start_line": 10
+    },
+    {
+      "cc": 1,
+      "end_line": 13,
+      "mass": 1.4142135623730951,
+      "name": "increment",
+      "path": "rules/__tests__/ImportsAndFields.java",
+      "sloc": 2,
+      "start_line": 10
+    },
+    {
+      "cc": 1,
+      "end_line": 10,
+      "mass": 2.0,
+      "name": "unreachableAfterReturn",
+      "path": "rules/__tests__/JavaRulesFixture.java",
+      "sloc": 4,
+      "start_line": 5
+    },
+    {
+      "cc": 2,
+      "end_line": 17,
+      "mass": 2.8284271247461903,
+      "name": "emptyCatch",
+      "path": "rules/__tests__/JavaRulesFixture.java",
+      "sloc": 2,
+      "start_line": 12
+    },
+    {
+      "cc": 2,
+      "end_line": 25,
+      "mass": 3.4641016151377544,
+      "name": "redundantElseAfterReturn",
+      "path": "rules/__tests__/JavaRulesFixture.java",
+      "sloc": 3,
+      "start_line": 19
+    },
+    {
+      "cc": 1,
+      "end_line": 28,
+      "mass": 0.0,
+      "name": "risky",
+      "path": "rules/__tests__/JavaRulesFixture.java",
+      "sloc": 0,
+      "start_line": 27
+    },
+    {
+      "cc": 1,
+      "end_line": 6,
+      "mass": 2.0,
+      "name": "unreachableAfterReturn",
+      "path": "rules/__tests__/JsRulesFixture.js",
+      "sloc": 4,
+      "start_line": 1
+    },
+    {
+      "cc": 2,
+      "end_line": 13,
+      "mass": 2.8284271247461903,
+      "name": "emptyCatch",
+      "path": "rules/__tests__/JsRulesFixture.js",
+      "sloc": 2,
+      "start_line": 8
+    },
+    {
+      "cc": 2,
+      "end_line": 21,
+      "mass": 3.4641016151377544,
+      "name": "redundantElseAfterReturn",
+      "path": "rules/__tests__/JsRulesFixture.js",
+      "sloc": 3,
+      "start_line": 15
+    },
+    {
+      "cc": 1,
+      "end_line": 23,
+      "mass": 0.0,
+      "name": "risky",
+      "path": "rules/__tests__/JsRulesFixture.js",
+      "sloc": 0,
+      "start_line": 23
+    },
+    {
+      "cc": 1,
+      "end_line": 31,
+      "mass": 1.7320508075688772,
+      "name": "mixedExemptAndDead",
+      "path": "rules/__tests__/JsRulesFixture.js",
+      "sloc": 3,
+      "start_line": 25
+    },
+    {
+      "cc": 1,
+      "end_line": 27,
+      "mass": 0.0,
+      "name": "helper",
+      "path": "rules/__tests__/JsRulesFixture.js",
+      "sloc": 0,
+      "start_line": 27
+    },
+    {
+      "cc": 1,
+      "end_line": 30,
+      "mass": 0.0,
+      "name": "trailingHelper",
+      "path": "rules/__tests__/JsRulesFixture.js",
+      "sloc": 0,
+      "start_line": 30
+    },
+    {
+      "cc": 2,
+      "end_line": 10,
+      "mass": 3.4641016151377544,
+      "name": "classify",
+      "path": "rules/broken/Good.java",
+      "sloc": 3,
+      "start_line": 5
+    },
+    {
+      "cc": 1,
+      "end_line": 10,
+      "mass": 2.0,
+      "name": "unreachableAfterReturn",
+      "path": "rules/src/RulesTrigger.java",
+      "sloc": 4,
+      "start_line": 5
+    },
+    {
+      "cc": 2,
+      "end_line": 17,
+      "mass": 2.8284271247461903,
+      "name": "emptyCatch",
+      "path": "rules/src/RulesTrigger.java",
+      "sloc": 2,
+      "start_line": 12
+    },
+    {
+      "cc": 2,
+      "end_line": 25,
+      "mass": 3.4641016151377544,
+      "name": "redundantElseAfterReturn",
+      "path": "rules/src/RulesTrigger.java",
+      "sloc": 3,
+      "start_line": 19
+    },
+    {
+      "cc": 1,
+      "end_line": 28,
+      "mass": 0.0,
+      "name": "risky",
+      "path": "rules/src/RulesTrigger.java",
+      "sloc": 0,
+      "start_line": 27
+    },
+    {
+      "cc": 2,
+      "end_line": 10,
+      "mass": 3.4641016151377544,
+      "name": "classify",
+      "path": "rules/src/Sample.java",
+      "sloc": 3,
+      "start_line": 5
+    },
+    {
+      "cc": 1,
+      "end_line": 6,
+      "mass": 2.0,
+      "name": "unreachableAfterReturn",
+      "path": "rules/src/rulesTrigger.js",
+      "sloc": 4,
+      "start_line": 1
+    },
+    {
+      "cc": 2,
+      "end_line": 13,
+      "mass": 2.8284271247461903,
+      "name": "emptyCatch",
+      "path": "rules/src/rulesTrigger.js",
+      "sloc": 2,
+      "start_line": 8
+    },
+    {
+      "cc": 2,
+      "end_line": 21,
+      "mass": 3.4641016151377544,
+      "name": "redundantElseAfterReturn",
+      "path": "rules/src/rulesTrigger.js",
+      "sloc": 3,
+      "start_line": 15
+    },
+    {
+      "cc": 1,
+      "end_line": 23,
+      "mass": 0.0,
+      "name": "risky",
+      "path": "rules/src/rulesTrigger.js",
+      "sloc": 0,
+      "start_line": 23
+    },
+    {
+      "cc": 2,
+      "end_line": 6,
+      "mass": 3.4641016151377544,
+      "name": "classify",
+      "path": "rules/src/sample.js",
+      "sloc": 3,
+      "start_line": 1
+    },
+    {
+      "cc": 2,
+      "end_line": 10,
+      "mass": 3.4641016151377544,
+      "name": "safe",
+      "path": "salvage/Mixed.java",
+      "sloc": 3,
+      "start_line": 5
+    },
+    {
+      "cc": 2,
+      "end_line": 6,
+      "mass": 3.4641016151377544,
+      "name": "safe",
+      "path": "salvage/Mixed.ts",
+      "sloc": 3,
+      "start_line": 1
     }
   ],
   "duplicates": [
     {
       "language": "java",
-      "redundant_lines": 72,
       "locations": [
         {
-          "relative_path": "clones/__tests__/DupIdenticalA.java",
-          "start_line": 3,
           "end_line": 14,
-          "excerpt": "        alpha(one,\n              two,\n              three);\n        beta(four,\n             five,\n             six);\n        gamma(seven,\n              eight,\n              nine);\n        delta(ten,\n              eleven,\n              twelve);",
+          "is_remote_link": false,
           "link": "clones/__tests__/DupIdenticalA.java#L3-L14",
-          "is_remote_link": false
+          "relative_path": "clones/__tests__/DupIdenticalA.java",
+          "start_line": 3
         },
         {
-          "relative_path": "clones/__tests__/DupIdenticalB.java",
-          "start_line": 4,
           "end_line": 18,
-          "excerpt": "        alpha(one,\n                two,\n              three);\n\n        // second call\n        beta(four,\n             five,\n             six);\n        gamma(seven,\n              eight,\n              nine);\n        // final call\n        delta(ten,\n              eleven,\n              twelve);",
+          "is_remote_link": false,
           "link": "clones/__tests__/DupIdenticalB.java#L4-L18",
-          "is_remote_link": false
+          "relative_path": "clones/__tests__/DupIdenticalB.java",
+          "start_line": 4
         },
         {
-          "relative_path": "clones/__tests__/IdentifierA.java",
-          "start_line": 3,
           "end_line": 14,
-          "excerpt": "        alpha(one,\n              two,\n              three);\n        beta(four,\n             five,\n             six);\n        gamma(seven,\n              eight,\n              nine);\n        delta(ten,\n              eleven,\n              twelve);",
+          "is_remote_link": false,
           "link": "clones/__tests__/IdentifierA.java#L3-L14",
-          "is_remote_link": false
+          "relative_path": "clones/__tests__/IdentifierA.java",
+          "start_line": 3
         },
         {
-          "relative_path": "clones/__tests__/SubsumedA.java",
-          "start_line": 3,
           "end_line": 14,
-          "excerpt": "        alpha(one,\n              two,\n              three);\n        beta(four,\n             five,\n             six);\n        gamma(seven,\n              eight,\n              nine);\n        delta(ten,\n              eleven,\n              twelve);",
+          "is_remote_link": false,
           "link": "clones/__tests__/SubsumedA.java#L3-L14",
-          "is_remote_link": false
-        },
-        {
-          "relative_path": "clones/__tests__/SubsumedB.java",
-          "start_line": 3,
-          "end_line": 14,
-          "excerpt": "        alpha(one,\n              two,\n              three);\n        beta(four,\n             five,\n             six);\n        gamma(seven,\n              eight,\n              nine);\n        delta(ten,\n              eleven,\n              twelve);",
-          "link": "clones/__tests__/SubsumedB.java#L3-L14",
-          "is_remote_link": false
-        },
-        {
-          "relative_path": "clones/src/main/java/DupA.java",
-          "start_line": 5,
-          "end_line": 16,
-          "excerpt": "        alpha(one,\n              two,\n              three);\n        beta(four,\n             five,\n             six);\n        gamma(seven,\n              eight,\n              nine);\n        delta(ten,\n              eleven,\n              twelve);",
-          "link": "clones/src/main/java/DupA.java#L5-L16",
-          "is_remote_link": false
-        },
-        {
-          "relative_path": "clones/src/main/java/DupB.java",
-          "start_line": 6,
-          "end_line": 17,
-          "excerpt": "        alpha(one,\n              two,\n              three);\n        beta(four,\n             five,\n             six);\n        gamma(seven,\n              eight,\n              nine);\n        delta(ten,\n              eleven,\n              twelve);",
-          "link": "clones/src/main/java/DupB.java#L6-L17",
-          "is_remote_link": false
-        }
-      ]
-    },
-    {
-      "language": "java",
-      "redundant_lines": 20,
-      "locations": [
-        {
-          "relative_path": "clones/__tests__/RankGX1.java",
-          "start_line": 3,
-          "end_line": 12,
-          "excerpt": "        int a1 = 1;\n        int a2 = 1;\n        int a3 = 1;\n        int a4 = 1;\n        int a5 = 1;\n        int a6 = 1;\n        int a7 = 1;\n        int a8 = 1;\n        int a9 = 1;\n        int a10 = 1;",
-          "link": "clones/__tests__/RankGX1.java#L3-L12",
-          "is_remote_link": false
-        },
-        {
-          "relative_path": "clones/__tests__/RankGX2.java",
-          "start_line": 3,
-          "end_line": 12,
-          "excerpt": "        int a1 = 1;\n        int a2 = 1;\n        int a3 = 1;\n        int a4 = 1;\n        int a5 = 1;\n        int a6 = 1;\n        int a7 = 1;\n        int a8 = 1;\n        int a9 = 1;\n        int a10 = 1;",
-          "link": "clones/__tests__/RankGX2.java#L3-L12",
-          "is_remote_link": false
-        },
-        {
-          "relative_path": "clones/__tests__/RankGX3.java",
-          "start_line": 3,
-          "end_line": 12,
-          "excerpt": "        int a1 = 1;\n        int a2 = 1;\n        int a3 = 1;\n        int a4 = 1;\n        int a5 = 1;\n        int a6 = 1;\n        int a7 = 1;\n        int a8 = 1;\n        int a9 = 1;\n        int a10 = 1;",
-          "link": "clones/__tests__/RankGX3.java#L3-L12",
-          "is_remote_link": false
-        }
-      ]
-    },
-    {
-      "language": "js_ts",
-      "redundant_lines": 20,
-      "locations": [
-        {
-          "relative_path": "clones/__tests__/SwitchDupJs.js",
-          "start_line": 4,
-          "end_line": 13,
-          "excerpt": "      alpha(one,\n            two,\n            three);\n      beta(four,\n           five,\n           six);\n      gamma(seven,\n            eight,\n            nine);\n      break;",
-          "link": "clones/__tests__/SwitchDupJs.js#L4-L13",
-          "is_remote_link": false
-        },
-        {
-          "relative_path": "clones/__tests__/SwitchDupJs.js",
-          "start_line": 15,
-          "end_line": 24,
-          "excerpt": "      alpha(one,\n            two,\n            three);\n      beta(four,\n           five,\n           six);\n      gamma(seven,\n            eight,\n            nine);\n      break;",
-          "link": "clones/__tests__/SwitchDupJs.js#L15-L24",
-          "is_remote_link": false
-        },
-        {
-          "relative_path": "clones/__tests__/SwitchDupJs.js",
-          "start_line": 26,
-          "end_line": 35,
-          "excerpt": "      alpha(one,\n            two,\n            three);\n      beta(four,\n           five,\n           six);\n      gamma(seven,\n            eight,\n            nine);\n      break;",
-          "link": "clones/__tests__/SwitchDupJs.js#L26-L35",
-          "is_remote_link": false
-        }
-      ]
-    },
-    {
-      "language": "java",
-      "redundant_lines": 15,
-      "locations": [
-        {
-          "relative_path": "clones/__tests__/RankGY1.java",
-          "start_line": 3,
-          "end_line": 17,
-          "excerpt": "        int b1 = 1;\n        int b2 = 1;\n        int b3 = 1;\n        int b4 = 1;\n        int b5 = 1;\n        int b6 = 1;\n        int b7 = 1;\n        int b8 = 1;\n        int b9 = 1;\n        int b10 = 1;\n        int b11 = 1;\n        int b12 = 1;\n        int b13 = 1;\n        int b14 = 1;\n        int b15 = 1;",
-          "link": "clones/__tests__/RankGY1.java#L3-L17",
-          "is_remote_link": false
-        },
-        {
-          "relative_path": "clones/__tests__/RankGY2.java",
-          "start_line": 3,
-          "end_line": 17,
-          "excerpt": "        int b1 = 1;\n        int b2 = 1;\n        int b3 = 1;\n        int b4 = 1;\n        int b5 = 1;\n        int b6 = 1;\n        int b7 = 1;\n        int b8 = 1;\n        int b9 = 1;\n        int b10 = 1;\n        int b11 = 1;\n        int b12 = 1;\n        int b13 = 1;\n        int b14 = 1;\n        int b15 = 1;",
-          "link": "clones/__tests__/RankGY2.java#L3-L17",
-          "is_remote_link": false
-        }
-      ]
-    },
-    {
-      "language": "java",
-      "redundant_lines": 15,
-      "locations": [
-        {
           "relative_path": "clones/__tests__/SubsumedA.java",
-          "start_line": 3,
-          "end_line": 17,
-          "excerpt": "        alpha(one,\n              two,\n              three);\n        beta(four,\n             five,\n             six);\n        gamma(seven,\n              eight,\n              nine);\n        delta(ten,\n              eleven,\n              twelve);\n        epsilon(thirteen,\n                fourteen,\n                fifteen);",
-          "link": "clones/__tests__/SubsumedA.java#L3-L17",
-          "is_remote_link": false
+          "start_line": 3
         },
         {
+          "end_line": 14,
+          "is_remote_link": false,
+          "link": "clones/__tests__/SubsumedB.java#L3-L14",
           "relative_path": "clones/__tests__/SubsumedB.java",
-          "start_line": 3,
+          "start_line": 3
+        },
+        {
+          "end_line": 16,
+          "is_remote_link": false,
+          "link": "clones/src/main/java/DupA.java#L5-L16",
+          "relative_path": "clones/src/main/java/DupA.java",
+          "start_line": 5
+        },
+        {
           "end_line": 17,
-          "excerpt": "        alpha(one,\n              two,\n              three);\n        beta(four,\n             five,\n             six);\n        gamma(seven,\n              eight,\n              nine);\n        delta(ten,\n              eleven,\n              twelve);\n        epsilon(thirteen,\n                fourteen,\n                fifteen);",
+          "is_remote_link": false,
+          "link": "clones/src/main/java/DupB.java#L6-L17",
+          "relative_path": "clones/src/main/java/DupB.java",
+          "start_line": 6
+        }
+      ],
+      "redundant_lines": 72
+    },
+    {
+      "language": "java",
+      "locations": [
+        {
+          "end_line": 12,
+          "is_remote_link": false,
+          "link": "clones/__tests__/RankGX1.java#L3-L12",
+          "relative_path": "clones/__tests__/RankGX1.java",
+          "start_line": 3
+        },
+        {
+          "end_line": 12,
+          "is_remote_link": false,
+          "link": "clones/__tests__/RankGX2.java#L3-L12",
+          "relative_path": "clones/__tests__/RankGX2.java",
+          "start_line": 3
+        },
+        {
+          "end_line": 12,
+          "is_remote_link": false,
+          "link": "clones/__tests__/RankGX3.java#L3-L12",
+          "relative_path": "clones/__tests__/RankGX3.java",
+          "start_line": 3
+        }
+      ],
+      "redundant_lines": 20
+    },
+    {
+      "language": "js_ts",
+      "locations": [
+        {
+          "end_line": 13,
+          "is_remote_link": false,
+          "link": "clones/__tests__/SwitchDupJs.js#L4-L13",
+          "relative_path": "clones/__tests__/SwitchDupJs.js",
+          "start_line": 4
+        },
+        {
+          "end_line": 24,
+          "is_remote_link": false,
+          "link": "clones/__tests__/SwitchDupJs.js#L15-L24",
+          "relative_path": "clones/__tests__/SwitchDupJs.js",
+          "start_line": 15
+        },
+        {
+          "end_line": 35,
+          "is_remote_link": false,
+          "link": "clones/__tests__/SwitchDupJs.js#L26-L35",
+          "relative_path": "clones/__tests__/SwitchDupJs.js",
+          "start_line": 26
+        }
+      ],
+      "redundant_lines": 20
+    },
+    {
+      "language": "java",
+      "locations": [
+        {
+          "end_line": 17,
+          "is_remote_link": false,
+          "link": "clones/__tests__/RankGY1.java#L3-L17",
+          "relative_path": "clones/__tests__/RankGY1.java",
+          "start_line": 3
+        },
+        {
+          "end_line": 17,
+          "is_remote_link": false,
+          "link": "clones/__tests__/RankGY2.java#L3-L17",
+          "relative_path": "clones/__tests__/RankGY2.java",
+          "start_line": 3
+        }
+      ],
+      "redundant_lines": 15
+    },
+    {
+      "language": "java",
+      "locations": [
+        {
+          "end_line": 17,
+          "is_remote_link": false,
+          "link": "clones/__tests__/SubsumedA.java#L3-L17",
+          "relative_path": "clones/__tests__/SubsumedA.java",
+          "start_line": 3
+        },
+        {
+          "end_line": 17,
+          "is_remote_link": false,
           "link": "clones/__tests__/SubsumedB.java#L3-L17",
-          "is_remote_link": false
+          "relative_path": "clones/__tests__/SubsumedB.java",
+          "start_line": 3
         }
-      ]
+      ],
+      "redundant_lines": 15
     },
     {
       "language": "js_ts",
-      "redundant_lines": 13,
       "locations": [
         {
-          "relative_path": "rules/__tests__/JsRulesFixture.js",
-          "start_line": 1,
           "end_line": 23,
-          "excerpt": "function unreachableAfterReturn() {\n    console.log(\"a\");\n    return;\n    console.log(\"b\");\n    console.log(\"c\");\n}\n\nfunction emptyCatch() {\n    try {\n        risky();\n    } catch (e) {\n    }\n}\n\nfunction redundantElseAfterReturn(x) {\n    if (x > 0) {\n        return 1;\n    } else {\n        return 0;\n    }\n}\n\nfunction risky() {}",
+          "is_remote_link": false,
           "link": "rules/__tests__/JsRulesFixture.js#L1-L23",
-          "is_remote_link": false
+          "relative_path": "rules/__tests__/JsRulesFixture.js",
+          "start_line": 1
         },
         {
-          "relative_path": "rules/src/rulesTrigger.js",
-          "start_line": 1,
           "end_line": 23,
-          "excerpt": "function unreachableAfterReturn() {\n    console.log(\"a\");\n    return;\n    console.log(\"b\");\n    console.log(\"c\");\n}\n\nfunction emptyCatch() {\n    try {\n        risky();\n    } catch (e) {\n    }\n}\n\nfunction redundantElseAfterReturn(x) {\n    if (x > 0) {\n        return 1;\n    } else {\n        return 0;\n    }\n}\n\nfunction risky() {}",
+          "is_remote_link": false,
           "link": "rules/src/rulesTrigger.js#L1-L23",
-          "is_remote_link": false
+          "relative_path": "rules/src/rulesTrigger.js",
+          "start_line": 1
         }
-      ]
+      ],
+      "redundant_lines": 13
     },
     {
       "language": "java",
-      "redundant_lines": 12,
       "locations": [
         {
-          "relative_path": "clones/__tests__/ConstructorBodyA.java",
-          "start_line": 3,
           "end_line": 14,
-          "excerpt": "        ctorAlpha(one,\n                  two,\n                  three);\n        ctorBeta(four,\n                 five,\n                 six);\n        ctorGamma(seven,\n                  eight,\n                  nine);\n        ctorDelta(ten,\n                  eleven,\n                  twelve);",
+          "is_remote_link": false,
           "link": "clones/__tests__/ConstructorBodyA.java#L3-L14",
-          "is_remote_link": false
+          "relative_path": "clones/__tests__/ConstructorBodyA.java",
+          "start_line": 3
         },
         {
-          "relative_path": "clones/__tests__/ConstructorBodyB.java",
-          "start_line": 3,
           "end_line": 14,
-          "excerpt": "        ctorAlpha(one,\n                  two,\n                  three);\n        ctorBeta(four,\n                 five,\n                 six);\n        ctorGamma(seven,\n                  eight,\n                  nine);\n        ctorDelta(ten,\n                  eleven,\n                  twelve);",
+          "is_remote_link": false,
           "link": "clones/__tests__/ConstructorBodyB.java#L3-L14",
-          "is_remote_link": false
+          "relative_path": "clones/__tests__/ConstructorBodyB.java",
+          "start_line": 3
         }
-      ]
+      ],
+      "redundant_lines": 12
     },
     {
       "language": "js_ts",
-      "redundant_lines": 12,
       "locations": [
         {
-          "relative_path": "clones/__tests__/ModuleLevelA.js",
-          "start_line": 1,
           "end_line": 12,
-          "excerpt": "moduleAlpha(one,\n            two,\n            three);\nmoduleBeta(four,\n           five,\n           six);\nmoduleGamma(seven,\n            eight,\n            nine);\nmoduleDelta(ten,\n            eleven,\n            twelve);",
+          "is_remote_link": false,
           "link": "clones/__tests__/ModuleLevelA.js#L1-L12",
-          "is_remote_link": false
+          "relative_path": "clones/__tests__/ModuleLevelA.js",
+          "start_line": 1
         },
         {
-          "relative_path": "clones/__tests__/ModuleLevelB.js",
-          "start_line": 1,
           "end_line": 12,
-          "excerpt": "moduleAlpha(one,\n            two,\n            three);\nmoduleBeta(four,\n           five,\n           six);\nmoduleGamma(seven,\n            eight,\n            nine);\nmoduleDelta(ten,\n            eleven,\n            twelve);",
+          "is_remote_link": false,
           "link": "clones/__tests__/ModuleLevelB.js#L1-L12",
-          "is_remote_link": false
+          "relative_path": "clones/__tests__/ModuleLevelB.js",
+          "start_line": 1
         }
-      ]
+      ],
+      "redundant_lines": 12
     },
     {
       "language": "java",
-      "redundant_lines": 12,
       "locations": [
         {
-          "relative_path": "clones/__tests__/PartialRun.java",
-          "start_line": 4,
           "end_line": 15,
-          "excerpt": "        alpha(one,\n              two,\n              three,\n              threeB);\n        beta(four,\n             five,\n             six,\n             sixB);\n        gamma(seven,\n              eight,\n              nine,\n              nineB);",
+          "is_remote_link": false,
           "link": "clones/__tests__/PartialRun.java#L4-L15",
-          "is_remote_link": false
-        },
-        {
           "relative_path": "clones/__tests__/PartialRun.java",
-          "start_line": 21,
+          "start_line": 4
+        },
+        {
           "end_line": 32,
-          "excerpt": "        alpha(one,\n              two,\n              three,\n              threeB);\n        beta(four,\n             five,\n             six,\n             sixB);\n        gamma(seven,\n              eight,\n              nine,\n              nineB);",
+          "is_remote_link": false,
           "link": "clones/__tests__/PartialRun.java#L21-L32",
-          "is_remote_link": false
+          "relative_path": "clones/__tests__/PartialRun.java",
+          "start_line": 21
         }
-      ]
+      ],
+      "redundant_lines": 12
     },
     {
       "language": "java",
-      "redundant_lines": 10,
       "locations": [
         {
-          "relative_path": "clones/__tests__/SwitchDupJava.java",
-          "start_line": 5,
           "end_line": 14,
-          "excerpt": "                alpha(one,\n                      two,\n                      three);\n                beta(four,\n                     five,\n                     six);\n                gamma(seven,\n                      eight,\n                      nine);\n                break;",
+          "is_remote_link": false,
           "link": "clones/__tests__/SwitchDupJava.java#L5-L14",
-          "is_remote_link": false
-        },
-        {
           "relative_path": "clones/__tests__/SwitchDupJava.java",
-          "start_line": 16,
+          "start_line": 5
+        },
+        {
           "end_line": 25,
-          "excerpt": "                alpha(one,\n                      two,\n                      three);\n                beta(four,\n                     five,\n                     six);\n                gamma(seven,\n                      eight,\n                      nine);\n                break;",
+          "is_remote_link": false,
           "link": "clones/__tests__/SwitchDupJava.java#L16-L25",
-          "is_remote_link": false
+          "relative_path": "clones/__tests__/SwitchDupJava.java",
+          "start_line": 16
         }
-      ]
+      ],
+      "redundant_lines": 10
     },
     {
       "language": "js_ts",
-      "redundant_lines": 10,
       "locations": [
         {
-          "relative_path": "clones/src/widgetA.js",
-          "start_line": 2,
           "end_line": 11,
-          "excerpt": "  widget(alpha,\n         beta);\n  widget(gamma,\n         delta);\n  widget(epsilon,\n         zeta);\n  widget(eta,\n         theta);\n  widget(iota,\n         kappa);",
+          "is_remote_link": false,
           "link": "clones/src/widgetA.js#L2-L11",
-          "is_remote_link": false
+          "relative_path": "clones/src/widgetA.js",
+          "start_line": 2
         },
         {
-          "relative_path": "clones/src/widgetB.js",
-          "start_line": 2,
           "end_line": 11,
-          "excerpt": "  widget(alpha,\n         beta);\n  widget(gamma,\n         delta);\n  widget(epsilon,\n         zeta);\n  widget(eta,\n         theta);\n  widget(iota,\n         kappa);",
+          "is_remote_link": false,
           "link": "clones/src/widgetB.js#L2-L11",
-          "is_remote_link": false
+          "relative_path": "clones/src/widgetB.js",
+          "start_line": 2
         }
-      ]
+      ],
+      "redundant_lines": 10
     },
     {
       "language": "js_ts",
-      "redundant_lines": 10,
       "locations": [
         {
-          "relative_path": "report/src/sample.js",
-          "start_line": 2,
           "end_line": 11,
-          "excerpt": "  const total = order.price * order.quantity;\n  const tax = total * 0.08;\n  const shipping = total > 50 ? 0 : 5;\n  const grandTotal = total + tax + shipping;\n  console.log(\"order total\", grandTotal);\n  console.log(\"tax due\", tax);\n  console.log(\"shipping cost\", shipping);\n  console.log(\"summary complete\");\n  order.total = grandTotal;\n  return grandTotal;",
+          "is_remote_link": false,
           "link": "report/src/sample.js#L2-L11",
-          "is_remote_link": false
+          "relative_path": "report/src/sample.js",
+          "start_line": 2
         },
         {
-          "relative_path": "report/src/sample2.js",
-          "start_line": 2,
           "end_line": 11,
-          "excerpt": "  const total = order.price * order.quantity;\n  const tax = total * 0.08;\n  const shipping = total > 50 ? 0 : 5;\n  const grandTotal = total + tax + shipping;\n  console.log(\"order total\", grandTotal);\n  console.log(\"tax due\", tax);\n  console.log(\"shipping cost\", shipping);\n  console.log(\"summary complete\");\n  order.total = grandTotal;\n  return grandTotal;",
+          "is_remote_link": false,
           "link": "report/src/sample2.js#L2-L11",
-          "is_remote_link": false
+          "relative_path": "report/src/sample2.js",
+          "start_line": 2
         }
-      ]
+      ],
+      "redundant_lines": 10
     }
   ],
-  "top25": [
+  "findings": [
     {
-      "name": "decide",
-      "language": "java",
-      "cc": 15,
-      "sloc": 30,
-      "mass": 82.15838362577492,
-      "location": {
-        "relative_path": "metrics/__tests__/Decisions.java",
-        "start_line": 2,
-        "end_line": 44,
-        "excerpt": "    int decide(int a, int b) {\n        if (a > 0) {\n            a = 1;\n        } else if (b > 0) {\n            a = 2;\n        } else {\n            a = 3;\n        }\n        for (int i = 0; i < a; i++) {\n            a++;\n        }\n        for (int x : new int[] {1, 2, 3}) {\n            a += x;\n        }\n        while (a > 0) {\n            a--;\n        }\n        do {\n            a++;\n        } while (a < 10);\n        try {\n            a = 1;\n        } catch (RuntimeException e) {\n            a = 2;\n        } catch (Exception e) {\n            a = 3;\n        } finally {\n            a = 4;\n        }\n        int t = a > 0 ? 1 : 2;\n        switch (a) {\n            case 1:\n                break;\n            case 2:\n                break;\n            case 3:\n                break;\n            default:\n                break;\n        }\n        boolean c = a > 0 && b > 0 || a < 0;\n        return t;\n    }",
-        "link": "metrics/__tests__/Decisions.java#L2-L44",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "decide",
+      "flagged_lines": [
+        3,
+        4
+      ],
       "language": "js_ts",
-      "cc": 13,
-      "sloc": 26,
-      "mass": 66.2872536767062,
       "location": {
-        "relative_path": "metrics/__tests__/JsDecisions.js",
-        "start_line": 1,
-        "end_line": 39,
-        "excerpt": "function decide(a, b) {\n    if (a > 0) {\n        a = 1;\n    } else {\n        a = 2;\n    }\n    for (let i = 0; i < a; i++) {\n        a++;\n    }\n    for (const x in { a: 1 }) {\n        a += 1;\n    }\n    while (a > 0) {\n        a--;\n    }\n    do {\n        a++;\n    } while (a < 10);\n    try {\n        a = 1;\n    } catch (e) {\n        a = 2;\n    } finally {\n        a = 3;\n    }\n    let t = a > 0 ? 1 : 2;\n    switch (a) {\n        case 1:\n            break;\n        case 2:\n            break;\n        default:\n            break;\n    }\n    let c1 = a > 0 && b > 0;\n    let c2 = a > 0 || b > 0;\n    let c3 = a ?? b;\n    return t;\n}",
-        "link": "metrics/__tests__/JsDecisions.js#L1-L39",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "compute",
-      "language": "java",
-      "cc": 12,
-      "sloc": 9,
-      "mass": 36.0,
-      "location": {
-        "relative_path": "metrics/erosion/HighComplexity.java",
-        "start_line": 2,
-        "end_line": 12,
-        "excerpt": "    int compute(int a, int b) {\n        if (a > 0 && b > 0) { a = 1; }\n        for (int i = 0; i < a; i++) { a++; }\n        while (a > 0) { a--; }\n        do { a++; } while (a < 10);\n        try { a = 1; } catch (RuntimeException e) { a = 2; }\n        int t = a > 0 ? 1 : 2;\n        switch (a) { case 1: break; }\n        switch (a) { case 2: break; case 3: break; }\n        boolean c = a > 0 || b > 0;\n    }",
-        "link": "metrics/erosion/HighComplexity.java#L2-L12",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "classify",
-      "language": "java",
-      "cc": 12,
-      "sloc": 13,
-      "mass": 43.26661530556787,
-      "location": {
-        "relative_path": "report_erosion/src/HighComplexity.java",
-        "start_line": 2,
-        "end_line": 16,
-        "excerpt": "    public int classify(int value) {\n        int result = 0;\n        if (value == 1) { result = 1; }\n        if (value == 2) { result = 2; }\n        if (value == 3) { result = 3; }\n        if (value == 4) { result = 4; }\n        if (value == 5) { result = 5; }\n        if (value == 6) { result = 6; }\n        if (value == 7) { result = 7; }\n        if (value == 8) { result = 8; }\n        if (value == 9) { result = 9; }\n        if (value == 10) { result = 10; }\n        if (value == 11) { result = 11; }\n        return result;\n    }",
-        "link": "report_erosion/src/HighComplexity.java#L2-L16",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "classify",
-      "language": "java",
-      "cc": 10,
-      "sloc": 11,
-      "mass": 33.166247903553995,
-      "location": {
-        "relative_path": "erosion_boundary/Boundary.java",
-        "start_line": 7,
-        "end_line": 19,
-        "excerpt": "    int classify(int a) {\n        int result = 0;\n        if (a == 0) { result = 1; }\n        if (a == 1) { result = 2; }\n        if (a == 2) { result = 3; }\n        if (a == 3) { result = 4; }\n        if (a == 4) { result = 5; }\n        if (a == 5) { result = 6; }\n        if (a == 6) { result = 7; }\n        if (a == 7) { result = 8; }\n        if (a == 8) { result = 9; }\n        return result;\n    }",
-        "link": "erosion_boundary/Boundary.java#L7-L19",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "m",
-      "language": "java",
-      "cc": 9,
-      "sloc": 18,
-      "mass": 38.18376618407356,
-      "location": {
-        "relative_path": "ir/Decisions.java",
-        "start_line": 2,
-        "end_line": 28,
-        "excerpt": "    int m(int x, boolean b) {\n        if (x > 0) {\n            x = 1;\n        }\n        for (int i = 0; i < x; i++) {\n            x = x - 1;\n        }\n        while (x > 0) {\n            x = x - 1;\n        }\n        switch (x) {\n            case 1:\n                x = 2;\n                break;\n            default:\n                x = 3;\n        }\n        try {\n            x = 4;\n        } catch (Exception e) {\n            x = 5;\n        }\n        int y = b ? 1 : 2;\n        boolean c = b && b;\n        boolean d = b || b;\n        return y;\n    }",
-        "link": "ir/Decisions.java#L2-L28",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "m",
-      "language": "js_ts",
-      "cc": 9,
-      "sloc": 18,
-      "mass": 38.18376618407356,
-      "location": {
-        "relative_path": "ir/decisions.ts",
-        "start_line": 1,
-        "end_line": 27,
-        "excerpt": "function m(x: number, b: boolean): number {\n    if (x > 0) {\n        x = 1;\n    }\n    for (let i = 0; i < x; i++) {\n        x = x - 1;\n    }\n    while (x > 0) {\n        x = x - 1;\n    }\n    switch (x) {\n        case 1:\n            x = 2;\n            break;\n        default:\n            x = 3;\n    }\n    try {\n        x = 4;\n    } catch (e) {\n        x = 5;\n    }\n    let y = b ? 1 : 2;\n    let c = b && b;\n    let d = b || b;\n    return y;\n}",
-        "link": "ir/decisions.ts#L1-L27",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "lowComplexity",
-      "language": "js_ts",
-      "cc": 8,
-      "sloc": 9,
-      "mass": 24.0,
-      "location": {
-        "relative_path": "metrics/erosion/LowComplexity.js",
-        "start_line": 1,
-        "end_line": 11,
-        "excerpt": "function lowComplexity(a, b) {\n    if (a > 0) { a = 1; }\n    for (let i = 0; i < a; i++) { a++; }\n    while (a > 0) { a--; }\n    for (const x of [1, 2, 3]) { a += x; }\n    let t = a > 0 ? 1 : 2;\n    let c = a > 0 && b > 0;\n    switch (a) { case 1: break; }\n    let done = true;\n    return a;\n}",
-        "link": "metrics/erosion/LowComplexity.js#L1-L11",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "loopy",
-      "language": "js_ts",
-      "cc": 4,
-      "sloc": 6,
-      "mass": 9.797958971132712,
-      "location": {
-        "relative_path": "metrics/__tests__/BareControlFlow.js",
-        "start_line": 1,
-        "end_line": 11,
-        "excerpt": "function loopy() {\n  for (let i = 0; i < 3; i++) {\n    if (i === 1) {\n      continue;\n    }\n    if (i === 2) {\n      break;\n    }\n  }\n  return;\n}",
-        "link": "metrics/__tests__/BareControlFlow.js#L1-L11",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "run",
-      "language": "java",
-      "cc": 3,
-      "sloc": 24,
-      "mass": 14.696938456699067,
-      "location": {
-        "relative_path": "clones/__tests__/SwitchDupJava.java",
-        "start_line": 2,
-        "end_line": 29,
-        "excerpt": "    void run(int x) {\n        switch (x) {\n            case 1:\n                alpha(one,\n                      two,\n                      three);\n                beta(four,\n                     five,\n                     six);\n                gamma(seven,\n                      eight,\n                      nine);\n                break;\n            case 2:\n                alpha(one,\n                      two,\n                      three);\n                beta(four,\n                     five,\n                     six);\n                gamma(seven,\n                      eight,\n                      nine);\n                break;\n            default:\n                otherwise();\n        }\n    }",
-        "link": "clones/__tests__/SwitchDupJava.java#L2-L29",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "run",
-      "language": "js_ts",
-      "cc": 3,
-      "sloc": 33,
-      "mass": 17.233687939614086,
-      "location": {
-        "relative_path": "clones/__tests__/SwitchDupJs.js",
-        "start_line": 1,
-        "end_line": 37,
-        "excerpt": "function run(x) {\n  switch (x) {\n    case 1:\n      alpha(one,\n            two,\n            three);\n      beta(four,\n           five,\n           six);\n      gamma(seven,\n            eight,\n            nine);\n      break;\n    case 2:\n      alpha(one,\n            two,\n            three);\n      beta(four,\n           five,\n           six);\n      gamma(seven,\n            eight,\n            nine);\n      break;\n    default:\n      alpha(one,\n            two,\n            three);\n      beta(four,\n           five,\n           six);\n      gamma(seven,\n            eight,\n            nine);\n      break;\n  }\n}",
-        "link": "clones/__tests__/SwitchDupJs.js#L1-L37",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "forOfOptional",
-      "language": "js_ts",
-      "cc": 3,
-      "sloc": 6,
-      "mass": 7.348469228349534,
-      "location": {
-        "relative_path": "metrics/__tests__/ForOfOptional.js",
-        "start_line": 1,
-        "end_line": 9,
-        "excerpt": "function forOfOptional(items, maybe) {\n    let total = 0;\n    for (const item of items) {\n        total += item;\n    }\n    const value = maybe?.value;\n    const fallback = maybe ?? 0;\n    return total + fallback + value;\n}",
-        "link": "metrics/__tests__/ForOfOptional.js#L1-L9",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "<anonymous>@1",
-      "language": "js_ts",
-      "cc": 3,
-      "sloc": 1,
-      "mass": 3.0,
-      "location": {
-        "relative_path": "metrics/__tests__/NestedExpressionCallable.js",
-        "start_line": 1,
-        "end_line": 1,
-        "excerpt": "const curried = (a) => (b) => (a && b ? a : b);",
-        "link": "metrics/__tests__/NestedExpressionCallable.js#L1-L1",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "colonForm",
-      "language": "java",
-      "cc": 3,
-      "sloc": 7,
-      "mass": 7.937253933193772,
-      "location": {
-        "relative_path": "metrics/__tests__/SwitchForms.java",
-        "start_line": 2,
-        "end_line": 12,
-        "excerpt": "    int colonForm(int a) {\n        switch (a) {\n            case 1:\n                break;\n            case 2:\n                break;\n            default:\n                break;\n        }\n        return a;\n    }",
-        "link": "metrics/__tests__/SwitchForms.java#L2-L12",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "arrowForm",
-      "language": "java",
-      "cc": 3,
-      "sloc": 5,
-      "mass": 6.708203932499369,
-      "location": {
-        "relative_path": "metrics/__tests__/SwitchForms.java",
-        "start_line": 14,
-        "end_line": 21,
-        "excerpt": "    int arrowForm(int a) {\n        switch (a) {\n            case 1 -> a = 1;\n            case 2 -> a = 2;\n            default -> a = 3;\n        }\n        return a;\n    }",
-        "link": "metrics/__tests__/SwitchForms.java#L14-L21",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "m",
-      "language": "java",
-      "cc": 2,
-      "sloc": 4,
-      "mass": 4.0,
-      "location": {
-        "relative_path": "ir/ContainerSet.java",
-        "start_line": 7,
-        "end_line": 13,
-        "excerpt": "    void m(int x) {\n        switch (x) {\n            case 1:\n                int c = 3;\n                int d = 4;\n        }\n    }",
-        "link": "ir/ContainerSet.java#L7-L13",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "m",
-      "language": "java",
-      "cc": 2,
-      "sloc": 5,
-      "mass": 4.47213595499958,
-      "location": {
-        "relative_path": "ir/StructuralPredicates.java",
-        "start_line": 2,
-        "end_line": 10,
-        "excerpt": "    int m(boolean b) {\n        int x = 0;\n        try {\n            x = 1;\n        } catch (Exception e) {\n            return -1;\n        }\n        return x;\n    }",
-        "link": "ir/StructuralPredicates.java#L2-L10",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "m",
-      "language": "js_ts",
-      "cc": 2,
-      "sloc": 4,
-      "mass": 4.0,
-      "location": {
-        "relative_path": "ir/container_set.ts",
-        "start_line": 4,
-        "end_line": 10,
-        "excerpt": "function m(x: number): void {\n    switch (x) {\n        case 1:\n            let c = 3;\n            let d = 4;\n    }\n}",
-        "link": "ir/container_set.ts#L4-L10",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "m",
-      "language": "js_ts",
-      "cc": 2,
-      "sloc": 5,
-      "mass": 4.47213595499958,
-      "location": {
-        "relative_path": "ir/structural_predicates.ts",
-        "start_line": 1,
-        "end_line": 9,
-        "excerpt": "function m(b: boolean): number {\n    let x = 0;\n    try {\n        x = 1;\n    } catch (e) {\n        return -1;\n    }\n    return x;\n}",
-        "link": "ir/structural_predicates.ts#L1-L9",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "Point",
-      "language": "java",
-      "cc": 2,
-      "sloc": 2,
-      "mass": 2.8284271247461903,
-      "location": {
-        "relative_path": "metrics/__tests__/CallableKinds.java",
-        "start_line": 10,
-        "end_line": 14,
-        "excerpt": "    Point {\n        if (x < 0) {\n            x = 0;\n        }\n    }",
-        "link": "metrics/__tests__/CallableKinds.java#L10-L14",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "outer",
-      "language": "js_ts",
-      "cc": 2,
-      "sloc": 4,
-      "mass": 4.0,
-      "location": {
-        "relative_path": "metrics/__tests__/NestedCallable.js",
-        "start_line": 1,
-        "end_line": 7,
-        "excerpt": "function outer(a) {\n    const inner = (b) => (b > 0 ? b : -b);\n    if (a > 0) {\n        return inner(a);\n    }\n    return 0;\n}",
-        "link": "metrics/__tests__/NestedCallable.js#L1-L7",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "inner",
-      "language": "js_ts",
-      "cc": 2,
-      "sloc": 1,
-      "mass": 2.0,
-      "location": {
-        "relative_path": "metrics/__tests__/NestedCallable.js",
-        "start_line": 2,
-        "end_line": 2,
-        "excerpt": "    const inner = (b) => (b > 0 ? b : -b);",
-        "link": "metrics/__tests__/NestedCallable.js#L2-L2",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "<anonymous>@4",
-      "language": "js_ts",
-      "cc": 2,
-      "sloc": 1,
-      "mass": 2.0,
-      "location": {
-        "relative_path": "metrics/__tests__/NestedExpressionCallable.js",
-        "start_line": 4,
         "end_line": 4,
-        "excerpt": "  (c) => c || 1;",
-        "link": "metrics/__tests__/NestedExpressionCallable.js#L4-L4",
-        "is_remote_link": false
-      }
+        "is_remote_link": false,
+        "link": "report/src/\"><img onerror=1>.js#L3-L4",
+        "relative_path": "report/src/\"><img onerror=1>.js",
+        "start_line": 3
+      },
+      "rule_id": "JSTS-UNREACHABLE-AFTER-RETURN"
     },
     {
-      "name": "sloc",
-      "language": "js_ts",
-      "cc": 2,
-      "sloc": 6,
-      "mass": 4.898979485566356,
-      "location": {
-        "relative_path": "metrics/__tests__/SlocLines.js",
-        "start_line": 1,
-        "end_line": 12,
-        "excerpt": "function sloc(a) { let x = a;\n    // comment one\n    // comment two\n\n    if (x > 0) {\n        x = x + 1;\n    }\n    // comment three\n    let y = x + 1;\n    let z = y + 1;\n    return z;\n}",
-        "link": "metrics/__tests__/SlocLines.js#L1-L12",
-        "is_remote_link": false
-      }
-    },
-    {
-      "name": "ifConstruct",
+      "flagged_lines": [
+        6
+      ],
       "language": "java",
-      "cc": 2,
-      "sloc": 3,
-      "mass": 3.4641016151377544,
       "location": {
-        "relative_path": "parity/Constructs.java",
-        "start_line": 2,
-        "end_line": 8,
-        "excerpt": "    void ifConstruct(int a) {\n        if (a > 0) {\n            a = 1;\n        } else {\n            a = 2;\n        }\n    }",
-        "link": "parity/Constructs.java#L2-L8",
-        "is_remote_link": false
-      }
+        "end_line": 7,
+        "is_remote_link": false,
+        "link": "report/src/Sample.java#L5-L7",
+        "relative_path": "report/src/Sample.java",
+        "start_line": 5
+      },
+      "rule_id": "JAVA-REDUNDANT-ELSE-AFTER-RETURN"
+    },
+    {
+      "flagged_lines": [
+        13
+      ],
+      "language": "java",
+      "location": {
+        "end_line": 14,
+        "is_remote_link": false,
+        "link": "report/src/Sample.java#L13-L14",
+        "relative_path": "report/src/Sample.java",
+        "start_line": 13
+      },
+      "rule_id": "JAVA-EMPTY-CATCH"
+    },
+    {
+      "flagged_lines": [
+        8,
+        9
+      ],
+      "language": "java",
+      "location": {
+        "end_line": 9,
+        "is_remote_link": false,
+        "link": "rules/__tests__/JavaRulesFixture.java#L8-L9",
+        "relative_path": "rules/__tests__/JavaRulesFixture.java",
+        "start_line": 8
+      },
+      "rule_id": "JAVA-UNREACHABLE-AFTER-RETURN"
+    },
+    {
+      "flagged_lines": [
+        15
+      ],
+      "language": "java",
+      "location": {
+        "end_line": 16,
+        "is_remote_link": false,
+        "link": "rules/__tests__/JavaRulesFixture.java#L15-L16",
+        "relative_path": "rules/__tests__/JavaRulesFixture.java",
+        "start_line": 15
+      },
+      "rule_id": "JAVA-EMPTY-CATCH"
+    },
+    {
+      "flagged_lines": [
+        23
+      ],
+      "language": "java",
+      "location": {
+        "end_line": 24,
+        "is_remote_link": false,
+        "link": "rules/__tests__/JavaRulesFixture.java#L22-L24",
+        "relative_path": "rules/__tests__/JavaRulesFixture.java",
+        "start_line": 22
+      },
+      "rule_id": "JAVA-REDUNDANT-ELSE-AFTER-RETURN"
+    },
+    {
+      "flagged_lines": [
+        4,
+        5
+      ],
+      "language": "js_ts",
+      "location": {
+        "end_line": 5,
+        "is_remote_link": false,
+        "link": "rules/__tests__/JsRulesFixture.js#L4-L5",
+        "relative_path": "rules/__tests__/JsRulesFixture.js",
+        "start_line": 4
+      },
+      "rule_id": "JSTS-UNREACHABLE-AFTER-RETURN"
+    },
+    {
+      "flagged_lines": [
+        11
+      ],
+      "language": "js_ts",
+      "location": {
+        "end_line": 12,
+        "is_remote_link": false,
+        "link": "rules/__tests__/JsRulesFixture.js#L11-L12",
+        "relative_path": "rules/__tests__/JsRulesFixture.js",
+        "start_line": 11
+      },
+      "rule_id": "JSTS-EMPTY-CATCH"
+    },
+    {
+      "flagged_lines": [
+        19
+      ],
+      "language": "js_ts",
+      "location": {
+        "end_line": 20,
+        "is_remote_link": false,
+        "link": "rules/__tests__/JsRulesFixture.js#L18-L20",
+        "relative_path": "rules/__tests__/JsRulesFixture.js",
+        "start_line": 18
+      },
+      "rule_id": "JSTS-REDUNDANT-ELSE-AFTER-RETURN"
+    },
+    {
+      "flagged_lines": [
+        28,
+        29
+      ],
+      "language": "js_ts",
+      "location": {
+        "end_line": 29,
+        "is_remote_link": false,
+        "link": "rules/__tests__/JsRulesFixture.js#L28-L29",
+        "relative_path": "rules/__tests__/JsRulesFixture.js",
+        "start_line": 28
+      },
+      "rule_id": "JSTS-UNREACHABLE-AFTER-RETURN"
+    },
+    {
+      "flagged_lines": [
+        8,
+        9
+      ],
+      "language": "java",
+      "location": {
+        "end_line": 9,
+        "is_remote_link": false,
+        "link": "rules/src/RulesTrigger.java#L8-L9",
+        "relative_path": "rules/src/RulesTrigger.java",
+        "start_line": 8
+      },
+      "rule_id": "JAVA-UNREACHABLE-AFTER-RETURN"
+    },
+    {
+      "flagged_lines": [
+        15
+      ],
+      "language": "java",
+      "location": {
+        "end_line": 16,
+        "is_remote_link": false,
+        "link": "rules/src/RulesTrigger.java#L15-L16",
+        "relative_path": "rules/src/RulesTrigger.java",
+        "start_line": 15
+      },
+      "rule_id": "JAVA-EMPTY-CATCH"
+    },
+    {
+      "flagged_lines": [
+        23
+      ],
+      "language": "java",
+      "location": {
+        "end_line": 24,
+        "is_remote_link": false,
+        "link": "rules/src/RulesTrigger.java#L22-L24",
+        "relative_path": "rules/src/RulesTrigger.java",
+        "start_line": 22
+      },
+      "rule_id": "JAVA-REDUNDANT-ELSE-AFTER-RETURN"
+    },
+    {
+      "flagged_lines": [
+        4,
+        5
+      ],
+      "language": "js_ts",
+      "location": {
+        "end_line": 5,
+        "is_remote_link": false,
+        "link": "rules/src/rulesTrigger.js#L4-L5",
+        "relative_path": "rules/src/rulesTrigger.js",
+        "start_line": 4
+      },
+      "rule_id": "JSTS-UNREACHABLE-AFTER-RETURN"
+    },
+    {
+      "flagged_lines": [
+        11
+      ],
+      "language": "js_ts",
+      "location": {
+        "end_line": 12,
+        "is_remote_link": false,
+        "link": "rules/src/rulesTrigger.js#L11-L12",
+        "relative_path": "rules/src/rulesTrigger.js",
+        "start_line": 11
+      },
+      "rule_id": "JSTS-EMPTY-CATCH"
+    },
+    {
+      "flagged_lines": [
+        19
+      ],
+      "language": "js_ts",
+      "location": {
+        "end_line": 20,
+        "is_remote_link": false,
+        "link": "rules/src/rulesTrigger.js#L18-L20",
+        "relative_path": "rules/src/rulesTrigger.js",
+        "start_line": 18
+      },
+      "rule_id": "JSTS-REDUNDANT-ELSE-AFTER-RETURN"
     }
   ],
+  "fingerprints": {
+    "configuration": "blake3:28418c5b84cae6ec172c22fd9fc2ec9f",
+    "measurement": "blake3:43340e59d6e269babeb275808dda9960"
+  },
+  "incomplete": true,
+  "result_scope": "scan",
+  "scan": {
+    "exclude": [],
+    "include_tests": true,
+    "min_clone_lines": 10,
+    "revision": {
+      "dirty": null,
+      "sha": null,
+      "unavailable_reason": "not_a_git_repository"
+    },
+    "target": null
+  },
+  "schema_version": 1,
+  "scores": {
+    "java": {
+      "erosion": 0.36341828999901393,
+      "verbosity": {
+        "complete": false,
+        "flagged_lines": 154,
+        "ratio": 0.23692307692307693,
+        "scanned_lines": 650,
+        "unanalyzed_lines": 2
+      }
+    },
+    "js_ts": {
+      "erosion": 0.21627892399648804,
+      "verbosity": {
+        "complete": false,
+        "flagged_lines": 73,
+        "ratio": 0.19109947643979058,
+        "scanned_lines": 382,
+        "unanalyzed_lines": 3
+      }
+    },
+    "overall": {
+      "erosion": 0.3033434146761384,
+      "verbosity": {
+        "complete": false,
+        "flagged_lines": 227,
+        "ratio": 0.21996124031007752,
+        "scanned_lines": 1032,
+        "unanalyzed_lines": 5
+      }
+    }
+  },
+  "skipped": {
+    "dependency_or_build_output": 4,
+    "generated_code": 3,
+    "gitignore": 1,
+    "parse_grammar_setup": 0,
+    "parse_syntax_error": 4,
+    "parse_unreadable": 0,
+    "parse_unsupported_extension": 0,
+    "test": 0,
+    "unreadable": 0,
+    "user_exclude": 0
+  },
   "skipped_files": [
     {
-      "relative_path": "discover/sample/.gradle/Cache.java",
+      "detail": null,
       "reason": "dependency_or_build_output",
-      "detail": null
+      "relative_path": "discover/sample/.gradle/Cache.java"
     },
     {
-      "relative_path": "discover/sample/build/generated/Api_pb.js",
+      "detail": null,
       "reason": "generated_code",
-      "detail": null
+      "relative_path": "discover/sample/build/generated/Api_pb.js"
     },
     {
-      "relative_path": "discover/sample/dist/bundle.js",
+      "detail": null,
       "reason": "dependency_or_build_output",
-      "detail": null
+      "relative_path": "discover/sample/dist/bundle.js"
     },
     {
-      "relative_path": "discover/sample/node_modules/left-pad/index.js",
+      "detail": null,
       "reason": "dependency_or_build_output",
-      "detail": null
+      "relative_path": "discover/sample/node_modules/left-pad/index.js"
     },
     {
-      "relative_path": "discover/sample/src/ignored.ts",
+      "detail": null,
       "reason": "gitignore",
-      "detail": null
+      "relative_path": "discover/sample/src/ignored.ts"
     },
     {
-      "relative_path": "discover/sample/src/types.d.ts",
+      "detail": null,
       "reason": "generated_code",
-      "detail": null
+      "relative_path": "discover/sample/src/types.d.ts"
     },
     {
-      "relative_path": "discover/sample/src/vendor.min.js",
+      "detail": null,
       "reason": "generated_code",
-      "detail": null
+      "relative_path": "discover/sample/src/vendor.min.js"
     },
     {
-      "relative_path": "discover/sample/target/classes/Cached.java",
+      "detail": null,
       "reason": "dependency_or_build_output",
-      "detail": null
+      "relative_path": "discover/sample/target/classes/Cached.java"
     },
     {
-      "relative_path": "ir/JsxUnterminatedEntity.tsx",
-      "reason": "parse_syntax_error",
       "detail": "salvaged; first error at line 1",
       "gaps": [
         {
-          "start_line": 1,
-          "end_line": 1
+          "end_line": 1,
+          "start_line": 1
         }
       ],
+      "reason": "parse_syntax_error",
+      "relative_path": "ir/JsxUnterminatedEntity.tsx",
       "unmeasured_callables": 1
     },
     {
-      "relative_path": "ir/TsUsingParameter.ts",
-      "reason": "parse_syntax_error",
       "detail": "salvaged; first error at line 1",
       "gaps": [
         {
-          "start_line": 1,
-          "end_line": 1
+          "end_line": 1,
+          "start_line": 1
         },
         {
-          "start_line": 2,
-          "end_line": 2
+          "end_line": 2,
+          "start_line": 2
         }
       ],
+      "reason": "parse_syntax_error",
+      "relative_path": "ir/TsUsingParameter.ts",
       "unmeasured_callables": 1
     },
     {
-      "relative_path": "salvage/Mixed.java",
-      "reason": "parse_syntax_error",
       "detail": "salvaged; first error at line 12",
       "gaps": [
         {
-          "start_line": 12,
-          "end_line": 12
+          "end_line": 12,
+          "start_line": 12
         }
       ],
+      "reason": "parse_syntax_error",
+      "relative_path": "salvage/Mixed.java",
       "unmeasured_callables": 1
     },
     {
-      "relative_path": "salvage/Mixed.ts",
-      "reason": "parse_syntax_error",
       "detail": "salvaged; first error at line 8",
       "gaps": [
         {
-          "start_line": 8,
-          "end_line": 8
+          "end_line": 8,
+          "start_line": 8
         }
       ],
+      "reason": "parse_syntax_error",
+      "relative_path": "salvage/Mixed.ts",
       "unmeasured_callables": 1
     }
   ],
-  "incomplete": true,
-  "adaptation": {
-    "summary": "CC, SLOC, mass, erosion and verbosity are computed from this scanner's own Java/JS-TS AST rules, adapted from scb-check's Python-only formulas. No numerical equivalence to scb-check's own scores is claimed.",
-    "cc_rules_doc": "docs/cc-rules.md",
-    "wasteful_rules_doc": "docs/wasteful-rules.md"
-  }
+  "snapshots": {
+    "scan": null,
+    "unavailable_reason": "not_a_git_repository"
+  },
+  "top25": [
+    {
+      "cc": 15,
+      "language": "java",
+      "location": {
+        "end_line": 44,
+        "is_remote_link": false,
+        "link": "metrics/__tests__/Decisions.java#L2-L44",
+        "relative_path": "metrics/__tests__/Decisions.java",
+        "start_line": 2
+      },
+      "mass": 82.15838362577492,
+      "name": "decide",
+      "sloc": 30
+    },
+    {
+      "cc": 13,
+      "language": "js_ts",
+      "location": {
+        "end_line": 39,
+        "is_remote_link": false,
+        "link": "metrics/__tests__/JsDecisions.js#L1-L39",
+        "relative_path": "metrics/__tests__/JsDecisions.js",
+        "start_line": 1
+      },
+      "mass": 66.2872536767062,
+      "name": "decide",
+      "sloc": 26
+    },
+    {
+      "cc": 12,
+      "language": "java",
+      "location": {
+        "end_line": 12,
+        "is_remote_link": false,
+        "link": "metrics/erosion/HighComplexity.java#L2-L12",
+        "relative_path": "metrics/erosion/HighComplexity.java",
+        "start_line": 2
+      },
+      "mass": 36.0,
+      "name": "compute",
+      "sloc": 9
+    },
+    {
+      "cc": 12,
+      "language": "java",
+      "location": {
+        "end_line": 16,
+        "is_remote_link": false,
+        "link": "report_erosion/src/HighComplexity.java#L2-L16",
+        "relative_path": "report_erosion/src/HighComplexity.java",
+        "start_line": 2
+      },
+      "mass": 43.26661530556787,
+      "name": "classify",
+      "sloc": 13
+    },
+    {
+      "cc": 10,
+      "language": "java",
+      "location": {
+        "end_line": 19,
+        "is_remote_link": false,
+        "link": "erosion_boundary/Boundary.java#L7-L19",
+        "relative_path": "erosion_boundary/Boundary.java",
+        "start_line": 7
+      },
+      "mass": 33.166247903553995,
+      "name": "classify",
+      "sloc": 11
+    },
+    {
+      "cc": 9,
+      "language": "java",
+      "location": {
+        "end_line": 28,
+        "is_remote_link": false,
+        "link": "ir/Decisions.java#L2-L28",
+        "relative_path": "ir/Decisions.java",
+        "start_line": 2
+      },
+      "mass": 38.18376618407356,
+      "name": "m",
+      "sloc": 18
+    },
+    {
+      "cc": 9,
+      "language": "js_ts",
+      "location": {
+        "end_line": 27,
+        "is_remote_link": false,
+        "link": "ir/decisions.ts#L1-L27",
+        "relative_path": "ir/decisions.ts",
+        "start_line": 1
+      },
+      "mass": 38.18376618407356,
+      "name": "m",
+      "sloc": 18
+    },
+    {
+      "cc": 8,
+      "language": "js_ts",
+      "location": {
+        "end_line": 11,
+        "is_remote_link": false,
+        "link": "metrics/erosion/LowComplexity.js#L1-L11",
+        "relative_path": "metrics/erosion/LowComplexity.js",
+        "start_line": 1
+      },
+      "mass": 24.0,
+      "name": "lowComplexity",
+      "sloc": 9
+    },
+    {
+      "cc": 4,
+      "language": "js_ts",
+      "location": {
+        "end_line": 11,
+        "is_remote_link": false,
+        "link": "metrics/__tests__/BareControlFlow.js#L1-L11",
+        "relative_path": "metrics/__tests__/BareControlFlow.js",
+        "start_line": 1
+      },
+      "mass": 9.797958971132712,
+      "name": "loopy",
+      "sloc": 6
+    },
+    {
+      "cc": 3,
+      "language": "java",
+      "location": {
+        "end_line": 29,
+        "is_remote_link": false,
+        "link": "clones/__tests__/SwitchDupJava.java#L2-L29",
+        "relative_path": "clones/__tests__/SwitchDupJava.java",
+        "start_line": 2
+      },
+      "mass": 14.696938456699067,
+      "name": "run",
+      "sloc": 24
+    },
+    {
+      "cc": 3,
+      "language": "js_ts",
+      "location": {
+        "end_line": 37,
+        "is_remote_link": false,
+        "link": "clones/__tests__/SwitchDupJs.js#L1-L37",
+        "relative_path": "clones/__tests__/SwitchDupJs.js",
+        "start_line": 1
+      },
+      "mass": 17.233687939614086,
+      "name": "run",
+      "sloc": 33
+    },
+    {
+      "cc": 3,
+      "language": "js_ts",
+      "location": {
+        "end_line": 9,
+        "is_remote_link": false,
+        "link": "metrics/__tests__/ForOfOptional.js#L1-L9",
+        "relative_path": "metrics/__tests__/ForOfOptional.js",
+        "start_line": 1
+      },
+      "mass": 7.348469228349534,
+      "name": "forOfOptional",
+      "sloc": 6
+    },
+    {
+      "cc": 3,
+      "language": "js_ts",
+      "location": {
+        "end_line": 1,
+        "is_remote_link": false,
+        "link": "metrics/__tests__/NestedExpressionCallable.js#L1-L1",
+        "relative_path": "metrics/__tests__/NestedExpressionCallable.js",
+        "start_line": 1
+      },
+      "mass": 3.0,
+      "name": "<anonymous>@1",
+      "sloc": 1
+    },
+    {
+      "cc": 3,
+      "language": "java",
+      "location": {
+        "end_line": 12,
+        "is_remote_link": false,
+        "link": "metrics/__tests__/SwitchForms.java#L2-L12",
+        "relative_path": "metrics/__tests__/SwitchForms.java",
+        "start_line": 2
+      },
+      "mass": 7.937253933193772,
+      "name": "colonForm",
+      "sloc": 7
+    },
+    {
+      "cc": 3,
+      "language": "java",
+      "location": {
+        "end_line": 21,
+        "is_remote_link": false,
+        "link": "metrics/__tests__/SwitchForms.java#L14-L21",
+        "relative_path": "metrics/__tests__/SwitchForms.java",
+        "start_line": 14
+      },
+      "mass": 6.708203932499369,
+      "name": "arrowForm",
+      "sloc": 5
+    },
+    {
+      "cc": 2,
+      "language": "java",
+      "location": {
+        "end_line": 13,
+        "is_remote_link": false,
+        "link": "ir/ContainerSet.java#L7-L13",
+        "relative_path": "ir/ContainerSet.java",
+        "start_line": 7
+      },
+      "mass": 4.0,
+      "name": "m",
+      "sloc": 4
+    },
+    {
+      "cc": 2,
+      "language": "java",
+      "location": {
+        "end_line": 10,
+        "is_remote_link": false,
+        "link": "ir/StructuralPredicates.java#L2-L10",
+        "relative_path": "ir/StructuralPredicates.java",
+        "start_line": 2
+      },
+      "mass": 4.47213595499958,
+      "name": "m",
+      "sloc": 5
+    },
+    {
+      "cc": 2,
+      "language": "js_ts",
+      "location": {
+        "end_line": 10,
+        "is_remote_link": false,
+        "link": "ir/container_set.ts#L4-L10",
+        "relative_path": "ir/container_set.ts",
+        "start_line": 4
+      },
+      "mass": 4.0,
+      "name": "m",
+      "sloc": 4
+    },
+    {
+      "cc": 2,
+      "language": "js_ts",
+      "location": {
+        "end_line": 9,
+        "is_remote_link": false,
+        "link": "ir/structural_predicates.ts#L1-L9",
+        "relative_path": "ir/structural_predicates.ts",
+        "start_line": 1
+      },
+      "mass": 4.47213595499958,
+      "name": "m",
+      "sloc": 5
+    },
+    {
+      "cc": 2,
+      "language": "java",
+      "location": {
+        "end_line": 14,
+        "is_remote_link": false,
+        "link": "metrics/__tests__/CallableKinds.java#L10-L14",
+        "relative_path": "metrics/__tests__/CallableKinds.java",
+        "start_line": 10
+      },
+      "mass": 2.8284271247461903,
+      "name": "Point",
+      "sloc": 2
+    },
+    {
+      "cc": 2,
+      "language": "js_ts",
+      "location": {
+        "end_line": 7,
+        "is_remote_link": false,
+        "link": "metrics/__tests__/NestedCallable.js#L1-L7",
+        "relative_path": "metrics/__tests__/NestedCallable.js",
+        "start_line": 1
+      },
+      "mass": 4.0,
+      "name": "outer",
+      "sloc": 4
+    },
+    {
+      "cc": 2,
+      "language": "js_ts",
+      "location": {
+        "end_line": 2,
+        "is_remote_link": false,
+        "link": "metrics/__tests__/NestedCallable.js#L2-L2",
+        "relative_path": "metrics/__tests__/NestedCallable.js",
+        "start_line": 2
+      },
+      "mass": 2.0,
+      "name": "inner",
+      "sloc": 1
+    },
+    {
+      "cc": 2,
+      "language": "js_ts",
+      "location": {
+        "end_line": 4,
+        "is_remote_link": false,
+        "link": "metrics/__tests__/NestedExpressionCallable.js#L4-L4",
+        "relative_path": "metrics/__tests__/NestedExpressionCallable.js",
+        "start_line": 4
+      },
+      "mass": 2.0,
+      "name": "<anonymous>@4",
+      "sloc": 1
+    },
+    {
+      "cc": 2,
+      "language": "js_ts",
+      "location": {
+        "end_line": 12,
+        "is_remote_link": false,
+        "link": "metrics/__tests__/SlocLines.js#L1-L12",
+        "relative_path": "metrics/__tests__/SlocLines.js",
+        "start_line": 1
+      },
+      "mass": 4.898979485566356,
+      "name": "sloc",
+      "sloc": 6
+    },
+    {
+      "cc": 2,
+      "language": "java",
+      "location": {
+        "end_line": 8,
+        "is_remote_link": false,
+        "link": "parity/Constructs.java#L2-L8",
+        "relative_path": "parity/Constructs.java",
+        "start_line": 2
+      },
+      "mass": 3.4641016151377544,
+      "name": "ifConstruct",
+      "sloc": 3
+    }
+  ]
 }

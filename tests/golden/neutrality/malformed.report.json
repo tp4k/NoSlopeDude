@@ -1,100 +1,123 @@
 {
+  "adaptation": {
+    "cc_rules_doc": "docs/cc-rules.md",
+    "summary": "CC, SLOC, mass, erosion and verbosity are computed from this scanner's own Java/JS-TS AST rules, adapted from scb-check's Python-only formulas. No numerical equivalence to scb-check's own scores is claimed.",
+    "wasteful_rules_doc": "docs/wasteful-rules.md"
+  },
+  "callables": [],
+  "duplicates": [],
+  "findings": [],
+  "fingerprints": {
+    "configuration": "blake3:28418c5b84cae6ec172c22fd9fc2ec9f",
+    "measurement": "blake3:43340e59d6e269babeb275808dda9960"
+  },
+  "incomplete": true,
+  "result_scope": "scan",
   "scan": {
-    "target": "<neutrality-corpus>",
+    "exclude": [],
+    "include_tests": true,
+    "min_clone_lines": 10,
     "revision": {
-      "sha": null,
       "dirty": null,
+      "sha": null,
       "unavailable_reason": "not_a_git_repository"
     },
-    "include_tests": true,
-    "exclude": [],
-    "min_clone_lines": 10
+    "target": null
   },
+  "schema_version": 1,
   "scores": {
-    "overall": {
-      "erosion": 0.0,
-      "verbosity": {
-        "flagged_lines": 0,
-        "scanned_lines": 3,
-        "unanalyzed_lines": 5,
-        "complete": false,
-        "ratio": 0.0
-      }
-    },
     "java": {
       "erosion": 0.0,
       "verbosity": {
-        "flagged_lines": 0,
-        "scanned_lines": 3,
-        "unanalyzed_lines": 3,
         "complete": false,
-        "ratio": 0.0
+        "flagged_lines": 0,
+        "ratio": 0.0,
+        "scanned_lines": 3,
+        "unanalyzed_lines": 3
       }
     },
     "js_ts": {
       "erosion": 0.0,
       "verbosity": {
-        "flagged_lines": 0,
-        "scanned_lines": 0,
-        "unanalyzed_lines": 2,
         "complete": false,
-        "ratio": 0.0
+        "flagged_lines": 0,
+        "ratio": 0.0,
+        "scanned_lines": 0,
+        "unanalyzed_lines": 2
+      }
+    },
+    "overall": {
+      "erosion": 0.0,
+      "verbosity": {
+        "complete": false,
+        "flagged_lines": 0,
+        "ratio": 0.0,
+        "scanned_lines": 3,
+        "unanalyzed_lines": 5
       }
     }
   },
-  "findings": [],
-  "duplicates": [],
-  "top25": [],
+  "skipped": {
+    "dependency_or_build_output": 0,
+    "generated_code": 0,
+    "gitignore": 0,
+    "parse_grammar_setup": 0,
+    "parse_syntax_error": 3,
+    "parse_unreadable": 0,
+    "parse_unsupported_extension": 0,
+    "test": 0,
+    "unreadable": 0,
+    "user_exclude": 0
+  },
   "skipped_files": [
     {
-      "relative_path": "metrics/broken/Broken.ts",
-      "reason": "parse_syntax_error",
       "detail": "salvaged; first error at line 1",
       "gaps": [
         {
-          "start_line": 1,
-          "end_line": 1
+          "end_line": 1,
+          "start_line": 1
         },
         {
-          "start_line": 2,
-          "end_line": 2
+          "end_line": 2,
+          "start_line": 2
         }
       ],
+      "reason": "parse_syntax_error",
+      "relative_path": "metrics/broken/Broken.ts",
       "unmeasured_callables": 1
     },
     {
-      "relative_path": "report/src/Broken.java",
-      "reason": "parse_syntax_error",
       "detail": "salvaged; first error at line 2",
       "gaps": [
         {
-          "start_line": 2,
-          "end_line": 2
+          "end_line": 2,
+          "start_line": 2
         },
         {
-          "start_line": 3,
-          "end_line": 3
+          "end_line": 3,
+          "start_line": 3
         }
       ],
+      "reason": "parse_syntax_error",
+      "relative_path": "report/src/Broken.java",
       "unmeasured_callables": 1
     },
     {
-      "relative_path": "rules/broken/Broken.java",
-      "reason": "parse_syntax_error",
       "detail": "salvaged; first error at line 5",
       "gaps": [
         {
-          "start_line": 5,
-          "end_line": 5
+          "end_line": 5,
+          "start_line": 5
         }
       ],
+      "reason": "parse_syntax_error",
+      "relative_path": "rules/broken/Broken.java",
       "unmeasured_callables": 1
     }
   ],
-  "incomplete": true,
-  "adaptation": {
-    "summary": "CC, SLOC, mass, erosion and verbosity are computed from this scanner's own Java/JS-TS AST rules, adapted from scb-check's Python-only formulas. No numerical equivalence to scb-check's own scores is claimed.",
-    "cc_rules_doc": "docs/cc-rules.md",
-    "wasteful_rules_doc": "docs/wasteful-rules.md"
-  }
+  "snapshots": {
+    "scan": null,
+    "unavailable_reason": "not_a_git_repository"
+  },
+  "top25": []
 }
