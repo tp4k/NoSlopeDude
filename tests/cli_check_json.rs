@@ -576,7 +576,7 @@ fn test_check_format_json_escapes_control_characters() {
     assert_eq!(rendered.matches('\n').count(), 1, "{rendered:?}");
     assert!(!rendered.bytes().any(|byte| byte < 0x20 && byte != b'\n'));
     let parsed: Value = serde_json::from_str(&rendered).expect("valid JSON");
-    assert_eq!(parsed["diagnostics"][0]["callable"], json!(hostile));
+    assert_eq!(parsed["diagnostics"][0]["callable"], json!("<computed>@1"));
 }
 
 #[test]

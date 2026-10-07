@@ -73,15 +73,27 @@ pub struct ReportEntity {
     pub mass: f64,
 }
 
-/// `name` as the canonical JSON publishes it. A computed-member callable is
-/// named by its whole assignment target, which can be arbitrary multi-line
-/// source, so a name holding a line break, `[` or `(` is replaced by a
-/// placeholder that locates the callable without quoting source.
+const ANONYMOUS_PREFIX: &str = "<anonymous>@";
+const NAME_PUNCTUATION: [char; 4] = ['_', '$', '.', '#'];
+
+/// `name` as the canonical JSON publishes it. A lowered name is the raw text
+/// of the whole name node, which can hold comments, patterns or arbitrary
+/// source, so only an identifier-like name (alphanumerics and `_ $ . #`) or
+/// `<anonymous>@<digits>` is published as is. Any other name becomes the
+/// placeholder `<computed>@<start_line>`, which locates the callable without
+/// quoting source.
 pub fn published_name(name: &str, start_line: usize) -> String {
-    if name.contains(['\n', '\r', '[', '(']) {
-        format!("{COMPUTED_NAME}@{start_line}")
-    } else {
+    let identifier_like = !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_alphanumeric() || NAME_PUNCTUATION.contains(&c));
+    let anonymous = name
+        .strip_prefix(ANONYMOUS_PREFIX)
+        .is_some_and(|line| !line.is_empty() && line.chars().all(|c| c.is_ascii_digit()));
+    if identifier_like || anonymous {
         name.to_string()
+    } else {
+        format!("{COMPUTED_NAME}@{start_line}")
     }
 }
 
