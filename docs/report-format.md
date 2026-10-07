@@ -205,7 +205,10 @@ neither the numerator nor the denominator.
   path's suffix: discovery records the path before it knows whether it is a
   file or a directory, so a directory named `locked.ts` may hold Java. A policy
   exclusion (`--exclude`, `.gitignore`, test, generated or dependency paths)
-  never affects `complete`.
+  of a file or of a readable path never affects `complete`. An unreadable
+  directory is the exception: it is reported as `unreadable`, and so makes
+  `complete` false, even when it is also gitignored or otherwise excluded,
+  because discovery cannot tell what it would have held.
 - An empty family has `scanned_lines` 0 and `ratio` `0.0`.
 
 ### Top-25 span
