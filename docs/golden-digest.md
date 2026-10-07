@@ -159,6 +159,17 @@ path is read only from `NSD_ARCHIVED_REPORT` at invocation time, exactly
 like the M0b check; without it the test prints a PENDING notice, same as
 above.
 
+The archive checkout's cleanliness check opens the recipe target with
+`git2::Repository::discover`, so a `recipe.target` that is a subdirectory of
+the checkout passes it; a target outside any repository still fails loudly.
+M6 WS-4 did not run the recapture (`NSD_ARCHIVED_REPORT` unset): the
+committed digest is unchanged and the gate is pending (status row M6-2b).
+The expected field-by-field diff, to be confirmed at recapture, is `body_blake3`
+(the six WS-3 top-level keys, dropped `excerpt` keys and null `scan.target`)
+and, if the digest copies the whole `scores.*.verbosity` object, the
+`unanalyzed_lines`/`complete` keys WS-1 added; any other moved field needs its
+own explanation (no silent re-baseline).
+
 Re-capturing (implementer-only; overwrites the committed file) sets a
 second, separate opt-in alongside the archive path:
 
