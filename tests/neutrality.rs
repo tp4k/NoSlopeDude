@@ -459,6 +459,8 @@ fn test_format_delta_comparator_catches_a_planted_measurement_mutation() {
         "/scores/java/verbosity/scanned_lines",
         "/scores/java/verbosity/ratio",
         "/scores/java/erosion",
+        "/findings/0/location/start_line",
+        "/duplicates/0/redundant_lines",
     ] {
         assert_eq!(
             diff_ignoring_format_deltas(&live, &bump(pointer), &[]),
