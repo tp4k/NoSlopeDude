@@ -471,6 +471,26 @@ fn test_format_delta_comparator_catches_a_planted_measurement_mutation() {
         Vec::<String>::new(),
         "an enumerated added key is a declared format delta"
     );
+
+    let salvaged_index = live["skipped_files"]
+        .as_array()
+        .and_then(|rows| {
+            rows.iter()
+                .position(|row| row["reason"] == SALVAGED_ROW_REASON)
+        })
+        .expect("the clean corpus holds a salvaged fixture");
+    let mut detail_mutated = live.clone();
+    detail_mutated["skipped_files"][salvaged_index]["detail"] = json!("a different detail");
+    assert_ne!(
+        live["skipped_files"][salvaged_index]["detail"],
+        detail_mutated["skipped_files"][salvaged_index]["detail"],
+        "the planted detail must differ from the live one"
+    );
+    assert_eq!(
+        diff_ignoring_format_deltas(&live, &detail_mutated, &[]),
+        vec![format!("/skipped_files/{salvaged_index}/detail")],
+        "a non-enumerated key of a salvaged row must be reported"
+    );
 }
 
 #[test]

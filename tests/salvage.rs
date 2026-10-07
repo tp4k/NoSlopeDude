@@ -242,10 +242,11 @@ fn test_salvaged_file_lists_its_mapped_parser_gaps() {
             )
         })
         .collect();
-    let shared_start = nested_gaps
-        .iter()
-        .enumerate()
-        .any(|(index, gap)| nested_gaps[index + 1..].iter().any(|other| other.0 == gap.0));
+    let shared_start = nested_gaps.iter().enumerate().any(|(index, gap)| {
+        nested_gaps[index + 1..]
+            .iter()
+            .any(|other| other.0 == gap.0)
+    });
     assert!(
         shared_start,
         "a.ts must hold two gaps sharing a start line, or the order check is vacuous: {nested_gaps:?}"
