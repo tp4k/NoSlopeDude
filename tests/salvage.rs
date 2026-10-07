@@ -215,12 +215,47 @@ fn test_salvaged_file_lists_its_mapped_parser_gaps() {
         "class Two {\n    void a(int x {\n        return;\n    }\n    void ok() {\n        return;\n    }\n    void b(int y {\n        return;\n    }\n}\n",
     )
     .expect("write Two.java");
+    fs::write(
+        dir.path().join("a.ts"),
+        "function f() {\n  let x = [1, 2,\n    3 +;\n  g(;\n}\nconst y = {a: 1, b:: 2,\n  c: 3};\n",
+    )
+    .expect("write a.ts");
 
     let (_dir, output) = run_scan(dir.path(), |_| {});
     let json_text =
         fs::read_to_string(output.settings.output.join("report.json")).expect("report.json exists");
     let value: serde_json::Value = serde_json::from_str(&json_text).expect("valid JSON");
     let rows = value["skipped_files"].as_array().expect("skipped_files");
+
+    let nested = rows
+        .iter()
+        .find(|row| row["relative_path"] == "a.ts")
+        .unwrap_or_else(|| panic!("a.ts is listed: {rows:?}"));
+    let nested_gaps: Vec<(u64, u64)> = nested["gaps"]
+        .as_array()
+        .expect("gaps")
+        .iter()
+        .map(|gap| {
+            (
+                gap["start_line"].as_u64().expect("start_line"),
+                gap["end_line"].as_u64().expect("end_line"),
+            )
+        })
+        .collect();
+    let shared_start = nested_gaps
+        .iter()
+        .enumerate()
+        .any(|(index, gap)| nested_gaps[index + 1..].iter().any(|other| other.0 == gap.0));
+    assert!(
+        shared_start,
+        "a.ts must hold two gaps sharing a start line, or the order check is vacuous: {nested_gaps:?}"
+    );
+    let mut sorted = nested_gaps.clone();
+    sorted.sort_unstable();
+    assert_eq!(
+        nested_gaps, sorted,
+        "gaps are ordered by (start_line, end_line)"
+    );
 
     let expected = [
         ("Mixed.java", vec![(12, 12)], 1),
