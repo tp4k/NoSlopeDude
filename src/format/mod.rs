@@ -6,7 +6,7 @@ mod json;
 use crate::check::CheckDiagnostic;
 use crate::git::path::RepoPath;
 
-pub use json::render_json;
+pub use json::{canonical_document, float, render_check_json, render_json};
 
 /// The file a `CheckDiagnostic::Config` is about.
 const CANDIDATE_CONFIG_FILE: &str = "nsd.yml";

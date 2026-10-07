@@ -106,3 +106,14 @@ pub fn fingerprint(inputs: &MeasurementProfileInputs) -> String {
     digest.push(&inputs.min_clone_lines.to_le_bytes());
     format!("blake3:{:032x}", digest.finish())
 }
+
+/// The fingerprint of a run measuring with `min_clone_lines` (a check's
+/// trusted `measurement.min_clone_lines`, a scan's `--min-clone-lines`): the
+/// live profile with only that threshold replaced. Never the bare
+/// `MeasurementProfileInputs::current()`, whose threshold is the default.
+pub fn measurement_fingerprint(min_clone_lines: u32) -> String {
+    fingerprint(&MeasurementProfileInputs {
+        min_clone_lines,
+        ..MeasurementProfileInputs::current()
+    })
+}

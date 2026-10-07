@@ -2,7 +2,9 @@
 //! and configuration*). Every internal failure is a diagnostic in the
 //! outcome, never an `Err`, so the exit status is always 2-class for them.
 
-use std::collections::{HashMap, HashSet};
+mod details;
+
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
@@ -17,18 +19,23 @@ use crate::config::{Config, PolicyConfig, Severity};
 use crate::git::diff::{
     diff_commit_to_commit, diff_commit_to_index, diff_commit_to_worktree, Change,
 };
-use crate::git::discovery::{discover, IncludedEntry};
+use crate::git::discovery::{discover, IncludedEntry, SkippedEntry};
 use crate::git::mergebase::merge_base;
 use crate::git::path::RepoPath;
 use crate::git::snapshot::{CommitSnapshot, Entry, IndexSnapshot, WorktreeSnapshot};
+use crate::git::snapshot_id::SnapshotId;
 use crate::git::{wrap_git_error, GitError, CODE_SNAPSHOT_UNAVAILABLE};
-use crate::identity::matching::{match_callables, FileCallables};
+use crate::identity::matching::{match_callables, FileCallables, MatchOutput};
+use crate::lower;
 use crate::model::Grammar;
+use crate::model::LanguageFamily;
+use crate::parse;
 use crate::policy;
 use crate::policy::clones::{evaluate_clones_precomputed, UnchangedCandidates};
 use crate::policy::complexity::{classify, FileMetrics};
 use crate::policy::coverage::{evaluate_coverage, CoverageInput};
 use crate::policy::damage::evaluate_damage;
+use crate::policy::damage::{mapped_gaps, MappedGap};
 use crate::policy::diagnostics::{
     CloneDiagnostic, CoverageDiagnostic, DamageDiagnostic, FindingDiagnostic, PolicyDiagnostic,
     SuppressionDiagnostic,
@@ -36,8 +43,14 @@ use crate::policy::diagnostics::{
 use crate::policy::exit::exit_status;
 use crate::policy::findings::{match_findings, FindingFile};
 use crate::policy::Candidate;
-use crate::profile::{fingerprint, MeasurementProfileInputs};
+use crate::profile::measurement_fingerprint;
+use crate::rules;
 use crate::suppress::apply_suppressions;
+
+use details::{skip_counts, summarize, FileFacts};
+pub use details::{
+    CheckDetails, Entity, EntityBase, FamilySummary, FileCoverage, Gap, Summaries, SKIP_KEYS,
+};
 
 /// What the candidate side of a check is.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,7 +112,7 @@ impl CheckDiagnostic {
 }
 
 /// The complete diagnostic set of one check and its exit status.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CheckOutcome {
     /// Grouped in a fixed order: configuration, read failures, complexity,
     /// findings, suppressions, damage, coverage, clones; each group in its
@@ -110,14 +123,17 @@ pub struct CheckOutcome {
     /// Exit-neutral notes about the run, outside `diagnostics`: at most one,
     /// raised when the analysis cache failed and the run continued uncached.
     pub warnings: Vec<String>,
+    /// The canonical document's other sections; `None` when the run failed
+    /// before it had both sides to describe.
+    pub details: Option<CheckDetails>,
 }
 
 /// Runs one check. Never fails: an internal error is an `NSD-G101` (or the
 /// `resolve` error's own code) in the outcome.
 pub fn run_check(request: &CheckRequest<'_>) -> CheckOutcome {
-    let (diagnostics, policy, warnings) = match execute(request) {
+    let (diagnostics, policy, warnings, details) = match execute(request) {
         Ok(checked) => checked,
-        Err(diagnostics) => (diagnostics, Config::default().policy, Vec::new()),
+        Err(diagnostics) => (diagnostics, Config::default().policy, Vec::new(), None),
     };
     let exit_status = exit_status(
         diagnostics.iter().map(CheckDiagnostic::code),
@@ -128,6 +144,7 @@ pub fn run_check(request: &CheckRequest<'_>) -> CheckOutcome {
         diagnostics,
         exit_status,
         warnings,
+        details,
     }
 }
 
@@ -151,6 +168,15 @@ impl Snapshot {
             Snapshot::Commit(snapshot) => snapshot.read(repo, entry),
             Snapshot::Index(snapshot) => snapshot.read(repo, entry),
             Snapshot::Worktree(snapshot) => snapshot.read(repo, entry),
+        }
+    }
+
+    /// The content-addressed ID of this side.
+    fn id(&self, repo: &Repository) -> Result<SnapshotId, GitError> {
+        match self {
+            Snapshot::Commit(snapshot) => Ok(SnapshotId::of_commit(snapshot)),
+            Snapshot::Index(snapshot) => Ok(SnapshotId::of_index(snapshot)),
+            Snapshot::Worktree(snapshot) => SnapshotId::of_worktree(repo, snapshot),
         }
     }
 
@@ -217,13 +243,20 @@ fn open_sides(
     }
 }
 
-type Checked = (Vec<CheckDiagnostic>, PolicyConfig, Vec<String>);
+type Checked = (
+    Vec<CheckDiagnostic>,
+    PolicyConfig,
+    Vec<String>,
+    Option<CheckDetails>,
+);
 
 fn execute(request: &CheckRequest<'_>) -> Result<Checked, Vec<CheckDiagnostic>> {
     let repo = Repository::open(request.repository)
         .map_err(|err| git_failure(&wrap_git_error("cannot open the repository", &err)))?;
     let (base, candidate, changes) =
         open_sides(&repo, &request.mode).map_err(|e| git_failure(&e))?;
+    let base_id = SnapshotId::of_commit(&base);
+    let candidate_id = candidate.id(&repo).map_err(|e| git_failure(&e))?;
     let resolution = policy::resolve(&repo, request.config_path, &base, candidate.as_candidate())
         .map_err(|err| {
         vec![CheckDiagnostic::Failure {
@@ -254,11 +287,25 @@ fn execute(request: &CheckRequest<'_>) -> Result<Checked, Vec<CheckDiagnostic>> 
         config: &resolution.config,
         scope: &scope,
     };
-    diagnostics.extend(sides.evaluate());
+    let evaluation = sides.evaluate();
+    diagnostics.extend(evaluation.diagnostics);
+    let details = evaluation.sections.map(|sections| CheckDetails {
+        base_snapshot: base_id.to_string(),
+        candidate_snapshot: candidate_id.to_string(),
+        measurement_fingerprint: measurement_fingerprint(
+            resolution.config.measurement.min_clone_lines,
+        ),
+        configuration_fingerprint: resolution.config.fingerprint(),
+        skipped: sections.skipped,
+        entities: sections.entities,
+        summaries: sections.summaries,
+        coverage: sections.coverage,
+    });
     Ok((
         diagnostics,
         resolution.config.policy,
         session.into_warnings(),
+        details,
     ))
 }
 
@@ -268,6 +315,9 @@ struct Loaded {
     path: RepoPath,
     bytes: Vec<u8>,
     analysis: FileAnalysis,
+    /// Executable lines lowering pruned; counted for candidate files only,
+    /// `0` for a base file, whose summary nobody reads.
+    unanalyzed_lines: usize,
 }
 
 impl Loaded {
@@ -289,6 +339,26 @@ impl Loaded {
                 .map(|callable| (callable.identity.clone(), callable.body_fingerprint.clone()))
                 .collect(),
         }
+    }
+
+    fn facts(&self) -> FileFacts {
+        FileFacts::new(
+            self.path.clone(),
+            self.analysis.language,
+            self.analysis
+                .callables
+                .iter()
+                .map(|callable| callable.metrics.clone())
+                .collect(),
+            self.analysis
+                .findings
+                .iter()
+                .map(|analyzed| analyzed.finding.clone())
+                .collect(),
+            rules::executable_lines_from_ir(&self.analysis.ir),
+            self.unanalyzed_lines,
+            !self.analysis.ir.damage.is_empty(),
+        )
     }
 
     fn metrics(&self) -> FileMetrics {
@@ -369,6 +439,25 @@ fn required_bytes(
     }
 }
 
+/// The executable lines lowering pruned from `analysis`'s file. Zero without
+/// a re-parse unless the IR records damage or an excluded callable or block;
+/// otherwise the file is parsed and lowered once more for the inventory
+/// `analyze_file` drops.
+fn unanalyzed_lines_of(path: &RepoPath, bytes: &[u8], analysis: &FileAnalysis) -> usize {
+    let ir = &analysis.ir;
+    if ir.damage.is_empty() && ir.excluded_callables.is_empty() && ir.excluded_blocks.is_empty() {
+        return 0;
+    }
+    let (Ok(text), Ok(source)) = (
+        std::str::from_utf8(path.as_bytes()),
+        String::from_utf8(bytes.to_vec()),
+    ) else {
+        return 0;
+    };
+    let (parsed, _failure) = parse::parse_source(Path::new(text), analysis.language, source);
+    parsed.map_or(0, |parsed| lower::lower_file_inventoried(&parsed).1)
+}
+
 /// Analyzes one file's bytes under its repository path.
 fn analyze_bytes(path: &RepoPath, bytes: &[u8]) -> Result<FileAnalysis, UnanalyzableReason> {
     match std::str::from_utf8(path.as_bytes()) {
@@ -404,13 +493,9 @@ struct CacheSession {
 
 impl CacheSession {
     fn open(repo: &Repository, min_clone_lines: u32) -> CacheSession {
-        let inputs = MeasurementProfileInputs {
-            min_clone_lines,
-            ..MeasurementProfileInputs::current()
-        };
         let session = CacheSession {
             cache: None,
-            fingerprint: fingerprint(&inputs),
+            fingerprint: measurement_fingerprint(min_clone_lines),
             disabled: AtomicBool::new(false),
             warning: Mutex::new(None),
         };
@@ -486,7 +571,7 @@ struct LoadTask<'a> {
 enum Load {
     Failure(CheckDiagnostic),
     Changed(Box<Loaded>),
-    Unchanged(UnchangedCandidates),
+    Unchanged(UnchangedCandidates, Box<FileFacts>),
     Unanalyzable(UnanalyzableReason),
 }
 
@@ -539,6 +624,7 @@ fn load_base(repo: &Repository, task: &LoadTask<'_>, read: ReadBlob<'_>) -> Load
             path: task.included.path.clone(),
             bytes,
             analysis,
+            unanalyzed_lines: 0,
         })),
         Err(reason) => Load::Unanalyzable(reason),
     }
@@ -547,29 +633,58 @@ fn load_base(repo: &Repository, task: &LoadTask<'_>, read: ReadBlob<'_>) -> Load
 /// An unchanged file's cached payload as the clone candidates and outcome
 /// clone evaluation needs.
 fn unchanged_load(included: &IncludedEntry, found: CachedAnalysis) -> Load {
+    let facts = found
+        .hydrate(Path::new(&included.path.render()), included.language)
+        .ok()
+        .map(|hydrated| {
+            FileFacts::new(
+                included.path.clone(),
+                included.language,
+                hydrated
+                    .callables
+                    .into_iter()
+                    .map(|callable| callable.metrics)
+                    .collect(),
+                hydrated
+                    .findings
+                    .into_iter()
+                    .map(|analyzed| analyzed.finding)
+                    .collect(),
+                hydrated.executable_lines,
+                hydrated.unanalyzed_lines,
+                !hydrated.damage.is_empty(),
+            )
+        });
     match found {
-        CachedAnalysis::Analyzed(payload) => Load::Unchanged(UnchangedCandidates {
-            path: included.path.clone(),
-            language: included.language,
-            candidates: payload
-                .clone_candidates
-                .into_iter()
-                .map(|stored| {
-                    (
-                        stored.key,
-                        CloneRun {
-                            file_index: 0,
-                            container: stored.container,
-                            first_statement: stored.first_statement,
-                            start_line: stored.start_line,
-                            end_line: stored.end_line,
-                            source_lines: stored.source_lines,
-                            statement_count: stored.statement_count,
-                        },
-                    )
-                })
-                .collect(),
-        }),
+        // An analyzed payload always hydrates; the fallback is unreachable.
+        CachedAnalysis::Analyzed(_) if facts.is_none() => {
+            Load::Unanalyzable(UnanalyzableReason::InvalidEncoding)
+        }
+        CachedAnalysis::Analyzed(payload) => Load::Unchanged(
+            UnchangedCandidates {
+                path: included.path.clone(),
+                language: included.language,
+                candidates: payload
+                    .clone_candidates
+                    .into_iter()
+                    .map(|stored| {
+                        (
+                            stored.key,
+                            CloneRun {
+                                file_index: 0,
+                                container: stored.container,
+                                first_statement: stored.first_statement,
+                                start_line: stored.start_line,
+                                end_line: stored.end_line,
+                                source_lines: stored.source_lines,
+                                statement_count: stored.statement_count,
+                            },
+                        )
+                    })
+                    .collect(),
+            },
+            Box::new(facts.expect("checked above")),
+        ),
         CachedAnalysis::Unanalyzable(CachedReason::InvalidEncoding) => {
             Load::Unanalyzable(UnanalyzableReason::InvalidEncoding)
         }
@@ -613,12 +728,16 @@ fn load_candidate(
         }
     }
     let analysis = analyze_bytes(&included.path, &bytes);
+    let unanalyzed_lines = analysis.as_ref().map_or(0, |analysis| {
+        unanalyzed_lines_of(&included.path, &bytes, analysis)
+    });
     let payload_wanted = !task.changed || (cache.active().is_some() && v102 != Severity::Off);
     let payload = match &analysis {
         _ if !payload_wanted => None,
-        Ok(analysis) => std::str::from_utf8(&bytes)
-            .ok()
-            .map(|source| CachedAnalysis::from_analysis(analysis, source, min_clone_lines)),
+        Ok(analysis) => std::str::from_utf8(&bytes).ok().map(|source| {
+            CachedAnalysis::from_analysis(analysis, source, min_clone_lines)
+                .with_unanalyzed_lines(unanalyzed_lines)
+        }),
         Err(reason) => CachedAnalysis::unanalyzable(*reason),
     };
     if let (Some(payload), Some(grammar), Some(blob)) = (&payload, grammar, analyzed_blob) {
@@ -629,6 +748,7 @@ fn load_candidate(
             path: included.path.clone(),
             bytes,
             analysis,
+            unanalyzed_lines,
         })),
         Ok(_) => payload.map_or(
             Load::Unanalyzable(UnanalyzableReason::InvalidEncoding),
@@ -655,32 +775,166 @@ struct Loads {
     base: Vec<Loaded>,
     changed: Vec<Loaded>,
     unchanged: Vec<UnchangedCandidates>,
+    /// The facts of the unchanged candidate files, same order as `unchanged`.
+    unchanged_facts: Vec<FileFacts>,
     coverage: Vec<CoverageInput>,
     failures: Vec<CheckDiagnostic>,
+    /// The candidate snapshot's discovery skips.
+    discovery_skips: Vec<SkippedEntry>,
+    /// The candidate-side files no analysis could be made of.
+    unanalyzed: Vec<Unanalyzed>,
+}
+
+/// One candidate-side file that could not be analyzed.
+struct Unanalyzed {
+    path: RepoPath,
+    language: LanguageFamily,
+    changed: bool,
+    reason: UnanalyzableReason,
+}
+
+/// The reason a coverage input is unanalyzable, by the same precedence as
+/// A102: the entry's own flags first, then the analysis outcome.
+fn input_reason(
+    entry: &IncludedEntry,
+    failure: Option<UnanalyzableReason>,
+) -> Option<UnanalyzableReason> {
+    if entry.too_large {
+        Some(UnanalyzableReason::TooLarge)
+    } else if entry.non_utf8_path {
+        Some(UnanalyzableReason::NonUtf8Path)
+    } else {
+        failure
+    }
+}
+
+/// The sections of the canonical document a run's loads and evaluators fill.
+struct Sections {
+    skipped: BTreeMap<&'static str, usize>,
+    entities: Vec<Entity>,
+    summaries: Summaries,
+    coverage: Vec<FileCoverage>,
+}
+
+struct Evaluation {
+    diagnostics: Vec<CheckDiagnostic>,
+    /// `None` when an evaluator failed, so no section can be trusted.
+    sections: Option<Sections>,
+}
+
+/// What `run_evaluators` yields beside the diagnostics.
+struct Evaluated {
+    diagnostics: Vec<CheckDiagnostic>,
+    entities: Vec<Entity>,
+    gaps: BTreeMap<RepoPath, Vec<MappedGap>>,
 }
 
 impl Sides<'_> {
-    fn evaluate(&self) -> Vec<CheckDiagnostic> {
-        let loads = self.load();
-        let mut diagnostics = loads.failures;
+    fn evaluate(&self) -> Evaluation {
+        let mut loads = self.load();
+        let mut diagnostics = std::mem::take(&mut loads.failures);
         let policy = &self.config.policy;
-        match self.run_evaluators(
+        let sections = match self.run_evaluators(
             &loads.base,
             &loads.changed,
             &loads.unchanged,
             &loads.coverage,
             policy,
         ) {
-            Ok(found) => diagnostics.extend(found),
-            Err(err) => diagnostics.extend(git_failure(&err)),
+            Ok(found) => {
+                diagnostics.extend(found.diagnostics);
+                Some(self.sections(&loads, found.entities, &found.gaps))
+            }
+            Err(err) => {
+                diagnostics.extend(git_failure(&err));
+                None
+            }
+        };
+        Evaluation {
+            diagnostics,
+            sections,
         }
-        diagnostics
+    }
+
+    /// The document sections: the settled summary scope is `full` when
+    /// unchanged files were analyzed (V102 not off), `changed` otherwise.
+    fn sections(
+        &self,
+        loads: &Loads,
+        entities: Vec<Entity>,
+        gaps: &BTreeMap<RepoPath, Vec<MappedGap>>,
+    ) -> Sections {
+        let full = self.config.policy.nsd_v102 != Severity::Off;
+        let changed_facts: Vec<FileFacts> = loads.changed.iter().map(Loaded::facts).collect();
+        let mut scoped: Vec<&FileFacts> = changed_facts.iter().collect();
+        if full {
+            scoped.extend(loads.unchanged_facts.iter());
+        }
+        let lost: Vec<LanguageFamily> = loads
+            .unanalyzed
+            .iter()
+            .filter(|input| input.reason != UnanalyzableReason::UnsupportedExtension)
+            .map(|input| input.language)
+            .collect();
+        let reasons: Vec<&'static str> = loads
+            .unanalyzed
+            .iter()
+            .map(|input| input.reason.label())
+            .collect();
+        let damaged = scoped.iter().filter(|facts| facts.damaged).count();
+
+        let mut coverage: Vec<(RepoPath, FileCoverage)> = changed_facts
+            .iter()
+            .map(|facts| {
+                let file_gaps: Vec<Gap> = gaps
+                    .get(&facts.path)
+                    .map(|found| found.iter().copied().map(Gap::from).collect())
+                    .unwrap_or_default();
+                (
+                    facts.path.clone(),
+                    FileCoverage {
+                        path: facts.path.render(),
+                        analyzed_lines: facts.scanned_lines(),
+                        unanalyzed_lines: facts.unanalyzed_lines,
+                        complete: facts.unanalyzed_lines == 0 && file_gaps.is_empty(),
+                        gaps: file_gaps,
+                    },
+                )
+            })
+            .collect();
+        coverage.extend(
+            loads
+                .unanalyzed
+                .iter()
+                .filter(|input| input.changed)
+                .map(|input| {
+                    (
+                        input.path.clone(),
+                        FileCoverage {
+                            path: input.path.render(),
+                            analyzed_lines: 0,
+                            unanalyzed_lines: 0,
+                            complete: false,
+                            gaps: Vec::new(),
+                        },
+                    )
+                }),
+        );
+        coverage.sort_by(|a, b| a.0.cmp(&b.0));
+
+        Sections {
+            skipped: skip_counts(&loads.discovery_skips, &reasons, damaged),
+            entities,
+            summaries: summarize(if full { "full" } else { "changed" }, scoped, &lost),
+            coverage: coverage.into_iter().map(|(_, entry)| entry).collect(),
+        }
     }
 
     fn load(&self) -> Loads {
         let mut loads = Loads::default();
         let base_discovery = discover(&self.base.entries, self.scope);
         let candidate_discovery = discover(self.candidate.entries(), self.scope);
+        loads.discovery_skips = candidate_discovery.skipped.clone();
         let changed_candidate = candidate_paths(self.changes);
         let changed_base = base_paths(self.changes);
         let counterparts = candidate_counterparts(self.changes);
@@ -725,7 +979,7 @@ impl Sides<'_> {
             match load {
                 Load::Failure(failure) => loads.failures.push(failure),
                 Load::Changed(loaded) => loads.base.push(*loaded),
-                Load::Unchanged(_) | Load::Unanalyzable(_) => {}
+                Load::Unchanged(..) | Load::Unanalyzable(_) => {}
             }
         }
 
@@ -742,6 +996,14 @@ impl Sides<'_> {
                     changed,
                     failure: None,
                 });
+                loads
+                    .unanalyzed
+                    .extend(input_reason(included, None).map(|reason| Unanalyzed {
+                        path: included.path.clone(),
+                        language: included.language,
+                        changed,
+                        reason,
+                    }));
                 continue;
             }
             candidate_tasks.push(LoadTask {
@@ -767,12 +1029,23 @@ impl Sides<'_> {
             match load {
                 Load::Failure(failure) => loads.failures.push(failure),
                 Load::Changed(loaded) => loads.changed.push(*loaded),
-                Load::Unchanged(candidates) => loads.unchanged.push(candidates),
-                Load::Unanalyzable(reason) => loads.coverage.push(CoverageInput {
-                    entry: task.included.clone(),
-                    changed: task.changed,
-                    failure: Some(reason),
-                }),
+                Load::Unchanged(candidates, facts) => {
+                    loads.unchanged.push(candidates);
+                    loads.unchanged_facts.push(*facts);
+                }
+                Load::Unanalyzable(reason) => {
+                    loads.coverage.push(CoverageInput {
+                        entry: task.included.clone(),
+                        changed: task.changed,
+                        failure: Some(reason),
+                    });
+                    loads.unanalyzed.push(Unanalyzed {
+                        path: task.included.path.clone(),
+                        language: task.included.language,
+                        changed: task.changed,
+                        reason,
+                    });
+                }
             }
         }
         let reported: HashSet<RepoPath> = loads
@@ -795,7 +1068,7 @@ impl Sides<'_> {
         unchanged: &[UnchangedCandidates],
         coverage: &[CoverageInput],
         policy: &PolicyConfig,
-    ) -> Result<Vec<CheckDiagnostic>, GitError> {
+    ) -> Result<Evaluated, GitError> {
         let base_files: Vec<FindingFile<'_>> = base.iter().map(Loaded::finding_file).collect();
         let candidate_files: Vec<FindingFile<'_>> =
             changed.iter().map(Loaded::finding_file).collect();
@@ -822,6 +1095,8 @@ impl Sides<'_> {
             policy,
         )?;
         let damage = evaluate_damage(&base_files, &candidate_files, self.changes)?;
+        let gaps = mapped_gaps(&base_files, &candidate_files, self.changes)?;
+        let entities = entities_of(base, changed, &matched);
         let coverage = evaluate_coverage(coverage, policy);
         let clones = evaluate_clones_precomputed(
             &base_files,
@@ -857,8 +1132,69 @@ impl Sides<'_> {
                 .into_iter()
                 .map(|found| CheckDiagnostic::Clone(Box::new(found))),
         );
-        Ok(diagnostics)
+        Ok(Evaluated {
+            diagnostics,
+            entities,
+            gaps,
+        })
     }
+}
+
+/// The changed candidate callables, sorted by (path, start line, name): each
+/// one new, or matched to a base callable whose identity or body differs. An
+/// ambiguous or unmatched callable has no base.
+fn entities_of(base: &[Loaded], changed: &[Loaded], matched: &MatchOutput) -> Vec<Entity> {
+    let base_files: HashMap<&RepoPath, &Loaded> =
+        base.iter().map(|file| (&file.path, file)).collect();
+    let pairs: HashMap<(&RepoPath, usize), (&RepoPath, usize)> = matched
+        .matches
+        .iter()
+        .map(|found| {
+            (
+                (&found.candidate.path, found.candidate.index),
+                (&found.base.path, found.base.index),
+            )
+        })
+        .collect();
+    let mut entities = Vec::new();
+    for file in changed {
+        for (index, callable) in file.analysis.callables.iter().enumerate() {
+            let counterpart = pairs.get(&(&file.path, index)).and_then(|(path, at)| {
+                base_files
+                    .get(path)
+                    .and_then(|loaded| loaded.analysis.callables.get(*at))
+                    .map(|before| (*path, before))
+            });
+            let unchanged = counterpart.is_some_and(|(_, before)| {
+                before.identity == callable.identity
+                    && before.body_fingerprint == callable.body_fingerprint
+            });
+            if unchanged {
+                continue;
+            }
+            entities.push((
+                file.path.clone(),
+                Entity {
+                    path: file.path.render(),
+                    name: callable.metrics.name.clone(),
+                    start_line: callable.metrics.start_line,
+                    end_line: callable.metrics.end_line,
+                    cc: callable.metrics.cc,
+                    sloc: callable.metrics.sloc,
+                    base: counterpart.map(|(path, before)| EntityBase {
+                        path: path.render(),
+                        start_line: before.metrics.start_line,
+                        end_line: before.metrics.end_line,
+                        cc: before.metrics.cc,
+                        sloc: before.metrics.sloc,
+                    }),
+                },
+            ));
+        }
+    }
+    entities
+        .sort_by(|a, b| (&a.0, a.1.start_line, &a.1.name).cmp(&(&b.0, b.1.start_line, &b.1.name)));
+    entities.into_iter().map(|(_, entity)| entity).collect()
 }
 
 #[cfg(test)]

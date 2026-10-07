@@ -139,6 +139,9 @@ pub struct AnalyzedPayload {
     pub callables: Vec<CachedCallable>,
     pub findings: Vec<CachedFinding>,
     pub executable_lines: Vec<usize>,
+    /// Lines the lowering left out of the measurement. No serde default: an
+    /// entry written before this field existed is a miss, never a zero.
+    pub unanalyzed_lines: usize,
     pub clone_candidates: Vec<CachedCandidate>,
 }
 
@@ -250,9 +253,19 @@ pub struct Hydrated {
     pub findings: Vec<AnalyzedFinding>,
     pub damage: Vec<HydratedDamage>,
     pub executable_lines: Vec<usize>,
+    pub unanalyzed_lines: usize,
 }
 
 impl CachedAnalysis {
+    /// Records the unanalyzed-line count of an analyzed payload; an
+    /// unanalyzable payload is returned unchanged.
+    pub fn with_unanalyzed_lines(mut self, unanalyzed_lines: usize) -> Self {
+        if let CachedAnalysis::Analyzed(payload) = &mut self {
+            payload.unanalyzed_lines = unanalyzed_lines;
+        }
+        self
+    }
+
     /// Builds the payload for `analysis`, whose bytes were `source`, under
     /// the effective `min_clone_lines`.
     pub fn from_analysis(analysis: &FileAnalysis, source: &str, min_clone_lines: u32) -> Self {
@@ -319,6 +332,7 @@ impl CachedAnalysis {
             callables,
             findings,
             executable_lines: rules::executable_lines_from_ir(&analysis.ir),
+            unanalyzed_lines: 0,
             clone_candidates,
         }))
     }
@@ -419,6 +433,7 @@ impl CachedAnalysis {
                 })
                 .collect(),
             executable_lines: payload.executable_lines.clone(),
+            unanalyzed_lines: payload.unanalyzed_lines,
         })
     }
 

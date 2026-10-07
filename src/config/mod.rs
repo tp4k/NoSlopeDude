@@ -17,6 +17,7 @@ use crate::git::snapshot::{
     CommitSnapshot, Entry, IndexSnapshot, WorktreeSnapshot, SOURCE_CEILING_BYTES,
 };
 use crate::git::GitError;
+use crate::hashing::Digest;
 use crate::model::DEFAULT_MIN_CLONE_LINES;
 
 /// The diagnostic code every invalid `nsd.yml` shape carries (D21): the
@@ -173,6 +174,52 @@ impl Config {
         let exclude = build_override(&self.exclude)?;
         Ok(CompiledScope { include, exclude })
     }
+
+    /// The configuration fingerprint of the canonical check JSON: a
+    /// versioned digest of the effective, parsed policy that decides a
+    /// verdict -- `version`, `include`, `exclude`, `measurement.min_clone_lines`
+    /// and the five severities. Never the file's bytes (formatting, key order
+    /// and comments do not move it), never a path, and never the `output`
+    /// caps, which shape only how diagnostics are listed.
+    pub fn fingerprint(&self) -> String {
+        let mut digest = Digest::new(CONFIGURATION_FAMILY_PREFIX);
+        digest.push(&self.version.to_le_bytes());
+        match &self.include {
+            None => digest.push(b"include:omitted"),
+            Some(patterns) => {
+                digest.push(b"include:listed");
+                push_patterns(&mut digest, patterns);
+            }
+        }
+        digest.push(b"exclude");
+        push_patterns(&mut digest, &self.exclude);
+        digest.push(&self.measurement.min_clone_lines.to_le_bytes());
+        let policy = &self.policy;
+        for (code, severity) in [
+            ("NSD-E101", policy.nsd_e101),
+            ("NSD-E102", policy.nsd_e102),
+            ("NSD-V101", policy.nsd_v101),
+            ("NSD-V102", policy.nsd_v102),
+            ("NSD-S102", policy.nsd_s102),
+        ] {
+            digest.push(code.as_bytes());
+            digest.push(severity.label().as_bytes());
+        }
+        format!("blake3:{:032x}", digest.finish())
+    }
+}
+
+/// The `Digest` domain of `Config::fingerprint`; bump the suffix when the
+/// fields it covers change.
+const CONFIGURATION_FAMILY_PREFIX: &str = "nsd-config-v1";
+
+/// Feeds an ordered pattern list: its count, then each pattern (the order is
+/// part of the meaning, since the last matching glob wins).
+fn push_patterns(digest: &mut Digest, patterns: &[String]) {
+    digest.push(&(patterns.len() as u64).to_le_bytes());
+    for pattern in patterns {
+        digest.push(pattern.as_bytes());
+    }
 }
 
 /// `measurement.min_clone_lines` (A2): parsed and exposed, not yet wired
@@ -198,6 +245,17 @@ pub enum Severity {
     Deny,
     Warn,
     Off,
+}
+
+impl Severity {
+    /// The spelling `nsd.yml` writes.
+    pub fn label(self) -> &'static str {
+        match self {
+            Severity::Deny => "deny",
+            Severity::Warn => "warn",
+            Severity::Off => "off",
+        }
+    }
 }
 
 /// The five policy codes this track recognises (D13); any other code,
