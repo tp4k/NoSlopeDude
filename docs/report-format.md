@@ -297,8 +297,10 @@ compact):
   the rule-finding lines and the redundant clone-occurrence lines (every
   occurrence beyond a group's first) over the summary scope, grouped with
   the trusted `measurement.min_clone_lines`, so it equals `nsd scan`'s for
-  the same analyzed set. `scope` is `"changed"` while trusted V102
-  is off (unchanged files are not read) and `"full"` while it is on
+  the same analyzed set when `scope` is `"full"`; under `"changed"` scope
+  `flagged_lines` counts rule findings only and no clone line is counted.
+  `scope` is `"changed"` while trusted V102
+  is off (unchanged files are not read, no clone candidate is enumerated) and `"full"` while it is on
   (unchanged files contribute their cached facts); `files` counts the files
   summarized.
 - `coverage`: one entry per changed file, sorted by path (`path`, `analyzed_lines`,
