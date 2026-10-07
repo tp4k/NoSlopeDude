@@ -676,7 +676,7 @@ fn test_nsd_v1_live_scan_is_reported_pending_when_the_archive_is_absent() {
 /// Whether the git checkout holding `target` has no modified or untracked
 /// entries. Panics (details withheld) when no repository can be opened.
 fn archive_checkout_is_clean(target: &Path) -> bool {
-    let checkout = git2::Repository::open(target).unwrap_or_else(|_| {
+    let checkout = git2::Repository::discover(target).unwrap_or_else(|_| {
         panic!(
             "opening the private java-fixture-01 checkout failed; details withheld \
              (AGENTS.md, Fixture privacy)"
