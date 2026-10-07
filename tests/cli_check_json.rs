@@ -1154,6 +1154,7 @@ const DUP_B_PATH: &str = "app/DupB.java";
 const DUP_FLAGGED_LINES: u64 = 12;
 const DUP_SCANNED_LINES: u64 = 30;
 const DUP_B_SCANNED_LINES: u64 = 15;
+const DUP_BLOCK_LINES: u64 = 12;
 
 fn overall_verbosity(document: &Value) -> Value {
     document["summaries"]["overall"]["verbosity"].clone()
@@ -1215,6 +1216,25 @@ fn test_check_summary_ratio_counts_clone_lines_like_scan() {
     assert_dup_counts(&check, DUP_FLAGGED_LINES);
     assert_eq!(check["ratio"], scan["ratio"], "check {check} scan {scan}");
     assert_eq!(check["ratio"], json!(0.4));
+}
+
+#[test]
+fn test_check_summary_clone_lines_use_the_trusted_min_clone_lines() {
+    let (_keep, above_block) = trusted_config(&format!(
+        "version: 1\nmeasurement:\n  min_clone_lines: {}\n",
+        DUP_BLOCK_LINES + 1
+    ));
+    for fx in [committed_duplicates(), {
+        let staged = fixture();
+        staged.commit(&[("Base.java", b"class Base {\n}\n".as_slice())]);
+        staged.stage(DUP_A_PATH, DUP_A.as_bytes());
+        staged.stage(DUP_B_PATH, DUP_B.as_bytes());
+        staged
+    }] {
+        let verbosity = overall_verbosity(&fx.staged_json_with(&above_block));
+
+        assert_eq!(verbosity["flagged_lines"], json!(0), "{verbosity}");
+    }
 }
 
 #[test]
