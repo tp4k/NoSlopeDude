@@ -10,10 +10,24 @@ SLOC, mass, erosion), `docs/clone-detection.md` (clone groups), and
 
 ## `report.json` shape
 
+`report.json` is the canonical scan document (M6-1/M6-2), written by the same
+canonical writer as `nsd check --format json` (`format::canonical_document_pretty`:
+keys sorted at every level, `-0.0` written as `0.0`; pretty-printed, ended by
+a newline). Nothing records time, no field holds an absolute path, and no
+field holds a source excerpt: `excerpt` is in the HTML only.
+
 ```json
 {
+  "schema_version": 1,
+  "result_scope": "scan",
+  "snapshots": { "scan": "blake3:<32 hex>", "unavailable_reason": null },
+  "fingerprints": { "configuration": "blake3:<32 hex>", "measurement": "blake3:<32 hex>" },
+  "skipped": { "dependency_or_build_output": 0, "generated_code": 0, "gitignore": 0, "parse_grammar_setup": 0, "parse_syntax_error": 0, "parse_unreadable": 0, "parse_unsupported_extension": 0, "test": 0, "unreadable": 0, "user_exclude": 0 },
+  "callables": [
+    { "path": "src/Sample.java", "name": "run", "start_line": 3, "end_line": 9, "cc": 2, "sloc": 6, "mass": 4.47213595499958 }
+  ],
   "scan": {
-    "target": "<the CLI target argument, verbatim>",
+    "target": null,
     "revision": {
       "sha": "<git HEAD sha, or null>",
       "dirty": null,
@@ -36,7 +50,6 @@ SLOC, mass, erosion), `docs/clone-detection.md` (clone groups), and
         "relative_path": "src/Sample.java",
         "start_line": 11,
         "end_line": 14,
-        "excerpt": "<the lines [start_line, end_line], read back off disk>",
         "link": "src/Sample.java#L11-L14",
         "is_remote_link": false
       },
@@ -102,6 +115,35 @@ repository-configured filter driver would execute. For a remote
 - Remote target with a resolved sha: `is_remote_link: true`, `link` is
   `"https://github.com/<owner>/<repo>/blob/<sha>/<relative_path>#L<start_line>-L<end_line>"`.
 
+### The canonical keys (M6-1/M6-2)
+
+- `schema_version` is `1` and `result_scope` is `"scan"` (`"check"` for
+  `nsd check --format json`).
+- `scan.target` is `null`: the target as typed can be an absolute path, and
+  the report names no absolute path. The terminal summary and the HTML still
+  show it.
+- `snapshots.scan` is the worktree snapshot ID (`blake3:<32 hex>`, the same
+  ID `check` reports for a candidate) when the target is a git work-tree
+  root, else `null` with `snapshots.unavailable_reason`: the
+  `scan.revision` reason when there is one (`not_a_git_repository` for a plain
+  directory; a remote clone also has no ID, as it would name a temporary
+  checkout), `target_not_git_root` (a subtree of a checkout: a worktree ID
+  covers the whole checkout, not the scanned subtree) or
+  `worktree_snapshot_failed`.
+- `fingerprints.measurement` is the measurement-profile digest for the run's
+  `--min-clone-lines`; `fingerprints.configuration` digests `--include-tests`,
+  the `--exclude` globs in order and `--min-clone-lines` (family
+  `nsd-scan-config-v1`). Neither holds a path.
+- `skipped` counts `skipped_files` by reason, every one of the ten possible
+  reasons present, zeros included. `skipped_files` stays the per-file list.
+- `callables` is every measured callable, uncapped (`top25` stays the capped
+  ranking), sorted by path (as a string), `start_line`, `end_line`, `name`,
+  `cc`, `sloc`, then `mass`, so two runs agree whatever the thread count.
+  Paths are repository-relative.
+
+The report is byte-identical across repeated runs, checkout roots and
+`RAYON_NUM_THREADS` (`tests/scan_json_identity.rs`).
+
 ### `skipped_files.reason`
 
 One of `SkipReason`'s labels (`gitignore`, `dependency_or_build_output`,
@@ -151,9 +193,9 @@ neither the numerator nor the denominator.
 `Callable` (D8) publishes both `start_line` and `end_line`
 (`IrCallable::span.end_line`, M0c-13). A top-25 row's `location` is a
 real `[start_line, end_line]` region — the callable's whole declaration
-and body, not just its first line — and `excerpt` fully brackets it, read
-back off disk, the same as every finding's and every duplicate-group
-location's span. A single-line callable (a one-line arrow function, e.g.
+and body, not just its first line — and the HTML `excerpt` fully brackets it
+(`report.json` carries none), read back off disk, the same as every
+finding's and every duplicate-group location's span. A single-line callable (a one-line arrow function, e.g.
 an expression-bodied `(b) => b`) still has `start_line == end_line`, same
 as any other one-line region.
 
@@ -217,7 +259,8 @@ bytes), nothing records time, and no field except a pass-through `message`
 | `NSD-C101`, `NSD-C102` about the candidate config | `path` (`"nsd.yml"`) |
 | `NSD-G101`, `NSD-C102` for a refused `--config` | `message` |
 
-`scan`'s `report.json` is unchanged.
+`scan`'s `report.json` uses the same canonical writer and the same
+`snapshots`, `fingerprints` and `skipped` keys; see "The canonical keys".
 
 ### The canonical check document (M6-2)
 

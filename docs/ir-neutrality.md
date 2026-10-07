@@ -347,22 +347,17 @@ neutrality/malformed.report.json`), confirmed with `git diff --quiet
 
 ## Normalization
 
-Two normalization mechanisms exist, at two different levels:
-
-- **Raw-text normalization** (`normalize_raw_text`), used for the
-  byte-identity comparison itself: the corpus's own absolute
-  temporary-directory path is replaced with the fixed label
-  `<neutrality-corpus>` in the raw `report.json` text `nsd` wrote to disk —
-  asserting first that it occurs exactly once. This compares the actual
-  bytes the binary renders (struct declaration order, exact whitespace),
-  not a re-serialized `serde_json::Value` (whose maps use alphabetical key
-  order and would not detect a real serialization regression).
-- **Value-level normalization** (`normalize`), used only for the
-  malformed-corpus's declared-deltas comparison and for
-  `tests/neutrality.rs::test_normalization_replaces_only_the_scan_target`,
-  which asserts that normalizing at the `Value` level touches only
-  `/scan/target` by diffing the normalized report against the unnormalized
-  one.
+None is left (M6-1/M6-2, WS-3). Before, the corpus's own temporary-directory
+path was replaced with the label `<neutrality-corpus>` in the raw
+`report.json` text (`normalize_raw_text`) and at the `Value` level
+(`normalize`), because `scan.target` held it. `scan.target` is now `null` and
+the report carries no excerpt, so the report names the path nowhere:
+`tests/neutrality.rs::path_free_raw_text` asserts **zero** occurrences of it
+and the byte-identity comparison reads the raw text `nsd` wrote as is (struct
+declaration order, exact whitespace), not a re-serialized `serde_json::Value`
+(whose maps use alphabetical key order and would not detect a real
+serialization regression).
+`test_scan_report_names_no_corpus_path_and_has_a_null_target` pins this.
 
 `scan.revision` needs no normalization: the copied corpus lives outside any
 Git work tree, so `src/target.rs`'s `local_git_revision` always resolves it
@@ -465,6 +460,35 @@ The baselines were then recaptured with `NSD_NEUTRALITY_CAPTURE_CLEAN=1` and
   `/skipped_files/<i>/detail` `null` -> `salvaged; first error at line N`: these
   are the WS-6-era moves that `DECLARED_DELTAS` had been tolerating against a
   baseline never recaptured. M1-8 did not cause them; the recapture absorbs them.
+
+## M6-1/M6-2: baselines moved by the canonical scan report
+
+`report.json` became the canonical scan document on purpose (WS-3), so
+byte-identity Proof B cannot pass across it. The adapted proof ran **before**
+recapturing: `tests/neutrality.rs::test_previous_baselines_differ_only_by_enumerated_format_deltas`
+compared the still-committed baselines with the live scans after stripping the
+M1-8 deltas and these WS-3 ones from both sides, and passed with no other
+pointer moved on either corpus, so no measurement moved.
+
+The enumerated WS-3 deltas (`ADDED_TOP_LEVEL_KEYS`, `strip_excerpts` and the
+`scan.target` removal in `strip_enumerated_format_deltas`):
+
+- Added top-level keys: `/schema_version`, `/result_scope`, `/snapshots`,
+  `/fingerprints`, `/skipped`, `/callables`.
+- `/scan/target`: the label `<neutrality-corpus>` became `null`.
+- Every `excerpt` key (`/findings/*/location`, `/duplicates/*/locations/*`,
+  `/top25/*/location`) is gone from the JSON; the HTML keeps them.
+
+`test_format_delta_comparator_catches_a_planted_measurement_mutation` also
+plants each of these on a live report and asserts none is reported, while a
+neighbour of `scan.target` (`/scan/include_tests`) and a moved `cc` still are.
+Both baselines were then recaptured with
+`NSD_NEUTRALITY_CAPTURE_CLEAN=1 NSD_NEUTRALITY_CAPTURE_MALFORMED=1 cargo test
+--locked --test neutrality` after `git status --short tests/fixtures` printed
+nothing (step 0), and `cargo test --locked --test neutrality` passes without
+the variables. `PRE_IR_SHA` and `scripts/neutrality_gate.sh` are untouched.
+The malformed baseline's `callables` is `[]` (every fixture's one callable is
+damaged); `DECLARED_DELTAS` stays empty.
 
 ## M0c-10: baselines moved by the Java grammar swap
 
