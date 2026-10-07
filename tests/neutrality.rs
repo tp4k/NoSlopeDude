@@ -59,33 +59,10 @@ const NORMALIZED_TARGET_LABEL: &str = "<neutrality-corpus>";
 
 /// Declared measurement deltas the malformed corpus is permitted to carry
 /// against its baseline -- JSON pointers such as `/skipped_files/0/reason`.
-/// WS-6 (salvage, the `SkipReason` split) populates this list with exactly
-/// the fields item 8's declared exception authorizes moving on
-/// `MALFORMED_CORPUS_SOURCES`'s three fixtures:
-///
-/// - `/skipped_files` -- a `SyntaxError` file is no longer a whole-file
-///   skip, but `src/report/mod.rs::build_skipped_files` still lists it so
-///   the file behind `incomplete` is named: all three fixtures' entries
-///   stay, and only each `detail` moves from `null` to
-///   `salvaged; first error at line N`.
-/// - `/scores/overall/verbosity/scanned_lines` and
-///   `/scores/java/verbosity/scanned_lines` -- `rules/broken/Broken.java`
-///   and `report/src/Broken.java` each have one callable and it intersects
-///   the damage, so it stays unmeasured (fail-closed), but D12's per-file
-///   scanned-line count is unconditioned on callable boundaries and still
-///   walks each file's surviving class-wrapper lines around the pruned
-///   callable -- previously 0 (the whole file was dropped), now a few per
-///   file. `js_ts`'s own `metrics/broken/Broken.ts` has no such surviving
-///   wrapper content, so `/scores/js_ts/verbosity/scanned_lines` needs no
-///   entry: it stays `0` on both sides. `flagged_lines` and every `ratio`
-///   also stay identical (`0`, since `0/0` and `0/scanned_lines` are both
-///   `0.0`) and need no entry either -- none of the three fixtures'
-///   surviving wrapper lines trip any of the six rules.
-const DECLARED_DELTAS: &[&str] = &[
-    "/skipped_files",
-    "/scores/overall/verbosity/scanned_lines",
-    "/scores/java/verbosity/scanned_lines",
-];
+/// Empty: the WS-6 declared moves (`detail`, per-file `scanned_lines`) and
+/// the WS-1 added keys are now part of the recaptured baseline itself, so any
+/// difference at all is a regression.
+const DECLARED_DELTAS: &[&str] = &[];
 
 /// Legacy shared capture variable. It no longer selects anything: capture
 /// is gated per corpus by `capture_var`, so recapturing one corpus cannot
@@ -368,6 +345,134 @@ fn read_baseline(relative: &str) -> Value {
     parse_json(&text)
 }
 
+/// WS-1 (M1-8) format deltas, the only ones the semantic comparison below
+/// ignores: `unanalyzed_lines` and `complete` beside each family's
+/// `verbosity.scanned_lines`, and `gaps` and `unmeasured_callables` inside a
+/// `parse_syntax_error` `skipped_files` row.
+const SCORE_FAMILIES: [&str; 3] = ["overall", "java", "js_ts"];
+const ADDED_VERBOSITY_KEYS: [&str; 2] = ["unanalyzed_lines", "complete"];
+const SALVAGED_ROW_REASON: &str = "parse_syntax_error";
+const ADDED_SALVAGED_ROW_KEYS: [&str; 2] = ["gaps", "unmeasured_callables"];
+
+/// Removes exactly the keys above, when present, and nothing else. A
+/// measurement (a `cc`, `sloc`, `scanned_lines`, `ratio` or `erosion`) is
+/// never touched, so a moved number stays visible to `diff_paths`.
+fn strip_enumerated_format_deltas(report: &mut Value) {
+    for family in SCORE_FAMILIES {
+        let verbosity = report
+            .pointer_mut(&format!("/scores/{family}/verbosity"))
+            .and_then(Value::as_object_mut);
+        if let Some(verbosity) = verbosity {
+            for key in ADDED_VERBOSITY_KEYS {
+                verbosity.remove(key);
+            }
+        }
+    }
+    let rows = report
+        .get_mut("skipped_files")
+        .and_then(Value::as_array_mut);
+    for row in rows.into_iter().flatten() {
+        if row["reason"] != SALVAGED_ROW_REASON {
+            continue;
+        }
+        if let Some(row) = row.as_object_mut() {
+            for key in ADDED_SALVAGED_ROW_KEYS {
+                row.remove(key);
+            }
+        }
+    }
+}
+
+/// `diff_paths` after `strip_enumerated_format_deltas` on both sides.
+fn diff_ignoring_format_deltas(
+    baseline: &Value,
+    actual: &Value,
+    declared_deltas: &[&str],
+) -> Vec<String> {
+    let mut baseline = baseline.clone();
+    let mut actual = actual.clone();
+    strip_enumerated_format_deltas(&mut baseline);
+    strip_enumerated_format_deltas(&mut actual);
+    diff_paths(&baseline, &actual, declared_deltas)
+}
+
+/// Semantic Proof B: the committed baseline and the live scan are compared
+/// with only the enumerated format deltas removed, so every measurement must
+/// agree. (Run against the pre-WS-1 baselines, before the recapture, it was
+/// the proof that WS-1 moved no measurement on the clean corpus.)
+#[test]
+fn test_baselines_agree_with_live_scan_when_enumerated_format_deltas_are_stripped() {
+    let clean = scan_corpus(&clean_corpus_sources());
+    let clean_diffs = diff_ignoring_format_deltas(
+        &read_baseline(CLEAN_BASELINE_PATH),
+        &normalize(&parse_json(&clean.json_text)),
+        &[],
+    );
+    assert!(
+        clean_diffs.is_empty(),
+        "clean corpus differs beyond the enumerated format deltas: {clean_diffs:?}"
+    );
+
+    let malformed = scan_corpus(&malformed_corpus_sources());
+    let malformed_diffs = diff_ignoring_format_deltas(
+        &read_baseline(MALFORMED_BASELINE_PATH),
+        &normalize(&parse_json(&malformed.json_text)),
+        DECLARED_DELTAS,
+    );
+    assert!(
+        malformed_diffs.is_empty(),
+        "malformed corpus differs beyond the enumerated format deltas: {malformed_diffs:?}"
+    );
+}
+
+/// The comparison above must see a moved measurement: a changed `cc`, `sloc`,
+/// `scanned_lines`, verbosity `ratio` or `erosion` is reported at exactly its
+/// own pointer, while a change to an enumerated added key is not.
+#[test]
+fn test_format_delta_comparator_catches_a_planted_measurement_mutation() {
+    let live = normalize(&parse_json(&scan_corpus(&clean_corpus_sources()).json_text));
+    let bump = |pointer: &str| {
+        let mut mutated = live.clone();
+        let slot = mutated
+            .pointer_mut(pointer)
+            .unwrap_or_else(|| panic!("live report has {pointer}"));
+        *slot = json!(slot.as_f64().expect("numeric slot") + 1.0);
+        mutated
+    };
+
+    for pointer in [
+        "/top25/0/cc",
+        "/top25/0/sloc",
+        "/scores/java/verbosity/scanned_lines",
+        "/scores/java/verbosity/ratio",
+        "/scores/java/erosion",
+    ] {
+        assert_eq!(
+            diff_ignoring_format_deltas(&live, &bump(pointer), &[]),
+            vec![pointer.to_string()],
+            "a moved {pointer} must be reported alone"
+        );
+    }
+
+    let mut format_only = live.clone();
+    format_only["scores"]["java"]["verbosity"]["unanalyzed_lines"] = json!(9999);
+    format_only["scores"]["overall"]["verbosity"]["complete"] = json!(null);
+    let salvaged_row = format_only["skipped_files"]
+        .as_array_mut()
+        .and_then(|rows| {
+            rows.iter_mut()
+                .find(|row| row["reason"] == SALVAGED_ROW_REASON)
+        })
+        .expect("the clean corpus holds a salvaged fixture");
+    salvaged_row["gaps"] = json!([{"start_line": 1, "end_line": 1}]);
+    salvaged_row["unmeasured_callables"] = json!(9999);
+    assert_eq!(
+        diff_ignoring_format_deltas(&live, &format_only, &[]),
+        Vec::<String>::new(),
+        "an enumerated added key is a declared format delta"
+    );
+}
+
 #[test]
 fn test_clean_corpus_report_is_byte_identical_to_the_pre_ir_baseline() {
     let scanned = scan_corpus(&clean_corpus_sources());
@@ -417,17 +522,23 @@ fn test_malformed_corpus_report_matches_its_baseline_with_declared_deltas_only()
             {
                 "relative_path": "metrics/broken/Broken.ts",
                 "reason": "parse_syntax_error",
-                "detail": "salvaged; first error at line 1"
+                "detail": "salvaged; first error at line 1",
+                "gaps": [{"start_line": 1, "end_line": 1}, {"start_line": 2, "end_line": 2}],
+                "unmeasured_callables": 1
             },
             {
                 "relative_path": "report/src/Broken.java",
                 "reason": "parse_syntax_error",
-                "detail": "salvaged; first error at line 2"
+                "detail": "salvaged; first error at line 2",
+                "gaps": [{"start_line": 2, "end_line": 2}, {"start_line": 3, "end_line": 3}],
+                "unmeasured_callables": 1
             },
             {
                 "relative_path": "rules/broken/Broken.java",
                 "reason": "parse_syntax_error",
-                "detail": "salvaged; first error at line 5"
+                "detail": "salvaged; first error at line 5",
+                "gaps": [{"start_line": 5, "end_line": 5}],
+                "unmeasured_callables": 1
             }
         ]),
         "every MALFORMED_CORPUS_SOURCES entry is listed as a salvaged skip"

@@ -16,6 +16,8 @@
       "verbosity": {
         "flagged_lines": 227,
         "scanned_lines": 1032,
+        "unanalyzed_lines": 5,
+        "complete": false,
         "ratio": 0.21996124031007752
       }
     },
@@ -24,6 +26,8 @@
       "verbosity": {
         "flagged_lines": 154,
         "scanned_lines": 650,
+        "unanalyzed_lines": 2,
+        "complete": false,
         "ratio": 0.23692307692307693
       }
     },
@@ -32,6 +36,8 @@
       "verbosity": {
         "flagged_lines": 73,
         "scanned_lines": 382,
+        "unanalyzed_lines": 3,
+        "complete": false,
         "ratio": 0.19109947643979058
       }
     }
@@ -1027,22 +1033,54 @@
     {
       "relative_path": "ir/JsxUnterminatedEntity.tsx",
       "reason": "parse_syntax_error",
-      "detail": "salvaged; first error at line 1"
+      "detail": "salvaged; first error at line 1",
+      "gaps": [
+        {
+          "start_line": 1,
+          "end_line": 1
+        }
+      ],
+      "unmeasured_callables": 1
     },
     {
       "relative_path": "ir/TsUsingParameter.ts",
       "reason": "parse_syntax_error",
-      "detail": "salvaged; first error at line 1"
+      "detail": "salvaged; first error at line 1",
+      "gaps": [
+        {
+          "start_line": 1,
+          "end_line": 1
+        },
+        {
+          "start_line": 2,
+          "end_line": 2
+        }
+      ],
+      "unmeasured_callables": 1
     },
     {
       "relative_path": "salvage/Mixed.java",
       "reason": "parse_syntax_error",
-      "detail": "salvaged; first error at line 12"
+      "detail": "salvaged; first error at line 12",
+      "gaps": [
+        {
+          "start_line": 12,
+          "end_line": 12
+        }
+      ],
+      "unmeasured_callables": 1
     },
     {
       "relative_path": "salvage/Mixed.ts",
       "reason": "parse_syntax_error",
-      "detail": "salvaged; first error at line 8"
+      "detail": "salvaged; first error at line 8",
+      "gaps": [
+        {
+          "start_line": 8,
+          "end_line": 8
+        }
+      ],
+      "unmeasured_callables": 1
     }
   ],
   "incomplete": true,

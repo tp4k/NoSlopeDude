@@ -15,7 +15,9 @@
       "erosion": 0.0,
       "verbosity": {
         "flagged_lines": 0,
-        "scanned_lines": 0,
+        "scanned_lines": 3,
+        "unanalyzed_lines": 5,
+        "complete": false,
         "ratio": 0.0
       }
     },
@@ -23,7 +25,9 @@
       "erosion": 0.0,
       "verbosity": {
         "flagged_lines": 0,
-        "scanned_lines": 0,
+        "scanned_lines": 3,
+        "unanalyzed_lines": 3,
+        "complete": false,
         "ratio": 0.0
       }
     },
@@ -32,6 +36,8 @@
       "verbosity": {
         "flagged_lines": 0,
         "scanned_lines": 0,
+        "unanalyzed_lines": 2,
+        "complete": false,
         "ratio": 0.0
       }
     }
@@ -43,17 +49,46 @@
     {
       "relative_path": "metrics/broken/Broken.ts",
       "reason": "parse_syntax_error",
-      "detail": null
+      "detail": "salvaged; first error at line 1",
+      "gaps": [
+        {
+          "start_line": 1,
+          "end_line": 1
+        },
+        {
+          "start_line": 2,
+          "end_line": 2
+        }
+      ],
+      "unmeasured_callables": 1
     },
     {
       "relative_path": "report/src/Broken.java",
       "reason": "parse_syntax_error",
-      "detail": null
+      "detail": "salvaged; first error at line 2",
+      "gaps": [
+        {
+          "start_line": 2,
+          "end_line": 2
+        },
+        {
+          "start_line": 3,
+          "end_line": 3
+        }
+      ],
+      "unmeasured_callables": 1
     },
     {
       "relative_path": "rules/broken/Broken.java",
       "reason": "parse_syntax_error",
-      "detail": null
+      "detail": "salvaged; first error at line 5",
+      "gaps": [
+        {
+          "start_line": 5,
+          "end_line": 5
+        }
+      ],
+      "unmeasured_callables": 1
     }
   ],
   "incomplete": true,
