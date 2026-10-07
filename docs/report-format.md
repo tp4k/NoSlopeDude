@@ -293,8 +293,11 @@ compact):
   sloc}`) or `null`), sorted by path, start line, name.
 - `summaries`: `scope`, `files`, and `overall`, `java`, `js_ts`, each
   `{erosion, verbosity: {ratio, flagged_lines, scanned_lines,
-  unanalyzed_lines, complete}}`. `flagged_lines` counts rule findings only;
-  clone-group lines are not in it. `scope` is `"changed"` while trusted V102
+  unanalyzed_lines, complete}}`. `flagged_lines` is the union of
+  the rule-finding lines and the redundant clone-occurrence lines (every
+  occurrence beyond a group's first) over the summary scope, grouped with
+  the trusted `measurement.min_clone_lines`, so it equals `nsd scan`'s for
+  the same analyzed set. `scope` is `"changed"` while trusted V102
   is off (unchanged files are not read) and `"full"` while it is on
   (unchanged files contribute their cached facts); `files` counts the files
   summarized.
