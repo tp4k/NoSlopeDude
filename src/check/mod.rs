@@ -915,9 +915,13 @@ impl Sides<'_> {
     }
 
     /// The clone groups over the summary scope, grouped as `scan` groups
-    /// them: the changed files' candidates, plus every unchanged candidate
-    /// file's when the scope is full.
+    /// them: the changed files' candidates plus every unchanged candidate
+    /// file's. Under V102 `off` (not full) the summary counts rule findings
+    /// only, so no candidate is enumerated.
     fn summary_clone_groups(&self, loads: &Loads, full: bool) -> Vec<CloneGroup> {
+        if !full {
+            return Vec::new();
+        }
         let min_clone_lines = self.config.measurement.min_clone_lines;
         let mut paths: Vec<PathBuf> = Vec::new();
         let mut per_file = Vec::new();
@@ -936,17 +940,15 @@ impl Sides<'_> {
             paths.push(PathBuf::from(loaded.path.render()));
             per_file.push((language, candidates));
         }
-        if full {
-            for unchanged in &loads.unchanged {
-                let file_index = paths.len() as u32;
-                let candidates = unchanged
-                    .candidates
-                    .iter()
-                    .map(|(key, run)| (*key, CloneRun { file_index, ..*run }))
-                    .collect();
-                paths.push(PathBuf::from(unchanged.path.render()));
-                per_file.push((unchanged.language, candidates));
-            }
+        for unchanged in &loads.unchanged {
+            let file_index = paths.len() as u32;
+            let candidates = unchanged
+                .candidates
+                .iter()
+                .map(|(key, run)| (*key, CloneRun { file_index, ..*run }))
+                .collect();
+            paths.push(PathBuf::from(unchanged.path.render()));
+            per_file.push((unchanged.language, candidates));
         }
         maximal_groups(per_file)
             .into_iter()
