@@ -1190,3 +1190,94 @@ fn test_scan_report_orders_callables_with_one_start_line_by_end_line() {
         .collect();
     assert_eq!(names, ["d", "c"], "{value}");
 }
+
+fn scan_id(root: &Path) -> String {
+    scan_value(root, |_| {})["snapshots"]["scan"]
+        .as_str()
+        .expect("a string snapshot ID")
+        .to_string()
+}
+
+/// D22: the scan ID covers tracked entries plus untracked non-ignored ones.
+/// Rejects an ID that hashes an ignored untracked tree (the walk that ignores
+/// `.gitignore`), one that drops a tracked file matching an ignore pattern,
+/// and one that drops untracked non-ignored files.
+#[test]
+fn test_scan_snapshot_id_skips_ignored_untracked_entries() {
+    let repo_dir = tempfile::tempdir().expect("tempdir");
+    let root = repo_dir.path();
+    init_git_worktree(root);
+    fs::write(root.join(".gitignore"), "build/\n*.log\n").expect("write .gitignore");
+    fs::write(root.join("A.java"), "public class A {}\n").expect("write A.java");
+    fs::write(root.join("kept.log"), "tracked despite the pattern\n").expect("write kept.log");
+    run_git(root, &["add", "-A"]);
+    run_git(root, &["add", "-f", "kept.log"]);
+    run_git(root, &["commit", "-m", "initial commit"]);
+    fs::create_dir(root.join("build")).expect("mkdir build");
+    fs::write(root.join("build/out.bin"), "one").expect("write out.bin");
+    fs::write(root.join("stray.log"), "ignored untracked file").expect("write stray.log");
+
+    let base = scan_id(root);
+
+    // (a) An ignored untracked file or directory entry never moves the ID.
+    fs::write(root.join("build/out.bin"), "two").expect("rewrite out.bin");
+    fs::write(root.join("build/more.bin"), "new").expect("write more.bin");
+    fs::write(root.join("stray.log"), "changed").expect("rewrite stray.log");
+    assert_eq!(scan_id(root), base, "ignored entries must not move the ID");
+
+    // (f) Without ignored entries the ID is check's worktree ID.
+    fs::remove_dir_all(root.join("build")).expect("remove build");
+    fs::remove_file(root.join("stray.log")).expect("remove stray.log");
+    let repo = Repository::open(root).expect("open the repository");
+    let worktree_id = SnapshotId::of_worktree(&repo, &WorktreeSnapshot::open(&repo).expect("open"))
+        .expect("worktree id")
+        .to_string();
+    assert_eq!(scan_id(root), worktree_id);
+    assert_eq!(scan_id(root), base, "the ignored entries never counted");
+
+    // (d) A tracked file matching an ignore pattern still counts.
+    fs::write(root.join("kept.log"), "tracked, edited").expect("edit kept.log");
+    let after_kept = scan_id(root);
+    assert_ne!(after_kept, base, "a tracked ignored-pattern file counts");
+
+    // (b) A tracked source change moves the ID.
+    fs::write(root.join("A.java"), "public class A { int x; }\n").expect("edit A.java");
+    let after_tracked = scan_id(root);
+    assert_ne!(after_tracked, after_kept, "a tracked edit moves the ID");
+
+    // (c) An untracked, non-ignored file moves the ID.
+    fs::write(root.join("new.java"), "public class N {}\n").expect("write new.java");
+    assert_ne!(scan_id(root), after_tracked, "an untracked file counts");
+}
+
+/// D22: an ignored untracked directory is pruned, never opened.
+/// Rejects a walk that stats or hashes files inside an ignored tree.
+#[cfg(unix)]
+#[test]
+fn test_scan_snapshot_id_never_opens_an_ignored_directory() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repo_dir = tempfile::tempdir().expect("tempdir");
+    let root = repo_dir.path();
+    init_git_worktree(root);
+    fs::write(root.join(".gitignore"), "build/\n").expect("write .gitignore");
+    fs::write(root.join("A.java"), "public class A {}\n").expect("write A.java");
+    git_commit_all(root, "initial commit");
+    fs::create_dir_all(root.join("build/locked")).expect("mkdir");
+    let unreadable = root.join("build/out.bin");
+    fs::write(&unreadable, "x").expect("write out.bin");
+    fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o000)).expect("chmod file");
+    let locked = root.join("build/locked");
+    fs::write(locked.join("inner.bin"), "y").expect("write inner.bin");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).expect("chmod dir");
+
+    let value = scan_value(root, |_| {});
+    // Restore access so the temp dir can be removed.
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).expect("restore dir");
+    fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o644)).expect("restore file");
+    assert!(value["snapshots"]["scan"].is_string(), "{value}");
+    assert_eq!(
+        value["snapshots"]["unavailable_reason"],
+        serde_json::Value::Null
+    );
+}
