@@ -1104,3 +1104,20 @@ fn test_check_json_lists_a_raised_gap_as_not_tolerated() {
     assert_eq!(coverage["unanalyzed_lines"], json!(0));
     assert_eq!(coverage["complete"], json!(false));
 }
+
+#[test]
+fn test_check_json_publishes_no_source_text_in_entity_names() {
+    let fx = fixture();
+    fx.commit(&[("Base.java", b"class Base {\n}\n".as_slice())]);
+    fx.stage(
+        "reg.js",
+        "registry[(function () {\n  const apiKey = \"SECRET-TOKEN-1234\";\n  return apiKey;\n})()] =\nfunction (x) {\n  if (x) { return 1; }\n  return 2;\n};\n"
+            .as_bytes(),
+    );
+
+    let output = fx.nsd(&["check", "--staged", "--format", "json"]);
+
+    let text = stdout(&output);
+    assert!(!text.contains("SECRET-TOKEN-1234"), "{text}");
+    assert!(text.contains("<computed>@5"), "{text}");
+}

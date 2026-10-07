@@ -818,6 +818,12 @@ fn test_remote_target_links_point_at_the_scanned_revision() {
         "#L{}-L{}",
         finding.location.start_line, finding.location.end_line
     )));
+    let published: serde_json::Value =
+        serde_json::from_str(&report::render_json(&report).expect("render")).expect("JSON");
+    assert_eq!(
+        published["scan"]["target"],
+        "https://github.com/an-owner/a-repo"
+    );
 }
 
 /// The keys of every object in `text`, in the order written, one list per
@@ -1134,4 +1140,53 @@ fn test_scan_report_lists_every_measured_callable() {
             "top25 row {row} is missing from callables"
         );
     }
+}
+
+/// A JS callable assigned to a computed member whose key expression holds a
+/// secret; the assigned function starts on line 5.
+const COMPUTED_MEMBER_PROBE: &str = "registry[(function () {\n  const apiKey = \"SECRET-TOKEN-1234\";\n  return apiKey;\n})()] =\nfunction (x) {\n  if (x) { return 1; }\n  return 2;\n};\n";
+
+#[test]
+fn test_scan_report_publishes_no_source_text_in_callable_names() {
+    let corpus = tempfile::tempdir().expect("tempdir");
+    fs::write(corpus.path().join("reg.js"), COMPUTED_MEMBER_PROBE).expect("write");
+
+    let (_dir, output) = run_scan(corpus.path(), |_| {});
+    let text = report_text(&output);
+    let value: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+
+    assert!(!text.contains("SECRET-TOKEN-1234"), "{text}");
+    for section in ["callables", "top25"] {
+        for row in value[section].as_array().expect("array") {
+            let name = row["name"].as_str().expect("name");
+            assert!(!name.contains(['\n', '\r']), "{section}: {name:?}");
+        }
+    }
+    let names: Vec<&str> = value["callables"]
+        .as_array()
+        .expect("callables")
+        .iter()
+        .filter_map(|row| row["name"].as_str())
+        .collect();
+    assert!(names.contains(&"<computed>@5"), "{names:?}");
+}
+
+#[test]
+fn test_scan_report_orders_callables_with_one_start_line_by_end_line() {
+    let corpus = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        corpus.path().join("T.java"),
+        "class T {\nvoid d() {} void c() {\nint x = 1;\n}\n}\n",
+    )
+    .expect("write");
+
+    let value = scan_value(corpus.path(), |_| {});
+
+    let names: Vec<&str> = value["callables"]
+        .as_array()
+        .expect("callables")
+        .iter()
+        .map(|row| row["name"].as_str().expect("name"))
+        .collect();
+    assert_eq!(names, ["d", "c"], "{value}");
 }
