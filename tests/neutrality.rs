@@ -401,7 +401,7 @@ fn diff_ignoring_format_deltas(
 /// agree. (Run against the pre-WS-1 baselines, before the recapture, it was
 /// the proof that WS-1 moved no measurement on the clean corpus.)
 #[test]
-fn test_baselines_agree_with_live_scan_when_enumerated_format_deltas_are_stripped() {
+fn test_previous_baselines_differ_only_by_enumerated_format_deltas() {
     let clean = scan_corpus(&clean_corpus_sources());
     let clean_diffs = diff_ignoring_format_deltas(
         &read_baseline(CLEAN_BASELINE_PATH),

@@ -44,6 +44,14 @@ under this repository.
 
 ## Known caveats of the recorded rows (round 2)
 
+**M1-8 note (2026-10-07).** Every `verbosity.scanned_lines` figure below counts
+analyzed executable lines and is unchanged by M1-8: the recorded rows were
+measured before `unanalyzed_lines` and `complete` existed, and M1-8 moved no
+measurement on the neutrality corpora (see `ir-neutrality.md`). Rows for scans
+with parse damage are now readable as "ratio over analyzed lines, family
+`complete: false`"; the lines damage removed are reported separately as
+`unanalyzed_lines`. No row was re-measured.
+
 This section originally described every row below as coming from one
 uniform incomplete scan: 58 whole files (55 Java, 3 JS/TS) dropped
 entirely from every score. That was accurate only through the

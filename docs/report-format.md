@@ -24,9 +24,9 @@ SLOC, mass, erosion), `docs/clone-detection.md` (clone groups), and
     "min_clone_lines": 10
   },
   "scores": {
-    "overall": { "erosion": 0.0, "verbosity": { "flagged_lines": 0, "scanned_lines": 0, "ratio": 0.0 } },
-    "java":    { "erosion": 0.0, "verbosity": { "flagged_lines": 0, "scanned_lines": 0, "ratio": 0.0 } },
-    "js_ts":   { "erosion": 0.0, "verbosity": { "flagged_lines": 0, "scanned_lines": 0, "ratio": 0.0 } }
+    "overall": { "erosion": 0.0, "verbosity": { "flagged_lines": 0, "scanned_lines": 0, "unanalyzed_lines": 0, "complete": true, "ratio": 0.0 } },
+    "java":    { "erosion": 0.0, "verbosity": { "flagged_lines": 0, "scanned_lines": 0, "unanalyzed_lines": 0, "complete": true, "ratio": 0.0 } },
+    "js_ts":   { "erosion": 0.0, "verbosity": { "flagged_lines": 0, "scanned_lines": 0, "unanalyzed_lines": 0, "complete": true, "ratio": 0.0 } }
   },
   "findings": [
     {
@@ -61,7 +61,8 @@ SLOC, mass, erosion), `docs/clone-detection.md` (clone groups), and
     }
   ],
   "skipped_files": [
-    { "relative_path": "src/Broken.java", "reason": "parse_syntax_error", "detail": "salvaged; first error at line 2" }
+    { "relative_path": "src/Broken.java", "reason": "parse_syntax_error", "detail": "salvaged; first error at line 2",
+      "gaps": [{ "start_line": 2, "end_line": 2 }], "unmeasured_callables": 1 }
   ],
   "incomplete": true,
   "adaptation": {
@@ -115,6 +116,35 @@ and the rest is scored. It is listed so that the file behind
 `incomplete: true` is named, and its `detail` is always `salvaged`,
 followed by `; first error at line N` (the 1-based line of the first
 `ERROR`/`MISSING` node) when tree-sitter reports one.
+
+Each such row also carries the file's mapped parser gaps (M1-8):
+
+- `gaps` — the 1-based, inclusive `{start_line, end_line}` line ranges of the
+  file's damage spans, sorted ascending and de-duplicated. Adjacent ranges are
+  not merged.
+- `unmeasured_callables` — how many callables were excluded from measurement
+  because they intersect the damage (fail-closed).
+
+Both keys appear only on `parse_syntax_error` rows; every other row keeps
+`relative_path`, `reason` and `detail` alone.
+
+### `scores.<family>.verbosity` coverage (M1-8)
+
+`scanned_lines` keeps its name but counts **analyzed** executable lines: the
+distinct executable lines that survive damage pruning. The ratio is
+`flagged_lines / scanned_lines`, so lines inside a pruned damage span are in
+neither the numerator nor the denominator.
+
+- `unanalyzed_lines` — the distinct executable lines of the file that damage
+  pruning removed (pre-prune distinct lines minus surviving distinct lines),
+  summed over the family's files. A line is in exactly one of the analyzed and
+  unanalyzed sets.
+- `complete` — `true` only when `unanalyzed_lines` is `0` **and** no file of
+  that family failed to parse. `overall` is `complete` only when no file at all
+  failed to parse. A file that fails to parse at all contributes no lines, so
+  it makes its family incomplete through this flag rather than through
+  `unanalyzed_lines`.
+- An empty family has `scanned_lines` 0 and `ratio` `0.0`.
 
 ### Top-25 span
 

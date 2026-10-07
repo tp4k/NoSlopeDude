@@ -415,6 +415,54 @@ key added on only one side under a declared pointer, and a changed leaf
 outside any declared pointer — independent of whatever `DECLARED_DELTAS`
 holds in production.
 
+### Update (M1-8, WS-1)
+
+`DECLARED_DELTAS` is now empty. The `/skipped_files` and `scanned_lines`
+moves above were folded into the recaptured `malformed.report.json` (see
+*M1-8: baselines moved by completeness and gap provenance*), so any difference
+against that baseline is a regression.
+
+## M1-8: baselines moved by completeness and gap provenance
+
+M1-8 changes the format of `report.json` on purpose, so byte-identity Proof B
+cannot pass across it. The adapted proof, run **before** recapturing, is
+`tests/neutrality.rs::test_previous_baselines_differ_only_by_enumerated_format_deltas`.
+It compares the still-committed baseline of each corpus with the live scan
+after `strip_enumerated_format_deltas` removed, from both sides and only when
+present: `unanalyzed_lines` and `complete` under each
+`scores.{overall,java,js_ts}.verbosity`, and `gaps` and `unmeasured_callables`
+from each `parse_syntax_error` `skipped_files` row. No other key or subtree is
+normalized, and the malformed corpus still passed its then-declared WS-6
+deltas. It passed on the old baselines, so M1-8 moved no measurement
+(`cc`, `sloc`, `mass`, `scanned_lines`, `flagged_lines`, `ratio`, `erosion`,
+findings, duplicates, `top25`) on either corpus.
+`test_format_delta_comparator_catches_a_planted_measurement_mutation` proves
+the comparator reports a planted `top25/0/cc`, `top25/0/sloc`,
+`verbosity.scanned_lines`, `verbosity.ratio` and `erosion` change at exactly
+its own pointer, and ignores a change to an enumerated key.
+
+The baselines were then recaptured with `NSD_NEUTRALITY_CAPTURE_CLEAN=1` and
+`NSD_NEUTRALITY_CAPTURE_MALFORMED=1` (one test each; `PRE_IR_SHA` untouched).
+
+**`clean.report.json`** moved at these pointers only:
+
+- `/scores/{overall,java,js_ts}/verbosity/unanalyzed_lines` and `/complete`
+  added (5/2/3 unanalyzed lines, all `complete: false`): the clean corpus holds
+  four salvaged fixtures (`ir/JsxUnterminatedEntity.tsx`, `ir/TsUsingParameter.ts`,
+  `salvage/Mixed.java`, `salvage/Mixed.ts`).
+- `/skipped_files/<i>/gaps` and `/unmeasured_callables` added on those four rows.
+- No existing value moved.
+
+**`malformed.report.json`** moved at these pointers:
+
+- The same added `unanalyzed_lines`, `complete`, `gaps` and `unmeasured_callables`
+  keys (WS-1).
+- `/scores/overall/verbosity/scanned_lines` and
+  `/scores/java/verbosity/scanned_lines` `0` -> `3`, and each
+  `/skipped_files/<i>/detail` `null` -> `salvaged; first error at line N`: these
+  are the WS-6-era moves that `DECLARED_DELTAS` had been tolerating against a
+  baseline never recaptured. M1-8 did not cause them; the recapture absorbs them.
+
 ## M0c-10: baselines moved by the Java grammar swap
 
 The Java grammar swap (`tree-sitter-java` 0.23.5 →
