@@ -570,3 +570,37 @@ fn test_worktree_id_does_not_block_on_a_fifo() {
         .expect("the worktree ID computation blocked on a FIFO");
     assert!(outcome.is_ok(), "a FIFO is a special file, not a failure");
 }
+
+/// Ledger row 59: an untracked FIFO is a special file in the worktree walk;
+/// the ID neither blocks on it nor fails because of it.
+#[test]
+#[cfg(unix)]
+fn test_worktree_id_does_not_block_on_an_untracked_fifo() {
+    let (dir, repo) = common::init_repo();
+    let commit_oid = common::commit_entries(
+        &repo,
+        &[(b"a.ts".to_vec(), MODE_REGULAR, b"one\n".to_vec())],
+    );
+    sync_index_to_commit(&repo, commit_oid);
+    let made = std::process::Command::new("mkfifo")
+        .arg(dir.path().join("pipe.ts"))
+        .status()
+        .expect("run mkfifo");
+    assert!(made.success(), "mkfifo failed");
+
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let path = dir.path().to_path_buf();
+    std::thread::spawn(move || {
+        let repo = Repository::open(&path).expect("open the repository");
+        let outcome = WorktreeSnapshot::open(&repo)
+            .and_then(|snapshot| SnapshotId::of_worktree(&repo, &snapshot))
+            .map(|id| id.to_string())
+            .map_err(|error| error.code());
+        let _ = sender.send(outcome);
+    });
+
+    let outcome = receiver
+        .recv_timeout(std::time::Duration::from_secs(20))
+        .expect("the worktree ID computation blocked on an untracked FIFO");
+    assert!(outcome.is_ok(), "{outcome:?}");
+}

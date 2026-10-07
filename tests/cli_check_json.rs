@@ -965,3 +965,142 @@ fn test_failure_messages_hold_no_absolute_path() {
     );
     assert!(!text.contains(&raw) && !text.contains(&canonical), "{text}");
 }
+
+#[test]
+fn test_check_json_fingerprint_covers_scope_and_every_severity() {
+    let fx = fixture();
+    fx.commit(&[("A.java", simple_class("A", "").as_bytes())]);
+    fx.stage(
+        "A.java",
+        simple_class("A", "        y = y * 2;\n").as_bytes(),
+    );
+    let (_keep_base, base_config) = trusted_config("version: 1\n");
+    let base = fx.staged_json_with(&base_config);
+    let variants = [
+        "version: 1\nexclude:\n  - \"legacy/**\"\n",
+        "version: 1\ninclude:\n  - \"**/*.java\"\n",
+        "version: 1\npolicy:\n  NSD-E101: off\n",
+        "version: 1\npolicy:\n  NSD-E102: off\n",
+        "version: 1\npolicy:\n  NSD-V101: off\n",
+        "version: 1\npolicy:\n  NSD-S102: off\n",
+    ];
+    for text in variants {
+        let (_keep, config) = trusted_config(text);
+        let varied = fx.staged_json_with(&config);
+        assert_ne!(
+            varied["fingerprints"]["configuration"], base["fingerprints"]["configuration"],
+            "{text}"
+        );
+        assert_eq!(
+            varied["fingerprints"]["measurement"], base["fingerprints"]["measurement"],
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn test_check_json_orders_entities_by_name_on_one_line() {
+    let fx = fixture();
+    fx.commit(&[("A.java", b"class A {\n}\n")]);
+    fx.stage(
+        "A.java",
+        b"class A {\n    void b() { work(); } void a() { work(); }\n}\n",
+    );
+
+    let parsed = fx.staged_json();
+
+    let entities = parsed["entities"].as_array().expect("an entities array");
+    let names: Vec<&str> = entities
+        .iter()
+        .map(|entity| text_of(&entity["name"], "name"))
+        .collect();
+    assert_eq!(names, ["a", "b"], "{entities:?}");
+    assert_eq!(entities[0]["start_line"], entities[1]["start_line"]);
+}
+
+#[test]
+fn test_check_json_lists_a_resigned_callable_with_its_base() {
+    let fx = fixture();
+    fx.commit(&[(
+        "A.java",
+        b"class A {\n    int g(int x) {\n        return x;\n    }\n}\n",
+    )]);
+    fx.stage(
+        "A.java",
+        b"class A {\n    int g(long x) {\n        return x;\n    }\n}\n",
+    );
+
+    let parsed = fx.staged_json();
+
+    let entities = parsed["entities"].as_array().expect("an entities array");
+    assert_eq!(entities.len(), 1, "{entities:?}");
+    assert_eq!(entities[0]["path"], json!("A.java"));
+    assert_eq!(entities[0]["start_line"], json!(2));
+    assert_eq!(entities[0]["base"]["path"], json!("A.java"));
+    assert_eq!(entities[0]["base"]["start_line"], json!(2));
+}
+
+#[test]
+fn test_check_json_reports_an_unanalyzable_changed_file() {
+    let fx = fixture();
+    fx.commit(&[("A.java", simple_class("A", "").as_bytes())]);
+    fx.stage(
+        "A.java",
+        simple_class("A", "        y = y * 2;\n").as_bytes(),
+    );
+    fx.stage("Bad.ts", INVALID_UTF8_TS);
+
+    let parsed = fx.staged_json();
+
+    assert_eq!(parsed["skipped"]["invalid_encoding"], json!(1));
+    let coverage = parsed["coverage"].as_array().expect("a coverage array");
+    let paths: Vec<&str> = coverage
+        .iter()
+        .map(|entry| text_of(&entry["path"], "path"))
+        .collect();
+    assert_eq!(paths, ["A.java", "Bad.ts"], "{coverage:?}");
+    assert_eq!(
+        coverage[1],
+        json!({
+            "path": "Bad.ts",
+            "analyzed_lines": 0,
+            "unanalyzed_lines": 0,
+            "complete": false,
+            "gaps": [],
+        })
+    );
+    let summaries = &parsed["summaries"];
+    assert_eq!(summaries["js_ts"]["verbosity"]["complete"], json!(false));
+    assert_eq!(summaries["overall"]["verbosity"]["complete"], json!(false));
+    assert_eq!(summaries["java"]["verbosity"]["complete"], json!(true));
+}
+
+#[test]
+fn test_check_json_lists_a_raised_gap_as_not_tolerated() {
+    let fx = fixture();
+    fx.commit(&[("B.java", simple_class("B", "").as_bytes())]);
+    fx.stage("A.java", b"class A {\n    int x = ;\n}\n");
+
+    let output = fx.nsd(&["check", "--staged", "--format", "json"]);
+
+    assert_eq!(
+        output.status.code(),
+        Some(EXIT_ERROR),
+        "{}",
+        stdout(&output)
+    );
+    let parsed = document(&output);
+    let codes: Vec<&str> = entries(&parsed)
+        .iter()
+        .map(|entry| text_of(&entry["code"], "code"))
+        .collect();
+    assert_eq!(codes, ["NSD-A101"], "{parsed}");
+    let coverage = &parsed["coverage"][0];
+    assert_eq!(coverage["path"], json!("A.java"));
+    assert_eq!(
+        coverage["gaps"],
+        json!([{"base": Value::Null, "candidate": range(2, 2), "tolerated": false}])
+    );
+    assert_eq!(coverage["unanalyzed_lines"], json!(0));
+    assert_eq!(coverage["complete"], json!(false));
+}
