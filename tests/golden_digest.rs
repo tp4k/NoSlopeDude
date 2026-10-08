@@ -296,13 +296,45 @@ fn test_required_but_pending_message_names_both_env_vars() {
     );
 }
 
+/// Which `scores.*.verbosity` key set a committed digest is pinned to.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum VerbosityShape {
+    /// The M0b file, frozen as history.
+    M0b,
+    /// The `nsd-v1` file since M6-2b: M1-8's coverage keys added.
+    WithCoverage,
+}
+
+impl VerbosityShape {
+    fn keys(self) -> &'static [&'static str] {
+        match self {
+            Self::M0b => &["flagged_lines", "ratio", "scanned_lines"],
+            Self::WithCoverage => &[
+                "complete",
+                "flagged_lines",
+                "ratio",
+                "scanned_lines",
+                "unanalyzed_lines",
+            ],
+        }
+    }
+}
+
 /// Runs unconditionally (no archive needed): a committed digest file --
 /// either the M0b digest or the `nsd-v1` digest, both the same A1 shape --
 /// must carry none of the archived report's private shape. Shared by
 /// `test_committed_digest_carries_no_paths_names_or_excerpts` and
 /// `test_nsd_v1_digest_carries_no_paths_names_or_excerpts` so the check
 /// cannot silently drift between the two files it is run against.
-fn assert_digest_carries_no_paths_names_or_excerpts(committed: &Value) -> Result<()> {
+///
+/// `verbosity_shape` is the one thing the two files legitimately disagree
+/// on: the M0b file keeps its three-key verbosity, while the `nsd-v1` file
+/// also carries M1-8's `complete` (a boolean, the only non-numeric leaf the
+/// digest may hold) and `unanalyzed_lines`.
+fn assert_digest_carries_no_paths_names_or_excerpts(
+    committed: &Value,
+    verbosity_shape: VerbosityShape,
+) -> Result<()> {
     const FORBIDDEN_KEYS: [&str; 6] = [
         "excerpt",
         "link",
@@ -437,7 +469,7 @@ fn assert_digest_carries_no_paths_names_or_excerpts(committed: &Value) -> Result
 
     const EXPECTED_LANGUAGES: [&str; 3] = ["overall", "java", "js_ts"];
     const EXPECTED_LANGUAGE_KEYS: [&str; 2] = ["erosion", "verbosity"];
-    const EXPECTED_VERBOSITY_KEYS: [&str; 3] = ["flagged_lines", "ratio", "scanned_lines"];
+    let expected_verbosity_keys: BTreeSet<&str> = verbosity_shape.keys().iter().copied().collect();
     let scores = committed["scores"]
         .as_object()
         .context("scores is not an object")?;
@@ -463,12 +495,16 @@ fn assert_digest_carries_no_paths_names_or_excerpts(committed: &Value) -> Result
             .and_then(Value::as_object)
             .with_context(|| format!("scores.{lang}.verbosity is not an object"))?;
         let verbosity_keys: BTreeSet<&str> = verbosity.keys().map(String::as_str).collect();
-        let expected_verbosity_keys: BTreeSet<&str> = EXPECTED_VERBOSITY_KEYS.into_iter().collect();
         assert_eq!(
             verbosity_keys, expected_verbosity_keys,
-            "scores.{lang}.verbosity's key set must be exactly \
-             {{flagged_lines, ratio, scanned_lines}}"
+            "scores.{lang}.verbosity's key set must be exactly {expected_verbosity_keys:?}"
         );
+        if verbosity_shape == VerbosityShape::WithCoverage {
+            assert!(
+                verbosity["complete"].is_boolean(),
+                "scores.{lang}.verbosity.complete must be a boolean"
+            );
+        }
     }
 
     fn assert_all_leaves_are_numbers(value: &Value, path: &str) {
@@ -483,6 +519,10 @@ fn assert_digest_carries_no_paths_names_or_excerpts(committed: &Value) -> Result
                     assert_all_leaves_are_numbers(item, &format!("{path}[{index}]"));
                 }
             }
+            // The one exempt leaf: M1-8's `complete` flag, by exact path
+            // shape, so a boolean anywhere else still fails.
+            Value::Bool(_)
+                if path.starts_with("scores.") && path.ends_with(".verbosity.complete") => {}
             other => assert!(other.is_number(), "{path} is not a number: {other:?}"),
         }
     }
@@ -505,7 +545,7 @@ fn assert_digest_carries_no_paths_names_or_excerpts(committed: &Value) -> Result
 #[test]
 fn test_committed_digest_carries_no_paths_names_or_excerpts() -> Result<()> {
     let committed = read_committed_digest(&committed_digest_path())?;
-    assert_digest_carries_no_paths_names_or_excerpts(&committed)
+    assert_digest_carries_no_paths_names_or_excerpts(&committed, VerbosityShape::M0b)
 }
 
 /// Runs unconditionally (no archive needed): the committed `nsd-v1` digest
@@ -515,7 +555,7 @@ fn test_committed_digest_carries_no_paths_names_or_excerpts() -> Result<()> {
 #[test]
 fn test_nsd_v1_digest_carries_no_paths_names_or_excerpts() -> Result<()> {
     let committed = read_committed_digest(&nsd_v1_digest_path())?;
-    assert_digest_carries_no_paths_names_or_excerpts(&committed)
+    assert_digest_carries_no_paths_names_or_excerpts(&committed, VerbosityShape::WithCoverage)
 }
 
 /// Unconditional: the M0b and `nsd-v1` committed digests must agree on
