@@ -116,9 +116,11 @@ checkout it came from:
    exact `label`, `authorship`, `revision_sha`, and `language` values;
    `body_blake3`'s `blake3:` + 32-lowercase-hex-char shape; `scores`' exact
    `{overall, java, js_ts}` language set, per-language `{erosion,
-   verbosity}` key shape and `verbosity`'s `{flagged_lines, ratio,
-   scanned_lines}` key shape; and that every leaf under `scores`, `clones`,
-   `findings_by_rule_id`, `skips_by_reason` and `top25` is numeric.
+   verbosity}` key shape and `verbosity`'s key shape (`{flagged_lines,
+   ratio, scanned_lines}` for the M0b file; the `nsd-v1` file adds M1-8's
+   `complete` and `unanalyzed_lines`); and that every leaf under `scores`,
+   `clones`, `findings_by_rule_id`, `skips_by_reason` and `top25` is
+   numeric, except the `nsd-v1` file's boolean `scores.*.verbosity.complete`.
 
 ## The `nsd-v1` digest (M0c-14)
 
@@ -150,27 +152,16 @@ the user's own trusted archive, and git2 runs no filter driver), and
 top-level `incomplete` is `false` -- so a re-capture against the wrong or
 a dirty checkout fails loudly instead of silently drifting.
 
-The committed `nsd-v1` digest predates the local `scan.revision.dirty`
-`false` to `null` change, which alters the live digest's `body_blake3`. The
-archive-backed live arm must therefore be re-captured against the private
-archive (`NSD_ARCHIVED_REPORT=... NSD_GOLDEN_CAPTURE=1`) before it can pass
-again; until then it fails its digest comparison when the archive is set. The archive
-path is read only from `NSD_ARCHIVED_REPORT` at invocation time, exactly
-like the M0b check; without it the test prints a PENDING notice, same as
-above.
+The archive path is read only from `NSD_ARCHIVED_REPORT` at invocation
+time, exactly like the M0b check; without it the test prints a PENDING
+notice, same as above.
 
 The archive checkout's cleanliness check opens the recipe target with
 `git2::Repository::discover`, so a `recipe.target` that is a subdirectory of
 the checkout passes it; a target outside any repository still fails loudly.
-M6 WS-4 did not run the recapture (`NSD_ARCHIVED_REPORT` unset): the
-committed digest is unchanged and the gate is pending (status row M6-2b).
-The expected field-by-field diff, to be confirmed at recapture, is
-`body_blake3` (the six WS-3 top-level keys, `scan.revision.dirty` false to
-null, and the WS-1 `scores.*.verbosity.{unanalyzed_lines, complete}` keys) and
-the `scores` component (those same two added keys per family and overall).
-Removed excerpts and the null `scan.target` cannot move the digest, because
-`normalize` erases both before the body is hashed. Any other moved field needs
-its own explanation (no silent re-baseline).
+
+The file was re-captured once after the last M6 format change (status row
+M6-2b, `46f1525`), on `main@b069e55`; see *M6-2b recapture delta* below.
 
 Re-capturing (implementer-only; overwrites the committed file) sets a
 second, separate opt-in alongside the archive path:
@@ -192,3 +183,20 @@ file at capture time:
 | `body_blake3` | **changed** (`blake3:f78712b43c6520413265b31903d724d8` → `blake3:bf38db177aef0a50836345834131cf68`) | measured directly: comparing the two normalized report bodies (archive vs. a live HEAD scan) shows the body moved only in `top25[].location.end_line` and `top25[].location.link`, for 20 of the 25 rows; `start_line` is unchanged, and no finding or clone location moved. The cause is M0c-13's `build_callable` change alone (`src/report/mod.rs:358`, `[start_line, end_line]` instead of `[start_line, start_line]`) — the orchard swap moved nothing in the normalized body |
 
 No path, name or excerpt appears in either file or in this table.
+
+### M6-2b recapture delta
+
+Re-captured at `main@b069e55` (after PR #8, the last M6 format change)
+with `NSD_ARCHIVED_REPORT=… NSD_GOLDEN_CAPTURE=1`, then verified with
+`NSD_ARCHIVED_REPORT=… NSD_REQUIRE_ARCHIVE_VERIFIED=1` (23 passed, no
+PENDING notice). The archive checkout was at the pinned `revision_sha` with
+an empty `git status --porcelain --untracked-files=all`.
+
+| field | delta | attributed to |
+|---|---|---|
+| `label`, `language`, `authorship`, `revision_sha`, `hash_version`, `findings_by_rule_id`, `clones`, `skips_by_reason`, `top25` | none | no measurement moved |
+| `scores` | `complete: true` and `unanalyzed_lines: 0` added to `overall`, `java` and `js_ts` `verbosity`; every existing number unchanged | M1-8 (WS-1): nothing on this fixture is unanalyzed |
+| `body_blake3` | **changed** (`blake3:bf38db177aef0a50836345834131cf68` → `blake3:ce58a4d80304c246a51b62420af4e46a`) | measured directly: diffing the normalized archive body against a live `main@b069e55` scan by key path finds exactly the six WS-3 top-level keys (`schema_version`, `result_scope`, `snapshots`, `fingerprints`, `skipped`, `callables`), `scan.revision.dirty` `false` → `null`, the six WS-1 `verbosity` keys above, and the M0c-13 `top25[].location.{end_line, link}` change on 20 of 25 rows already present in the previous capture. Nothing else differs |
+
+Removed excerpts and the null `scan.target` cannot move the digest, because
+`normalize` erases both before the body is hashed.

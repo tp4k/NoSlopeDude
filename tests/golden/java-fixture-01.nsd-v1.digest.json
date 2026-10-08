@@ -1,6 +1,6 @@
 {
   "authorship": "unknown",
-  "body_blake3": "blake3:bf38db177aef0a50836345834131cf68",
+  "body_blake3": "blake3:ce58a4d80304c246a51b62420af4e46a",
   "clones": {
     "group_count": 71,
     "total_redundant_lines": 1372
@@ -19,25 +19,31 @@
     "java": {
       "erosion": 0.13294913151043064,
       "verbosity": {
+        "complete": true,
         "flagged_lines": 2152,
         "ratio": 0.009966469683777625,
-        "scanned_lines": 215924
+        "scanned_lines": 215924,
+        "unanalyzed_lines": 0
       }
     },
     "js_ts": {
       "erosion": 0.14008623369905362,
       "verbosity": {
+        "complete": true,
         "flagged_lines": 1,
         "ratio": 0.3333333333333333,
-        "scanned_lines": 3
+        "scanned_lines": 3,
+        "unanalyzed_lines": 0
       }
     },
     "overall": {
       "erosion": 0.13313797553867948,
       "verbosity": {
+        "complete": true,
         "flagged_lines": 2153,
         "ratio": 0.009970962408591792,
-        "scanned_lines": 215927
+        "scanned_lines": 215927,
+        "unanalyzed_lines": 0
       }
     }
   },
