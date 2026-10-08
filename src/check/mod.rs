@@ -761,6 +761,8 @@ struct Loads {
     discovery_skips: Vec<SkippedEntry>,
     /// The candidate-side files no analysis could be made of.
     unanalyzed: Vec<Unanalyzed>,
+    /// The families of the candidate-side files that could not be read.
+    unread: Vec<LanguageFamily>,
 }
 
 /// One candidate-side file that could not be analyzed.
@@ -853,6 +855,7 @@ impl Sides<'_> {
             .iter()
             .filter(|input| input.reason != UnanalyzableReason::UnsupportedExtension)
             .map(|input| input.language)
+            .chain(loads.unread.iter().copied())
             .collect();
         let reasons: Vec<&'static str> = loads
             .unanalyzed
@@ -1054,7 +1057,10 @@ impl Sides<'_> {
         });
         for (task, load) in candidate_tasks.iter().zip(results) {
             match load {
-                Load::Failure(failure) => loads.failures.push(failure),
+                Load::Failure(failure) => {
+                    loads.failures.push(failure);
+                    loads.unread.push(task.included.language);
+                }
                 Load::Changed(loaded) => loads.changed.push(*loaded),
                 Load::Unchanged(candidates, facts) => {
                     loads.unchanged.push(candidates);
