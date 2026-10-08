@@ -447,3 +447,21 @@ fn test_unparsable_header_line_is_a_miss() {
         assert_eq!(cache.get(&key).expect("read"), Some(read.clone()));
     }
 }
+
+#[test]
+fn test_payload_round_trip_keeps_unanalyzed_lines() {
+    const DAMAGED_UNANALYZED_LINES: usize = 2;
+    let damaged = include_str!("fixtures/salvage/Mixed.java");
+    let analysis = analyze("Mixed.java", damaged);
+    assert_eq!(analysis.unanalyzed_lines, DAMAGED_UNANALYZED_LINES);
+    let hydrated = CachedAnalysis::from_analysis(&analysis, damaged, MIN_LINES)
+        .hydrate(Path::new("Mixed.java"), LanguageFamily::Java)
+        .expect("hydrates");
+    assert_eq!(hydrated.unanalyzed_lines, analysis.unanalyzed_lines);
+
+    let clean = analyze("A.java", JAVA_SOURCE);
+    let hydrated = CachedAnalysis::from_analysis(&clean, JAVA_SOURCE, MIN_LINES)
+        .hydrate(Path::new("A.java"), LanguageFamily::Java)
+        .expect("hydrates");
+    assert_eq!(hydrated.unanalyzed_lines, 0);
+}

@@ -6,8 +6,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use git2::Repository;
+
+use nsd::git::snapshot::WorktreeSnapshot;
+use nsd::git::snapshot_id::SnapshotId;
 use nsd::model::{RemoteTarget, Revision, ScanSettings, Target, DEFAULT_MIN_CLONE_LINES};
 use nsd::pipeline::{self, PipelineOutput};
+use nsd::profile::{fingerprint, MeasurementProfileInputs};
 use nsd::report::{self, ReportInput};
 
 /// A real, on-disk git worktree with a committed `HEAD` (system `git` binary,
@@ -109,8 +114,10 @@ fn test_json_report_contains_every_required_section() {
     assert_eq!(findings.len(), output.rules.findings.len());
     for (index, finding) in findings.iter().enumerate() {
         assert!(finding["rule_id"].is_string());
-        assert!(finding["location"]["excerpt"].is_string());
-        assert!(!finding["location"]["excerpt"].as_str().unwrap().is_empty());
+        assert!(
+            finding["location"].get("excerpt").is_none(),
+            "the canonical report carries no source excerpt: {finding:?}"
+        );
 
         // Value-level equality against the rules stage's own published
         // finding at the same index (D20/D22): a family_label swap or a
@@ -183,7 +190,10 @@ fn test_json_report_contains_every_required_section() {
     }
 
     // Scan settings.
-    assert!(value["scan"]["target"].is_string());
+    assert!(
+        value["scan"]["target"].is_null(),
+        "a local target is published as null, never as a path"
+    );
     assert!(value["scan"]["include_tests"].is_boolean());
     assert!(value["scan"]["exclude"].is_array());
     assert!(value["scan"]["min_clone_lines"].is_number());
@@ -360,6 +370,193 @@ fn test_incomplete_marker_set_on_parse_failure() {
         Some("salvaged; first error at line 2"),
         "line 2 opens `broken(` and never closes it"
     );
+}
+
+fn read_report(output: &PipelineOutput) -> serde_json::Value {
+    let json_text =
+        fs::read_to_string(output.settings.output.join("report.json")).expect("report.json exists");
+    serde_json::from_str(&json_text).expect("valid JSON")
+}
+
+/// The families' verbosity objects, `overall` last.
+fn verbosity_objects(value: &serde_json::Value) -> [&serde_json::Value; 3] {
+    ["java", "js_ts", "overall"].map(|family| &value["scores"][family]["verbosity"])
+}
+
+/// M1-8: every family and the overall score carry `unanalyzed_lines` and
+/// `complete` beside `scanned_lines`. `tests/fixtures/report/src` without its
+/// `Broken.java` is the clean corpus; with it, the Java family is salvaged.
+#[test]
+fn test_scores_carry_completeness_metadata() {
+    let clean_dir = tempfile::tempdir().expect("tempdir");
+    for entry in fs::read_dir(fixture_root().join("src")).expect("fixture dir") {
+        let entry = entry.expect("dir entry");
+        if entry.file_name() == "Broken.java" {
+            continue;
+        }
+        fs::copy(entry.path(), clean_dir.path().join(entry.file_name())).expect("copy fixture");
+    }
+    let (_clean_out, clean) = run_scan(clean_dir.path(), |_| {});
+    let clean_value = read_report(&clean);
+    let parse_rows: Vec<&serde_json::Value> = clean_value["skipped_files"]
+        .as_array()
+        .expect("skipped_files array")
+        .iter()
+        .filter(|row| {
+            row["reason"]
+                .as_str()
+                .is_some_and(|r| r.starts_with("parse_"))
+        })
+        .collect();
+    assert!(
+        parse_rows.is_empty(),
+        "the clean copy must parse: {parse_rows:?}"
+    );
+    for verbosity in verbosity_objects(&clean_value) {
+        assert_eq!(verbosity["unanalyzed_lines"], 0, "{verbosity}");
+        assert_eq!(verbosity["complete"], true, "{verbosity}");
+    }
+
+    let (_salvaged_out, salvaged) = run_scan(&fixture_root(), |_| {});
+    let value = read_report(&salvaged);
+    let [java, js_ts, overall] = verbosity_objects(&value);
+    let java_unanalyzed = java["unanalyzed_lines"].as_u64().expect("java count");
+    assert!(java_unanalyzed > 0, "Broken.java's pruned lines: {java}");
+    assert_eq!(java["complete"], false, "{java}");
+    assert_eq!(js_ts["unanalyzed_lines"], 0, "{js_ts}");
+    assert_eq!(
+        js_ts["complete"], true,
+        "a Java damage must not taint js_ts: {js_ts}"
+    );
+    assert_eq!(overall["unanalyzed_lines"], java_unanalyzed, "{overall}");
+    assert_eq!(overall["complete"], false, "{overall}");
+}
+
+/// M1-8: a file lost in parsing entirely (no IR, so no line count) still
+/// makes its own family `complete: false`, and only its own.
+#[test]
+fn test_unparsed_file_makes_its_family_incomplete() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        dir.path().join("Good.java"),
+        "class Good {\n    int x = 1;\n}\n",
+    )
+    .expect("write Good.java");
+    fs::write(dir.path().join("good.js"), "const x = 1;\n").expect("write good.js");
+    fs::write(dir.path().join("Bad.java"), [0xff_u8, 0xfe, 0xfd]).expect("write Bad.java");
+
+    let (_out, output) = run_scan(dir.path(), |_| {});
+    let value = read_report(&output);
+    let bad = value["skipped_files"]
+        .as_array()
+        .expect("skipped_files array")
+        .iter()
+        .find(|row| row["relative_path"] == "Bad.java")
+        .unwrap_or_else(|| panic!("Bad.java is listed: {}", value["skipped_files"]));
+    assert_eq!(bad["reason"], "parse_unreadable");
+
+    let [java, js_ts, overall] = verbosity_objects(&value);
+    assert_eq!(java["unanalyzed_lines"], 0, "no count is known: {java}");
+    assert_eq!(java["complete"], false, "{java}");
+    assert_eq!(js_ts["complete"], true, "{js_ts}");
+    assert_eq!(overall["complete"], false, "{overall}");
+
+    let js_dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        js_dir.path().join("Good.java"),
+        "class Good {\n    int x = 1;\n}\n",
+    )
+    .expect("write Good.java");
+    fs::write(js_dir.path().join("good.js"), "const x = 1;\n").expect("write good.js");
+    fs::write(js_dir.path().join("bad.js"), [0xff_u8, 0xfe, 0xfd]).expect("write bad.js");
+
+    let (_out, output) = run_scan(js_dir.path(), |_| {});
+    let value = read_report(&output);
+    let bad = value["skipped_files"]
+        .as_array()
+        .expect("skipped_files array")
+        .iter()
+        .find(|row| row["relative_path"] == "bad.js")
+        .unwrap_or_else(|| panic!("bad.js is listed: {}", value["skipped_files"]));
+    assert_eq!(bad["reason"], "parse_unreadable");
+
+    let [java, js_ts, _overall] = verbosity_objects(&value);
+    assert_eq!(js_ts["unanalyzed_lines"], 0, "no count is known: {js_ts}");
+    assert_eq!(js_ts["complete"], false, "{js_ts}");
+    assert_eq!(java["complete"], true, "{java}");
+}
+
+/// D3': a discovery-time analysis failure (an unreadable path) makes `overall`
+/// and every family incomplete, whatever the skipped path's suffix: the walk
+/// records the path before it knows what the directory holds.
+#[cfg(unix)]
+#[test]
+fn test_unreadable_directory_makes_overall_incomplete() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for locked_name in ["locked", "locked.ts"] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::write(
+            dir.path().join("Good.java"),
+            "class Good {\n    int x = 1;\n}\n",
+        )
+        .expect("write Good.java");
+        let locked = dir.path().join(locked_name);
+        fs::create_dir(&locked).expect("create locked dir");
+        fs::write(locked.join("Lost.java"), "class Lost {}\n").expect("write Lost.java");
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).expect("chmod 000");
+
+        if fs::read_dir(&locked).is_ok() {
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).expect("restore");
+            eprintln!("skipping {locked_name}: chmod 000 does not block this user (root?)");
+            continue;
+        }
+        let (_out, output) = run_scan(dir.path(), |_| {});
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).expect("restore");
+
+        let value = read_report(&output);
+        assert_eq!(value["incomplete"], true, "{locked_name}");
+        let row = value["skipped_files"]
+            .as_array()
+            .expect("skipped_files array")
+            .iter()
+            .find(|row| row["relative_path"] == locked_name)
+            .unwrap_or_else(|| panic!("{locked_name} is listed: {}", value["skipped_files"]));
+        assert_eq!(row["reason"], "unreadable");
+        let [java, js_ts, overall] = verbosity_objects(&value);
+        assert_eq!(overall["complete"], false, "{locked_name}: {overall}");
+        assert_eq!(java["complete"], false, "{locked_name}: {java}");
+        assert_eq!(js_ts["complete"], false, "{locked_name}: {js_ts}");
+    }
+}
+
+/// A policy exclusion is not an analysis failure: every `complete` stays true.
+#[test]
+fn test_policy_exclusion_keeps_scores_complete() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        dir.path().join("Good.java"),
+        "class Good {\n    int x = 1;\n}\n",
+    )
+    .expect("write Good.java");
+    fs::write(dir.path().join("Skip.java"), "class Skip {}\n").expect("write Skip.java");
+    fs::write(dir.path().join("good.js"), "const x = 1;\n").expect("write good.js");
+
+    let (_out, output) = run_scan(dir.path(), |settings| {
+        settings.exclude = vec!["Skip.java".to_string()];
+    });
+    let value = read_report(&output);
+    let excluded = value["skipped_files"]
+        .as_array()
+        .expect("skipped_files array")
+        .iter()
+        .find(|row| row["relative_path"] == "Skip.java")
+        .unwrap_or_else(|| panic!("Skip.java is listed: {}", value["skipped_files"]));
+    assert_eq!(excluded["reason"], "user_exclude");
+    assert_eq!(value["incomplete"], false);
+    for verbosity in verbosity_objects(&value) {
+        assert_eq!(verbosity["complete"], true, "{verbosity}");
+    }
 }
 
 #[test]
@@ -694,4 +891,519 @@ fn test_remote_target_links_point_at_the_scanned_revision() {
         "#L{}-L{}",
         finding.location.start_line, finding.location.end_line
     )));
+    let published: serde_json::Value =
+        serde_json::from_str(&report::render_json(&report).expect("render")).expect("JSON");
+    assert_eq!(
+        published["scan"]["target"],
+        "https://github.com/an-owner/a-repo"
+    );
+}
+
+/// The keys of every object in `text`, in the order written, one list per
+/// object (`serde_json::Value` would re-sort them, hiding the order).
+fn key_orders(text: &str) -> Vec<Vec<String>> {
+    let mut finished = Vec::new();
+    let mut open: Vec<Vec<String>> = Vec::new();
+    let mut chars = text.chars().peekable();
+    while let Some(character) = chars.next() {
+        match character {
+            '{' => open.push(Vec::new()),
+            '}' => finished.extend(open.pop()),
+            '"' => {
+                let mut literal = String::new();
+                while let Some(next) = chars.next() {
+                    match next {
+                        '\\' => {
+                            literal.push(next);
+                            literal.extend(chars.next());
+                        }
+                        '"' => break,
+                        other => literal.push(other),
+                    }
+                }
+                if chars.peek() == Some(&':') {
+                    open.last_mut()
+                        .expect("a key sits in an object")
+                        .push(literal);
+                }
+            }
+            _ => {}
+        }
+    }
+    finished
+}
+
+fn report_text(output: &PipelineOutput) -> String {
+    fs::read_to_string(output.settings.output.join("report.json")).expect("report.json exists")
+}
+
+/// M6-1: the scan document is canonical: versioned, scoped, key-sorted.
+#[test]
+fn test_scan_report_is_canonical_with_scope_scan() {
+    let (_dir, output) = run_scan(&fixture_root(), |_| {});
+    let text = report_text(&output);
+    let value: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+
+    assert_eq!(value["schema_version"], 1, "{text}");
+    assert_eq!(value["result_scope"], "scan", "{text}");
+    let orders = key_orders(&text);
+    assert!(orders.len() > 20, "the report nests many objects: {text}");
+    for keys in &orders {
+        let mut sorted = keys.clone();
+        sorted.sort();
+        assert_eq!(keys, &sorted, "keys must be written sorted: {keys:?}");
+    }
+    assert!(
+        text.contains("\"overall\": {"),
+        "the pretty layout perf_scan.sh anchors on stays"
+    );
+}
+
+/// M6-2: no excerpt key anywhere (findings and duplicates included), no
+/// checkout path, no fixture source line.
+#[test]
+fn test_scan_report_holds_no_excerpt_or_absolute_path() {
+    let root = fixture_root();
+    let (_dir, output) = run_scan(&root, |_| {});
+    let text = report_text(&output);
+
+    assert!(
+        !output.report.findings.is_empty() && !output.report.duplicates.is_empty(),
+        "the fixture must exercise every location-bearing section"
+    );
+    assert!(!text.contains("\"excerpt\""), "{text}");
+    for form in [
+        root.to_str().expect("UTF-8 path").to_string(),
+        root.canonicalize()
+            .expect("canonicalize")
+            .to_str()
+            .expect("UTF-8 path")
+            .to_string(),
+    ] {
+        assert!(!text.contains(&form), "the report names {form}");
+    }
+    let mut checked = 0;
+    for file in ["Sample.java", "sample.js", "sample2.js", "Anonymous.js"] {
+        let source = fs::read_to_string(root.join("src").join(file)).expect("read the fixture");
+        for line in source.lines().map(str::trim).filter(|l| l.len() >= 12) {
+            assert!(!text.contains(line), "{file} line {line:?} leaked");
+            checked += 1;
+        }
+    }
+    assert!(checked > 5, "the fixtures must supply source lines");
+}
+
+fn scan_value(root: &Path, configure: impl FnOnce(&mut ScanSettings)) -> serde_json::Value {
+    let (_dir, output) = run_scan(root, configure);
+    serde_json::from_str(&report_text(&output)).expect("valid JSON")
+}
+
+fn count_of(skipped_files: &[serde_json::Value], reason: &str) -> u64 {
+    skipped_files
+        .iter()
+        .filter(|row| row["reason"] == reason)
+        .count() as u64
+}
+
+/// One change to the scan settings.
+type Mutation = dyn Fn(&mut ScanSettings);
+
+/// Every `skipped_files` reason a scan can name: the discovery labels, then
+/// the parse failures prefixed `parse_`.
+const SCAN_SKIP_KEYS: [&str; 10] = [
+    "dependency_or_build_output",
+    "generated_code",
+    "gitignore",
+    "parse_grammar_setup",
+    "parse_syntax_error",
+    "parse_unreadable",
+    "parse_unsupported_extension",
+    "test",
+    "unreadable",
+    "user_exclude",
+];
+
+/// M6-1/M6-2: fingerprints, snapshot and per-reason skip counts.
+#[test]
+fn test_scan_report_carries_fingerprints_snapshot_and_skip_counts() {
+    // Skips: a user exclude and a salvaged parse failure.
+    let corpus = tempfile::tempdir().expect("tempdir");
+    fs::write(corpus.path().join("A.java"), "class A { void a() {} }\n").expect("write");
+    fs::write(
+        corpus.path().join("Bad.java"),
+        "public class Bad {\n    public void broken( {\n        return\n    }\n}\n",
+    )
+    .expect("write");
+    fs::create_dir(corpus.path().join("custom")).expect("mkdir");
+    fs::write(corpus.path().join("custom/V.java"), "class V {}\n").expect("write");
+    let custom_excluded = |settings: &mut ScanSettings| {
+        settings.exclude = vec!["**/custom/**".to_string()];
+    };
+    let value = scan_value(corpus.path(), custom_excluded);
+
+    let skipped_files = value["skipped_files"].as_array().expect("skipped_files");
+    let counts = value["skipped"].as_object().expect("skipped is an object");
+    let keys: Vec<&str> = counts.keys().map(String::as_str).collect();
+    assert_eq!(keys, SCAN_SKIP_KEYS, "every reason is present, zeros too");
+    for key in SCAN_SKIP_KEYS {
+        assert_eq!(
+            counts[key].as_u64(),
+            Some(count_of(skipped_files, key)),
+            "{key}: {value}"
+        );
+    }
+    assert_eq!(counts["parse_syntax_error"], 1, "{value}");
+    assert_eq!(counts["user_exclude"], 1, "{value}");
+
+    // Fingerprints: configuration moves with every scan setting.
+    let configuration = |mutate: &Mutation| {
+        let value = scan_value(corpus.path(), |settings| {
+            custom_excluded(settings);
+            mutate(settings);
+        });
+        value["fingerprints"]["configuration"].clone()
+    };
+    let base = configuration(&|_| {});
+    let text = base.as_str().expect("configuration fingerprint");
+    assert!(
+        text.len() == "blake3:".len() + 32 && text.starts_with("blake3:"),
+        "{text}"
+    );
+    assert_eq!(configuration(&|_| {}), base, "same settings, same value");
+    let changes: [(&str, &Mutation); 3] = [
+        ("include_tests", &|s| s.include_tests = !s.include_tests),
+        ("exclude", &|s| s.exclude.push("**/x/**".to_string())),
+        ("min_clone_lines", &|s| s.min_clone_lines = 77),
+    ];
+    for (name, mutate) in changes {
+        assert_ne!(configuration(mutate), base, "{name} must move it");
+    }
+
+    // Snapshots: a git root has an ID, a subdirectory and a plain directory
+    // have none and say why.
+    assert_eq!(value["snapshots"]["scan"], serde_json::Value::Null);
+    assert_eq!(
+        value["snapshots"]["unavailable_reason"], "not_a_git_repository",
+        "{value}"
+    );
+    let repo_dir = tempfile::tempdir().expect("tempdir");
+    init_git_worktree(repo_dir.path());
+    fs::write(repo_dir.path().join("A.java"), "public class A {}\n").expect("write A.java");
+    fs::create_dir(repo_dir.path().join("sub")).expect("mkdir");
+    fs::write(repo_dir.path().join("sub/B.java"), "public class B {}\n").expect("write B.java");
+    git_commit_all(repo_dir.path(), "initial commit");
+
+    let at_root = scan_value(repo_dir.path(), |_| {});
+    let repo = Repository::open(repo_dir.path()).expect("open the repository");
+    let expected = SnapshotId::of_worktree(&repo, &WorktreeSnapshot::open(&repo).expect("open"))
+        .expect("worktree id")
+        .to_string();
+    assert_eq!(at_root["snapshots"]["scan"], expected, "{at_root}");
+    assert_eq!(
+        at_root["snapshots"]["unavailable_reason"],
+        serde_json::Value::Null
+    );
+    let at_subdirectory = scan_value(&repo_dir.path().join("sub"), |_| {});
+    assert_eq!(
+        at_subdirectory["snapshots"]["scan"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        at_subdirectory["snapshots"]["unavailable_reason"], "target_not_git_root",
+        "{at_subdirectory}"
+    );
+}
+
+/// D7: the measurement fingerprint is the run's `--min-clone-lines`, never
+/// the default profile's.
+#[test]
+fn test_scan_measurement_fingerprint_uses_the_run_clone_threshold() {
+    let measured = |min_clone_lines: u32| {
+        let value = scan_value(&fixture_root(), |settings| {
+            settings.min_clone_lines = min_clone_lines;
+        });
+        value["fingerprints"]["measurement"]
+            .as_str()
+            .expect("measurement fingerprint")
+            .to_string()
+    };
+    let expected = |min_clone_lines: u32| {
+        fingerprint(&MeasurementProfileInputs {
+            min_clone_lines,
+            ..MeasurementProfileInputs::current()
+        })
+    };
+
+    let (ten, twenty) = (measured(10), measured(20));
+    assert_eq!(ten, expected(10));
+    assert_eq!(twenty, expected(20));
+    assert_ne!(ten, twenty);
+}
+
+/// M6-2: the complete callable entity set is uncapped, sorted by path, start
+/// line, end line, then name, and carries no excerpt.
+#[test]
+fn test_scan_report_lists_every_measured_callable() {
+    let corpus = tempfile::tempdir().expect("tempdir");
+    let method = |index: usize| format!("    int m{index}(int x) {{ return x + {index}; }}\n");
+    let mut first = String::from("class Z {\n");
+    first.extend((0..14).map(method));
+    first.push_str("    void b() {} void a() {}\n}\n");
+    let mut second = String::from("class Y {\n");
+    second.extend((14..28).map(method));
+    second.push_str("}\n");
+    // `Z.java` sorts after `Y.java` though it is written first.
+    fs::write(corpus.path().join("Z.java"), first).expect("write");
+    fs::write(corpus.path().join("Y.java"), second).expect("write");
+
+    let value = scan_value(corpus.path(), |_| {});
+
+    let callables = value["callables"].as_array().expect("callables");
+    assert_eq!(callables.len(), 30, "{value}");
+    assert_eq!(value["top25"].as_array().expect("top25").len(), 25);
+    let order: Vec<(String, u64, u64, String)> = callables
+        .iter()
+        .map(|entry| {
+            (
+                entry["path"].as_str().expect("path").to_string(),
+                entry["start_line"].as_u64().expect("start"),
+                entry["end_line"].as_u64().expect("end"),
+                entry["name"].as_str().expect("name").to_string(),
+            )
+        })
+        .collect();
+    let mut sorted = order.clone();
+    sorted.sort();
+    assert_eq!(order, sorted, "path, start line, end line, then name");
+    let tail: Vec<&str> = order[order.len() - 2..]
+        .iter()
+        .map(|entry| entry.3.as_str())
+        .collect();
+    assert_eq!(tail, ["a", "b"], "one start line is ordered by name");
+    for entry in callables {
+        let mut keys: Vec<&str> = entry
+            .as_object()
+            .expect("entry")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "cc",
+                "end_line",
+                "mass",
+                "name",
+                "path",
+                "sloc",
+                "start_line"
+            ]
+        );
+    }
+    for row in value["top25"].as_array().expect("top25") {
+        let location = &row["location"];
+        assert!(
+            callables
+                .iter()
+                .any(|entry| entry["path"] == location["relative_path"]
+                    && entry["start_line"] == location["start_line"]
+                    && entry["name"] == row["name"]
+                    && entry["cc"] == row["cc"]),
+            "top25 row {row} is missing from callables"
+        );
+    }
+}
+
+/// A JS callable assigned to a computed member whose key expression holds a
+/// secret; the assigned function starts on line 5.
+const COMPUTED_MEMBER_PROBE: &str = "registry[(function () {\n  const apiKey = \"SECRET-TOKEN-1234\";\n  return apiKey;\n})()] =\nfunction (x) {\n  if (x) { return 1; }\n  return 2;\n};\n";
+
+#[test]
+fn test_scan_report_publishes_no_source_text_in_callable_names() {
+    let corpus = tempfile::tempdir().expect("tempdir");
+    fs::write(corpus.path().join("reg.js"), COMPUTED_MEMBER_PROBE).expect("write");
+
+    let (_dir, output) = run_scan(corpus.path(), |_| {});
+    let text = report_text(&output);
+    let value: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+
+    assert!(!text.contains("SECRET-TOKEN-1234"), "{text}");
+    for section in ["callables", "top25"] {
+        for row in value[section].as_array().expect("array") {
+            let name = row["name"].as_str().expect("name");
+            assert!(!name.contains(['\n', '\r']), "{section}: {name:?}");
+        }
+    }
+    let names: Vec<&str> = value["callables"]
+        .as_array()
+        .expect("callables")
+        .iter()
+        .filter_map(|row| row["name"].as_str())
+        .collect();
+    assert!(names.contains(&"<computed>@5"), "{names:?}");
+}
+
+fn callable_names(value: &serde_json::Value) -> Vec<String> {
+    value["callables"]
+        .as_array()
+        .expect("callables")
+        .iter()
+        .filter_map(|row| row["name"].as_str().map(str::to_string))
+        .collect()
+}
+
+#[test]
+fn test_scan_report_publishes_no_comment_or_pattern_text_in_callable_names() {
+    let corpus = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        corpus.path().join("names.js"),
+        "obj /* SECRET-COMMENT-5678 */ .handler = function (x) {\n  if (x) { return 1; }\n  return 2;\n};\nconst { k = \"SECRET-DEFAULT-9999\" } = function (x) {\n  if (x) { return 1; }\n  return 2;\n};\n",
+    )
+    .expect("write");
+
+    let (_dir, output) = run_scan(corpus.path(), |_| {});
+    let text = report_text(&output);
+    let value: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+
+    assert!(!text.contains("SECRET-COMMENT-5678"), "{text}");
+    assert!(!text.contains("SECRET-DEFAULT-9999"), "{text}");
+    let names = callable_names(&value);
+    assert!(names.contains(&"<computed>@1".to_string()), "{names:?}");
+    assert!(names.contains(&"<computed>@5".to_string()), "{names:?}");
+}
+
+#[test]
+fn test_scan_report_replaces_bracket_only_and_line_break_only_names() {
+    let corpus = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        corpus.path().join("one.js"),
+        "registry[\"SECRET-TOKEN-5678\"] = function (x) {\n  if (x) { return 1; }\n  return 2;\n};\n",
+    )
+    .expect("write");
+    fs::write(
+        corpus.path().join("two.js"),
+        "registry\n  .handler = function (x) {\n  if (x) { return 1; }\n  return 2;\n};\n",
+    )
+    .expect("write");
+
+    let (_dir, output) = run_scan(corpus.path(), |_| {});
+    let text = report_text(&output);
+    let value: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+
+    assert!(!text.contains("SECRET-TOKEN-5678"), "{text}");
+    let names = callable_names(&value);
+    assert!(names.contains(&"<computed>@1".to_string()), "{names:?}");
+    assert!(names.contains(&"<computed>@2".to_string()), "{names:?}");
+}
+
+#[test]
+fn test_scan_report_orders_callables_with_one_start_line_by_end_line() {
+    let corpus = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        corpus.path().join("T.java"),
+        "class T {\nvoid d() {} void c() {\nint x = 1;\n}\n}\n",
+    )
+    .expect("write");
+
+    let value = scan_value(corpus.path(), |_| {});
+
+    let names: Vec<&str> = value["callables"]
+        .as_array()
+        .expect("callables")
+        .iter()
+        .map(|row| row["name"].as_str().expect("name"))
+        .collect();
+    assert_eq!(names, ["d", "c"], "{value}");
+}
+
+fn scan_id(root: &Path) -> String {
+    scan_value(root, |_| {})["snapshots"]["scan"]
+        .as_str()
+        .expect("a string snapshot ID")
+        .to_string()
+}
+
+/// D22: the scan ID covers tracked entries plus untracked non-ignored ones.
+/// Rejects an ID that hashes an ignored untracked tree (the walk that ignores
+/// `.gitignore`), one that drops a tracked file matching an ignore pattern,
+/// and one that drops untracked non-ignored files.
+#[test]
+fn test_scan_snapshot_id_skips_ignored_untracked_entries() {
+    let repo_dir = tempfile::tempdir().expect("tempdir");
+    let root = repo_dir.path();
+    init_git_worktree(root);
+    fs::write(root.join(".gitignore"), "build/\n*.log\n").expect("write .gitignore");
+    fs::write(root.join("A.java"), "public class A {}\n").expect("write A.java");
+    fs::write(root.join("kept.log"), "tracked despite the pattern\n").expect("write kept.log");
+    run_git(root, &["add", "-A"]);
+    run_git(root, &["add", "-f", "kept.log"]);
+    run_git(root, &["commit", "-m", "initial commit"]);
+    fs::create_dir(root.join("build")).expect("mkdir build");
+    fs::write(root.join("build/out.bin"), "one").expect("write out.bin");
+    fs::write(root.join("stray.log"), "ignored untracked file").expect("write stray.log");
+
+    let base = scan_id(root);
+
+    // (a) An ignored untracked file or directory entry never moves the ID.
+    fs::write(root.join("build/out.bin"), "two").expect("rewrite out.bin");
+    fs::write(root.join("build/more.bin"), "new").expect("write more.bin");
+    fs::write(root.join("stray.log"), "changed").expect("rewrite stray.log");
+    assert_eq!(scan_id(root), base, "ignored entries must not move the ID");
+
+    // (f) Without ignored entries the ID is check's worktree ID.
+    fs::remove_dir_all(root.join("build")).expect("remove build");
+    fs::remove_file(root.join("stray.log")).expect("remove stray.log");
+    let repo = Repository::open(root).expect("open the repository");
+    let worktree_id = SnapshotId::of_worktree(&repo, &WorktreeSnapshot::open(&repo).expect("open"))
+        .expect("worktree id")
+        .to_string();
+    assert_eq!(scan_id(root), worktree_id);
+    assert_eq!(scan_id(root), base, "the ignored entries never counted");
+
+    // (d) A tracked file matching an ignore pattern still counts.
+    fs::write(root.join("kept.log"), "tracked, edited").expect("edit kept.log");
+    let after_kept = scan_id(root);
+    assert_ne!(after_kept, base, "a tracked ignored-pattern file counts");
+
+    // (b) A tracked source change moves the ID.
+    fs::write(root.join("A.java"), "public class A { int x; }\n").expect("edit A.java");
+    let after_tracked = scan_id(root);
+    assert_ne!(after_tracked, after_kept, "a tracked edit moves the ID");
+
+    // (c) An untracked, non-ignored file moves the ID.
+    fs::write(root.join("new.java"), "public class N {}\n").expect("write new.java");
+    assert_ne!(scan_id(root), after_tracked, "an untracked file counts");
+}
+
+/// D22: an ignored untracked directory is pruned, never opened.
+/// Rejects a walk that stats or hashes files inside an ignored tree.
+#[cfg(unix)]
+#[test]
+fn test_scan_snapshot_id_never_opens_an_ignored_directory() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repo_dir = tempfile::tempdir().expect("tempdir");
+    let root = repo_dir.path();
+    init_git_worktree(root);
+    fs::write(root.join(".gitignore"), "build/\n").expect("write .gitignore");
+    fs::write(root.join("A.java"), "public class A {}\n").expect("write A.java");
+    git_commit_all(root, "initial commit");
+    fs::create_dir_all(root.join("build/locked")).expect("mkdir");
+    let unreadable = root.join("build/out.bin");
+    fs::write(&unreadable, "x").expect("write out.bin");
+    fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o000)).expect("chmod file");
+    let locked = root.join("build/locked");
+    fs::write(locked.join("inner.bin"), "y").expect("write inner.bin");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).expect("chmod dir");
+
+    let value = scan_value(root, |_| {});
+    // Restore access so the temp dir can be removed.
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).expect("restore dir");
+    fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o644)).expect("restore file");
+    assert!(value["snapshots"]["scan"].is_string(), "{value}");
+    assert_eq!(
+        value["snapshots"]["unavailable_reason"],
+        serde_json::Value::Null
+    );
 }

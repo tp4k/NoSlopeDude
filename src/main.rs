@@ -7,10 +7,10 @@ use anyhow::Context;
 use clap::Parser;
 use git2::Repository;
 
-use nsd::check::{run_check, CheckDiagnostic, CheckMode, CheckRequest};
+use nsd::check::{run_check, CheckDetails, CheckDiagnostic, CheckMode, CheckRequest};
 use nsd::cli::{CheckArgs, Cli, Command, Format, ScanArgs};
 use nsd::config::{Config, CODE_INVALID_CONFIG};
-use nsd::format::{escape_terminal, render_json, render_terminal};
+use nsd::format::{escape_terminal, render_check_json, render_terminal};
 use nsd::model::ScanSettings;
 use nsd::pipeline;
 use nsd::policy::exit::exit_status;
@@ -59,7 +59,7 @@ fn run_check_command(args: &CheckArgs) -> u8 {
 
 fn check_command(args: &CheckArgs) -> anyhow::Result<u8> {
     let repository = std::env::current_dir().context("cannot read the current directory")?;
-    let (diagnostics, status) = match &args.config {
+    let (diagnostics, status, details) = match &args.config {
         Some(config) if config_is_inside_checkout(&repository, config)? => refused_config(),
         _ => {
             let mode = match &args.base {
@@ -78,12 +78,29 @@ fn check_command(args: &CheckArgs) -> anyhow::Result<u8> {
             for warning in &outcome.warnings {
                 eprintln!("warning: {}", escape_terminal(warning));
             }
-            (outcome.diagnostics, outcome.exit_status)
+            (outcome.diagnostics, outcome.exit_status, outcome.details)
         }
     };
     let rendered = match args.format {
         Format::Terminal => render_terminal(&diagnostics),
-        Format::Json => render_json(&diagnostics, status),
+        Format::Json => {
+            let repository_forms = repository_paths(&repository);
+            let config_forms: Vec<PathBuf> = args
+                .config
+                .iter()
+                .flat_map(|config| [config.clone(), repository.join(config)])
+                .collect();
+            let repository_refs: Vec<&Path> =
+                repository_forms.iter().map(PathBuf::as_path).collect();
+            let config_refs: Vec<&Path> = config_forms.iter().map(PathBuf::as_path).collect();
+            render_check_json(
+                &diagnostics,
+                status,
+                details.as_ref(),
+                &repository_refs,
+                &config_refs,
+            )
+        }
     };
     std::io::stdout()
         .write_all(rendered.as_bytes())
@@ -93,7 +110,7 @@ fn check_command(args: &CheckArgs) -> anyhow::Result<u8> {
 
 /// The refusal names no path: the one given may be absolute, and the listing
 /// never prints the checkout's location.
-fn refused_config() -> (Vec<CheckDiagnostic>, u8) {
+fn refused_config() -> (Vec<CheckDiagnostic>, u8, Option<CheckDetails>) {
     let diagnostics = vec![CheckDiagnostic::Failure {
         code: CODE_INVALID_CONFIG,
         message: "trusted config is inside the candidate checkout".to_string(),
@@ -103,7 +120,21 @@ fn refused_config() -> (Vec<CheckDiagnostic>, u8) {
         &Config::default().policy,
         false,
     );
-    (diagnostics, status)
+    (diagnostics, status, None)
+}
+
+/// Every spelling of the checkout a failure message could name: the working
+/// directory itself and, when it opens as a repository, its work tree, its
+/// git directory and its common directory (a linked work tree's lives
+/// outside it).
+fn repository_paths(repository: &Path) -> Vec<PathBuf> {
+    let mut paths = vec![repository.to_path_buf()];
+    if let Ok(opened) = Repository::open(repository) {
+        paths.push(opened.path().to_path_buf());
+        paths.push(opened.commondir().to_path_buf());
+        paths.extend(opened.workdir().map(Path::to_path_buf));
+    }
+    paths
 }
 
 /// Whether `config` lies under the work tree of the repository at

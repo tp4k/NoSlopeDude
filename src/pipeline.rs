@@ -34,8 +34,13 @@ pub fn run(target_input: &str, settings: ScanSettings) -> anyhow::Result<Pipelin
 
     let (parsed_files, parse_failures) =
         parse::parse_all(&resolved_target.root, &discover.discovered);
-    let ir = lower::lower_all(&parsed_files);
-    let metrics = metrics::run_with_ir(&parsed_files, &ir, !parse_failures.is_empty());
+    let (ir, unanalyzed_lines) = lower::lower_all_inventoried(&parsed_files);
+    let metrics = metrics::run_with_ir(
+        &parsed_files,
+        &ir,
+        &unanalyzed_lines,
+        !parse_failures.is_empty(),
+    );
     let clones = clones::run_with_ir(&parsed_files, &ir, settings.min_clone_lines);
     let rules = rules::run_with_ir(&parsed_files, &ir, &metrics, &clones);
     let report_input = ReportInput {

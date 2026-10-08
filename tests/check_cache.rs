@@ -520,6 +520,37 @@ fn test_binary_json_is_byte_stable_across_cache_states() {
 }
 
 #[test]
+fn test_warm_json_keeps_the_unanalyzed_lines_of_an_unchanged_damaged_file() {
+    let fx = fixture();
+    fx.commit(&[(
+        "Mixed.java",
+        include_str!("fixtures/salvage/Mixed.java").as_bytes(),
+    )]);
+    fx.stage(
+        "A.java",
+        b"class A {\n    int f() {\n        return 1;\n    }\n}\n",
+    );
+    let config_dir = TempDir::new().expect("create a config directory");
+    let config = config_dir.path().join("trusted.yml");
+    fs::write(&config, "version: 1\npolicy:\n  NSD-V102: warn\n").expect("write the config");
+    let config = config.to_str().expect("UTF-8 path");
+    let args = ["check", "--staged", "--format", "json", "--config", config];
+
+    let cold = fx.nsd(&args);
+    assert!(!fx.entry_files().is_empty(), "the cold run wrote entries");
+    let warm = fx.nsd(&args);
+
+    for run in [&cold, &warm] {
+        let document: Value = serde_json::from_slice(&run.stdout).expect("a JSON document");
+        let unanalyzed = document["summaries"]["overall"]["verbosity"]["unanalyzed_lines"]
+            .as_u64()
+            .expect("unanalyzed_lines");
+        assert!(unanalyzed > 0, "{document}");
+    }
+    assert_eq!(warm.stdout, cold.stdout);
+}
+
+#[test]
 fn test_binary_terminal_output_is_byte_stable_across_cache_states() {
     let runs = four_states(&[]);
 

@@ -198,6 +198,113 @@ fn test_a_file_with_damage_is_listed_as_a_salvaged_skip() {
     );
 }
 
+/// M1-8 (ledger row 27): a salvaged file's `skipped_files` row names every
+/// mapped parser gap (the damage spans' line ranges, ascending) and counts
+/// the callables salvage left unmeasured, so "which files were partially
+/// analyzed and why" is answerable from `report.json` alone. `Two.java`'s
+/// `a` and `b` are the damaged callables around the clean `ok`; `Mixed.java`
+/// and `Mixed.ts` each carry one.
+#[test]
+fn test_salvaged_file_lists_its_mapped_parser_gaps() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    for name in ["Mixed.java", "Mixed.ts"] {
+        fs::copy(salvage_fixture_root().join(name), dir.path().join(name)).expect("copy fixture");
+    }
+    fs::write(
+        dir.path().join("Two.java"),
+        "class Two {\n    void a(int x {\n        return;\n    }\n    void ok() {\n        return;\n    }\n    void b(int y {\n        return;\n    }\n}\n",
+    )
+    .expect("write Two.java");
+    fs::write(
+        dir.path().join("a.ts"),
+        "function f() {\n  let x = [1, 2,\n    3 +;\n  g(;\n}\nconst y = {a: 1, b:: 2,\n  c: 3};\n",
+    )
+    .expect("write a.ts");
+
+    let (_dir, output) = run_scan(dir.path(), |_| {});
+    let json_text =
+        fs::read_to_string(output.settings.output.join("report.json")).expect("report.json exists");
+    let value: serde_json::Value = serde_json::from_str(&json_text).expect("valid JSON");
+    let rows = value["skipped_files"].as_array().expect("skipped_files");
+
+    let nested = rows
+        .iter()
+        .find(|row| row["relative_path"] == "a.ts")
+        .unwrap_or_else(|| panic!("a.ts is listed: {rows:?}"));
+    let nested_gaps: Vec<(u64, u64)> = nested["gaps"]
+        .as_array()
+        .expect("gaps")
+        .iter()
+        .map(|gap| {
+            (
+                gap["start_line"].as_u64().expect("start_line"),
+                gap["end_line"].as_u64().expect("end_line"),
+            )
+        })
+        .collect();
+    let shared_start = nested_gaps.iter().enumerate().any(|(index, gap)| {
+        nested_gaps[index + 1..]
+            .iter()
+            .any(|other| other.0 == gap.0)
+    });
+    assert!(
+        shared_start,
+        "a.ts must hold two gaps sharing a start line, or the order check is vacuous: {nested_gaps:?}"
+    );
+    let mut sorted = nested_gaps.clone();
+    sorted.sort_unstable();
+    assert_eq!(
+        nested_gaps, sorted,
+        "gaps are ordered by (start_line, end_line)"
+    );
+
+    let expected = [
+        ("Mixed.java", vec![(12, 12)], 1),
+        ("Mixed.ts", vec![(8, 8)], 1),
+        ("Two.java", vec![(2, 2), (8, 8)], 2),
+    ];
+    for (path, gaps, unmeasured) in expected {
+        let row = rows
+            .iter()
+            .find(|row| row["relative_path"] == path)
+            .unwrap_or_else(|| panic!("{path} is listed: {rows:?}"));
+        assert_eq!(row["reason"], "parse_syntax_error", "{path}");
+        let gaps: Vec<serde_json::Value> = gaps
+            .into_iter()
+            .map(|(start_line, end_line)| {
+                serde_json::json!({"start_line": start_line, "end_line": end_line})
+            })
+            .collect();
+        assert_eq!(row["gaps"], serde_json::Value::Array(gaps), "{path}");
+        assert_eq!(row["unmeasured_callables"], unmeasured, "{path}");
+    }
+}
+
+/// M1-8: damage that sits outside every callable and block still counts its
+/// executable lines as unanalyzed. `c.ts`'s line 5 is a bare damage span
+/// (`class { foo( }`) with one executable line; no callable or block is
+/// excluded, so only a walk of the whole unpruned tree finds it.
+#[test]
+fn test_stray_damage_lines_are_counted_as_unanalyzed() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        dir.path().join("c.ts"),
+        "export function safe(x) {\n  return x;\n}\n\nclass { foo( }\n",
+    )
+    .expect("write c.ts");
+
+    let (_dir, output) = run_scan(dir.path(), |_| {});
+
+    let ir = &output.ir[0];
+    assert!(
+        ir.excluded_callables.is_empty() && ir.excluded_blocks.is_empty(),
+        "the damage must be bare, outside every callable and block"
+    );
+    let summary = &output.metrics.file_scan_summaries[0];
+    assert_eq!(summary.scanned_lines, 2, "{summary:?}");
+    assert_eq!(summary.unanalyzed_lines, 1, "{summary:?}");
+}
+
 /// A scan whose only skips are policy skips (`test`, `gitignore`,
 /// `user_exclude`) reports `incomplete: false`: the `SkipReason` split
 /// drives `incomplete` only from an analysis-failure skip, never from a
@@ -291,8 +398,9 @@ fn test_policy_skip_labels_are_byte_identical_to_the_legacy_labels() {
     assert_eq!(SkipReason::Unreadable.label(), "unreadable");
 }
 
-/// `report.json`'s top-level key set is exactly what it was before salvage:
-/// item 8's "retain legacy JSON serialization through this gate".
+/// `report.json`'s top-level key set is pinned: the M0b ban on new fields is
+/// lifted (D5), and the canonical scan document (M6-1) adds `schema_version`,
+/// `result_scope`, `snapshots`, `fingerprints`, `skipped` and `callables`.
 #[test]
 fn test_report_json_gains_no_new_top_level_field() {
     let (_dir, output) = run_scan(&salvage_fixture_root(), |_| {});
@@ -309,18 +417,24 @@ fn test_report_json_gains_no_new_top_level_field() {
     keys.sort_unstable();
     let mut expected_keys = vec![
         "adaptation",
+        "callables",
         "duplicates",
         "findings",
+        "fingerprints",
         "incomplete",
+        "result_scope",
         "scan",
+        "schema_version",
         "scores",
+        "skipped",
         "skipped_files",
+        "snapshots",
         "top25",
     ];
     expected_keys.sort_unstable();
     assert_eq!(
         keys, expected_keys,
-        "report.json must keep its exact pre-salvage top-level key set: {keys:?}"
+        "report.json must hold exactly the canonical scan top-level key set: {keys:?}"
     );
 }
 

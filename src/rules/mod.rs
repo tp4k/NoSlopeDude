@@ -90,6 +90,7 @@ pub(crate) fn run_with_ir(
                     relative_path: summary.relative_path.clone(),
                     language: file.language,
                     scanned_lines: summary.scanned_lines,
+                    unanalyzed_lines: summary.unanalyzed_lines,
                     executable_lines,
                 });
             (findings, file_lines)
@@ -260,6 +261,7 @@ fn file_language_lines(
                         relative_path: summary.relative_path.clone(),
                         language: file.language,
                         scanned_lines: summary.scanned_lines,
+                        unanalyzed_lines: summary.unanalyzed_lines,
                         executable_lines: executable_lines_from_ir(&ir_file),
                     }
                 })
@@ -298,11 +300,21 @@ pub fn compute_verbosity(
     let mut scanned_overall = 0usize;
     let mut scanned_java = 0usize;
     let mut scanned_js_ts = 0usize;
+    let mut unanalyzed_overall = 0usize;
+    let mut unanalyzed_java = 0usize;
+    let mut unanalyzed_js_ts = 0usize;
     for file in files {
         scanned_overall += file.scanned_lines;
+        unanalyzed_overall += file.unanalyzed_lines;
         match file.language {
-            LanguageFamily::Java => scanned_java += file.scanned_lines,
-            LanguageFamily::JsTs => scanned_js_ts += file.scanned_lines,
+            LanguageFamily::Java => {
+                scanned_java += file.scanned_lines;
+                unanalyzed_java += file.unanalyzed_lines;
+            }
+            LanguageFamily::JsTs => {
+                scanned_js_ts += file.scanned_lines;
+                unanalyzed_js_ts += file.unanalyzed_lines;
+            }
         }
     }
 
@@ -339,14 +351,18 @@ pub fn compute_verbosity(
         .sum();
 
     VerbosityScores {
-        overall: verbosity_score(overall, scanned_overall),
-        java: verbosity_score(flagged_java, scanned_java),
-        js_ts: verbosity_score(flagged_js_ts, scanned_js_ts),
+        overall: verbosity_score(overall, scanned_overall, unanalyzed_overall),
+        java: verbosity_score(flagged_java, scanned_java, unanalyzed_java),
+        js_ts: verbosity_score(flagged_js_ts, scanned_js_ts, unanalyzed_js_ts),
     }
 }
 
 /// D23: `0.0` when `scanned_lines` is `0`, including an empty scan.
-fn verbosity_score(flagged_lines: usize, scanned_lines: usize) -> VerbosityScore {
+fn verbosity_score(
+    flagged_lines: usize,
+    scanned_lines: usize,
+    unanalyzed_lines: usize,
+) -> VerbosityScore {
     let ratio = if scanned_lines == 0 {
         0.0
     } else {
@@ -355,6 +371,7 @@ fn verbosity_score(flagged_lines: usize, scanned_lines: usize) -> VerbosityScore
     VerbosityScore {
         flagged_lines,
         scanned_lines,
+        unanalyzed_lines,
         ratio,
     }
 }
@@ -609,6 +626,9 @@ mod tests {
             file_scan_summaries: vec![FileScanSummary {
                 relative_path: file.relative_path.clone(),
                 scanned_lines: 7,
+                unanalyzed_lines: 0,
+                gaps: Vec::new(),
+                unmeasured_callables: 0,
             }],
             erosion: 0.0,
             top25: Vec::new(),

@@ -241,7 +241,22 @@ pub struct SyntaxBlock {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileScanSummary {
     pub relative_path: PathBuf,
+    /// The file's analyzed executable lines: the ones that survived pruning.
     pub scanned_lines: usize,
+    /// The executable lines lowering pruned (damage spans, excluded
+    /// callables and blocks), counted once each.
+    pub unanalyzed_lines: usize,
+    /// Every mapped parser gap, as a line range, sorted ascending.
+    pub gaps: Vec<LineRange>,
+    /// How many callables salvage excluded from measurement.
+    pub unmeasured_callables: usize,
+}
+
+/// A 1-based inclusive source-line range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct LineRange {
+    pub start_line: usize,
+    pub end_line: usize,
 }
 
 /// Everything the metrics stage (WS-2) computed from every successfully
@@ -330,6 +345,7 @@ pub struct FileLanguageLines {
     pub relative_path: PathBuf,
     pub language: LanguageFamily,
     pub scanned_lines: usize,
+    pub unanalyzed_lines: usize,
     pub executable_lines: Vec<usize>,
 }
 
@@ -339,6 +355,7 @@ pub struct FileLanguageLines {
 pub struct VerbosityScore {
     pub flagged_lines: usize,
     pub scanned_lines: usize,
+    pub unanalyzed_lines: usize,
     pub ratio: f64,
 }
 

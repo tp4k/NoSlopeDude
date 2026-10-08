@@ -51,41 +51,12 @@ const FIXTURES_ROOT: &str = "tests/fixtures";
 const CLEAN_BASELINE_PATH: &str = "tests/golden/neutrality/clean.report.json";
 const MALFORMED_BASELINE_PATH: &str = "tests/golden/neutrality/malformed.report.json";
 
-/// The label `normalize`/`normalize_raw_text` substitute for the corpus's
-/// volatile tempdir path -- the one field that can never be made constant
-/// across invocations, because each invocation (including the one that
-/// captured the committed baseline) copies the corpus into a fresh tempdir.
-const NORMALIZED_TARGET_LABEL: &str = "<neutrality-corpus>";
-
 /// Declared measurement deltas the malformed corpus is permitted to carry
 /// against its baseline -- JSON pointers such as `/skipped_files/0/reason`.
-/// WS-6 (salvage, the `SkipReason` split) populates this list with exactly
-/// the fields item 8's declared exception authorizes moving on
-/// `MALFORMED_CORPUS_SOURCES`'s three fixtures:
-///
-/// - `/skipped_files` -- a `SyntaxError` file is no longer a whole-file
-///   skip, but `src/report/mod.rs::build_skipped_files` still lists it so
-///   the file behind `incomplete` is named: all three fixtures' entries
-///   stay, and only each `detail` moves from `null` to
-///   `salvaged; first error at line N`.
-/// - `/scores/overall/verbosity/scanned_lines` and
-///   `/scores/java/verbosity/scanned_lines` -- `rules/broken/Broken.java`
-///   and `report/src/Broken.java` each have one callable and it intersects
-///   the damage, so it stays unmeasured (fail-closed), but D12's per-file
-///   scanned-line count is unconditioned on callable boundaries and still
-///   walks each file's surviving class-wrapper lines around the pruned
-///   callable -- previously 0 (the whole file was dropped), now a few per
-///   file. `js_ts`'s own `metrics/broken/Broken.ts` has no such surviving
-///   wrapper content, so `/scores/js_ts/verbosity/scanned_lines` needs no
-///   entry: it stays `0` on both sides. `flagged_lines` and every `ratio`
-///   also stay identical (`0`, since `0/0` and `0/scanned_lines` are both
-///   `0.0`) and need no entry either -- none of the three fixtures'
-///   surviving wrapper lines trip any of the six rules.
-const DECLARED_DELTAS: &[&str] = &[
-    "/skipped_files",
-    "/scores/overall/verbosity/scanned_lines",
-    "/scores/java/verbosity/scanned_lines",
-];
+/// Empty: the WS-6 declared moves (`detail`, per-file `scanned_lines`) and
+/// the WS-1 added keys are now part of the recaptured baseline itself, so any
+/// difference at all is a regression.
+const DECLARED_DELTAS: &[&str] = &[];
 
 /// Legacy shared capture variable. It no longer selects anything: capture
 /// is gated per corpus by `capture_var`, so recapturing one corpus cannot
@@ -274,35 +245,20 @@ fn capture_requested(corpus: Corpus) -> bool {
     capture_selected(corpus, |name| std::env::var_os(name))
 }
 
-/// Replaces exactly one occurrence of `target_input` (the corpus's own
-/// tempdir path) with the fixed label, in the raw text `render_json` wrote
-/// -- not a `serde_json::Value` re-serialization, which would reorder keys
-/// (`Value` is a `BTreeMap`) and hide a real serialization-shape change.
-fn normalize_raw_text(json_text: &str, target_input: &str) -> String {
+/// The raw text `render_json` wrote, after asserting it names the corpus's
+/// own tempdir path nowhere (WS-3: `scan.target` is null and no excerpt is
+/// written), so the text is constant across invocations without any
+/// substitution. Raw text, not a `serde_json::Value` re-serialization, which
+/// would reorder keys (`Value` is a `BTreeMap`) and hide a real
+/// serialization-shape change.
+fn path_free_raw_text<'a>(json_text: &'a str, target_input: &str) -> &'a str {
     let occurrences = json_text.matches(target_input).count();
     assert_eq!(
-        occurrences, 1,
-        "expected exactly one occurrence of the corpus tempdir path {target_input:?} \
-         in the rendered report, found {occurrences}"
+        occurrences, 0,
+        "the rendered report names the corpus tempdir path {target_input:?} \
+         {occurrences} time(s)"
     );
-    json_text.replacen(target_input, NORMALIZED_TARGET_LABEL, 1)
-}
-
-/// Replaces `scan.target` with the fixed label and nothing else, on the
-/// parsed `Value` -- used by the malformed-corpus JSON-pointer diff and by
-/// `test_normalization_replaces_only_the_scan_target`, which asserts this
-/// touches exactly one field.
-fn normalize(report: &Value) -> Value {
-    let mut normalized = report.clone();
-    let scan = normalized
-        .get_mut("scan")
-        .and_then(Value::as_object_mut)
-        .expect("report has a scan object");
-    scan.insert(
-        "target".to_string(),
-        Value::String(NORMALIZED_TARGET_LABEL.to_string()),
-    );
-    normalized
+    json_text
 }
 
 /// Every JSON-pointer path (leaf, or the point of a structural mismatch)
@@ -368,21 +324,225 @@ fn read_baseline(relative: &str) -> Value {
     parse_json(&text)
 }
 
+/// WS-1 (M1-8) format deltas, the only ones the semantic comparison below
+/// ignores: `unanalyzed_lines` and `complete` beside each family's
+/// `verbosity.scanned_lines`, and `gaps` and `unmeasured_callables` inside a
+/// `parse_syntax_error` `skipped_files` row.
+const SCORE_FAMILIES: [&str; 3] = ["overall", "java", "js_ts"];
+const ADDED_VERBOSITY_KEYS: [&str; 2] = ["unanalyzed_lines", "complete"];
+const SALVAGED_ROW_REASON: &str = "parse_syntax_error";
+const ADDED_SALVAGED_ROW_KEYS: [&str; 2] = ["gaps", "unmeasured_callables"];
+
+/// WS-3 (M6-1/M6-2) format deltas: the canonical top-level keys the scan
+/// report gained, `scan.target` (a volatile tempdir path before, null now),
+/// and every `excerpt` key (the canonical report carries none; the HTML keeps
+/// them).
+const ADDED_TOP_LEVEL_KEYS: [&str; 6] = [
+    "schema_version",
+    "result_scope",
+    "snapshots",
+    "fingerprints",
+    "skipped",
+    "callables",
+];
+const REMOVED_EXCERPT_KEY: &str = "excerpt";
+
+fn strip_excerpts(value: &mut Value) {
+    match value {
+        Value::Object(fields) => {
+            fields.remove(REMOVED_EXCERPT_KEY);
+            fields.values_mut().for_each(strip_excerpts);
+        }
+        Value::Array(items) => items.iter_mut().for_each(strip_excerpts),
+        _ => {}
+    }
+}
+
+/// Removes exactly the keys above, when present, and nothing else. A
+/// measurement (a `cc`, `sloc`, `scanned_lines`, `ratio` or `erosion`) is
+/// never touched, so a moved number stays visible to `diff_paths`.
+fn strip_enumerated_format_deltas(report: &mut Value) {
+    if let Some(fields) = report.as_object_mut() {
+        for key in ADDED_TOP_LEVEL_KEYS {
+            fields.remove(key);
+        }
+    }
+    if let Some(scan) = report.get_mut("scan").and_then(Value::as_object_mut) {
+        scan.remove("target");
+    }
+    strip_excerpts(report);
+    for family in SCORE_FAMILIES {
+        let verbosity = report
+            .pointer_mut(&format!("/scores/{family}/verbosity"))
+            .and_then(Value::as_object_mut);
+        if let Some(verbosity) = verbosity {
+            for key in ADDED_VERBOSITY_KEYS {
+                verbosity.remove(key);
+            }
+        }
+    }
+    let rows = report
+        .get_mut("skipped_files")
+        .and_then(Value::as_array_mut);
+    for row in rows.into_iter().flatten() {
+        if row["reason"] != SALVAGED_ROW_REASON {
+            continue;
+        }
+        if let Some(row) = row.as_object_mut() {
+            for key in ADDED_SALVAGED_ROW_KEYS {
+                row.remove(key);
+            }
+        }
+    }
+}
+
+/// `diff_paths` after `strip_enumerated_format_deltas` on both sides.
+fn diff_ignoring_format_deltas(
+    baseline: &Value,
+    actual: &Value,
+    declared_deltas: &[&str],
+) -> Vec<String> {
+    let mut baseline = baseline.clone();
+    let mut actual = actual.clone();
+    strip_enumerated_format_deltas(&mut baseline);
+    strip_enumerated_format_deltas(&mut actual);
+    diff_paths(&baseline, &actual, declared_deltas)
+}
+
+/// Semantic Proof B: the committed baseline and the live scan are compared
+/// with only the enumerated format deltas removed, so every measurement must
+/// agree. (Run against the pre-WS-1 baselines, before the recapture, it was
+/// the proof that WS-1 moved no measurement on the clean corpus.)
+#[test]
+fn test_previous_baselines_differ_only_by_enumerated_format_deltas() {
+    let clean = scan_corpus(&clean_corpus_sources());
+    let clean_diffs = diff_ignoring_format_deltas(
+        &read_baseline(CLEAN_BASELINE_PATH),
+        &parse_json(&clean.json_text),
+        &[],
+    );
+    assert!(
+        clean_diffs.is_empty(),
+        "clean corpus differs beyond the enumerated format deltas: {clean_diffs:?}"
+    );
+
+    let malformed = scan_corpus(&malformed_corpus_sources());
+    let malformed_diffs = diff_ignoring_format_deltas(
+        &read_baseline(MALFORMED_BASELINE_PATH),
+        &parse_json(&malformed.json_text),
+        DECLARED_DELTAS,
+    );
+    assert!(
+        malformed_diffs.is_empty(),
+        "malformed corpus differs beyond the enumerated format deltas: {malformed_diffs:?}"
+    );
+}
+
+/// The comparison above must see a moved measurement: a changed `cc`, `sloc`,
+/// `scanned_lines`, verbosity `ratio` or `erosion` is reported at exactly its
+/// own pointer, while a change to an enumerated added key is not.
+#[test]
+fn test_format_delta_comparator_catches_a_planted_measurement_mutation() {
+    let live = parse_json(&scan_corpus(&clean_corpus_sources()).json_text);
+    let bump = |pointer: &str| {
+        let mut mutated = live.clone();
+        let slot = mutated
+            .pointer_mut(pointer)
+            .unwrap_or_else(|| panic!("live report has {pointer}"));
+        *slot = json!(slot.as_f64().expect("numeric slot") + 1.0);
+        mutated
+    };
+
+    for pointer in [
+        "/top25/0/cc",
+        "/top25/0/sloc",
+        "/scores/java/verbosity/scanned_lines",
+        "/scores/java/verbosity/ratio",
+        "/scores/java/erosion",
+        "/findings/0/location/start_line",
+        "/duplicates/0/redundant_lines",
+    ] {
+        assert_eq!(
+            diff_ignoring_format_deltas(&live, &bump(pointer), &[]),
+            vec![pointer.to_string()],
+            "a moved {pointer} must be reported alone"
+        );
+    }
+
+    let mut format_only = live.clone();
+    format_only["scores"]["java"]["verbosity"]["unanalyzed_lines"] = json!(9999);
+    format_only["scores"]["overall"]["verbosity"]["complete"] = json!(null);
+    let salvaged_row = format_only["skipped_files"]
+        .as_array_mut()
+        .and_then(|rows| {
+            rows.iter_mut()
+                .find(|row| row["reason"] == SALVAGED_ROW_REASON)
+        })
+        .expect("the clean corpus holds a salvaged fixture");
+    salvaged_row["gaps"] = json!([{"start_line": 1, "end_line": 1}]);
+    salvaged_row["unmeasured_callables"] = json!(9999);
+    assert_eq!(
+        diff_ignoring_format_deltas(&live, &format_only, &[]),
+        Vec::<String>::new(),
+        "an enumerated added key is a declared format delta"
+    );
+
+    let mut canonical_only = live.clone();
+    canonical_only["schema_version"] = json!(1);
+    canonical_only["callables"] = json!([{"path": "x"}]);
+    canonical_only["skipped"] = json!({"test": 3});
+    canonical_only["scan"]["target"] = json!("/somewhere");
+    canonical_only["top25"][0]["excerpt"] = json!("different text");
+    assert_eq!(
+        diff_ignoring_format_deltas(&live, &canonical_only, &[]),
+        Vec::<String>::new(),
+        "a WS-3 enumerated delta is not a measurement"
+    );
+    let mut renamed = live.clone();
+    renamed["scan"]["include_tests"] = json!(false);
+    assert_eq!(
+        diff_ignoring_format_deltas(&live, &renamed, &[]),
+        vec!["/scan/include_tests".to_string()],
+        "a neighbour of scan.target is not a declared delta"
+    );
+
+    let salvaged_index = live["skipped_files"]
+        .as_array()
+        .and_then(|rows| {
+            rows.iter()
+                .position(|row| row["reason"] == SALVAGED_ROW_REASON)
+        })
+        .expect("the clean corpus holds a salvaged fixture");
+    let mut detail_mutated = live.clone();
+    detail_mutated["skipped_files"][salvaged_index]["detail"] = json!("a different detail");
+    assert_ne!(
+        live["skipped_files"][salvaged_index]["detail"],
+        detail_mutated["skipped_files"][salvaged_index]["detail"],
+        "the planted detail must differ from the live one"
+    );
+    assert_eq!(
+        diff_ignoring_format_deltas(&live, &detail_mutated, &[]),
+        vec![format!("/skipped_files/{salvaged_index}/detail")],
+        "a non-enumerated key of a salvaged row must be reported"
+    );
+}
+
 #[test]
 fn test_clean_corpus_report_is_byte_identical_to_the_pre_ir_baseline() {
     let scanned = scan_corpus(&clean_corpus_sources());
     assert_every_source_is_discovered_or_skipped(&clean_corpus_sources(), &scanned.discover);
-    let actual_text = normalize_raw_text(&scanned.json_text, &scanned.target_input);
+    let actual_text = path_free_raw_text(&scanned.json_text, &scanned.target_input);
 
     let baseline_path = manifest_path(CLEAN_BASELINE_PATH);
     if capture_requested(Corpus::Clean) {
-        fs::write(&baseline_path, &actual_text).expect("write clean neutrality baseline");
+        fs::write(&baseline_path, actual_text).expect("write clean neutrality baseline");
         return;
     }
     let baseline_text =
         fs::read_to_string(&baseline_path).expect("committed clean baseline exists");
     assert_eq!(
-        actual_text, baseline_text,
+        actual_text,
+        baseline_text.as_str(),
         "clean corpus report.json diverged from the committed pre-IR baseline"
     );
 }
@@ -391,14 +551,14 @@ fn test_clean_corpus_report_is_byte_identical_to_the_pre_ir_baseline() {
 fn test_malformed_corpus_report_matches_its_baseline_with_declared_deltas_only() {
     let scanned = scan_corpus(&malformed_corpus_sources());
     assert_every_source_is_discovered_or_skipped(&malformed_corpus_sources(), &scanned.discover);
-    let actual_text = normalize_raw_text(&scanned.json_text, &scanned.target_input);
+    let actual_text = path_free_raw_text(&scanned.json_text, &scanned.target_input);
 
     let baseline_path = manifest_path(MALFORMED_BASELINE_PATH);
     if capture_requested(Corpus::Malformed) {
-        fs::write(&baseline_path, &actual_text).expect("write malformed neutrality baseline");
+        fs::write(&baseline_path, actual_text).expect("write malformed neutrality baseline");
         return;
     }
-    let actual = normalize(&parse_json(&scanned.json_text));
+    let actual = parse_json(&scanned.json_text);
     let baseline = read_baseline(MALFORMED_BASELINE_PATH);
     let diffs = diff_paths(&baseline, &actual, DECLARED_DELTAS);
     assert!(
@@ -417,17 +577,23 @@ fn test_malformed_corpus_report_matches_its_baseline_with_declared_deltas_only()
             {
                 "relative_path": "metrics/broken/Broken.ts",
                 "reason": "parse_syntax_error",
-                "detail": "salvaged; first error at line 1"
+                "detail": "salvaged; first error at line 1",
+                "gaps": [{"start_line": 1, "end_line": 1}, {"start_line": 2, "end_line": 2}],
+                "unmeasured_callables": 1
             },
             {
                 "relative_path": "report/src/Broken.java",
                 "reason": "parse_syntax_error",
-                "detail": "salvaged; first error at line 2"
+                "detail": "salvaged; first error at line 2",
+                "gaps": [{"start_line": 2, "end_line": 2}, {"start_line": 3, "end_line": 3}],
+                "unmeasured_callables": 1
             },
             {
                 "relative_path": "rules/broken/Broken.java",
                 "reason": "parse_syntax_error",
-                "detail": "salvaged; first error at line 5"
+                "detail": "salvaged; first error at line 5",
+                "gaps": [{"start_line": 5, "end_line": 5}],
+                "unmeasured_callables": 1
             }
         ]),
         "every MALFORMED_CORPUS_SOURCES entry is listed as a salvaged skip"
@@ -534,19 +700,14 @@ fn test_diff_paths_suppresses_only_declared_deltas() {
 }
 
 #[test]
-fn test_normalization_replaces_only_the_scan_target() {
+fn test_scan_report_names_no_corpus_path_and_has_a_null_target() {
     let scanned = scan_corpus(&clean_corpus_sources());
-    let report = parse_json(&scanned.json_text);
-    let normalized = normalize(&report);
-    let diffs = diff_paths(&report, &normalized, &[]);
-    assert_eq!(
-        diffs,
-        vec!["/scan/target".to_string()],
-        "normalization must touch exactly scan.target: {diffs:?}"
-    );
-    assert_eq!(
-        normalized["scan"]["target"],
-        Value::String(NORMALIZED_TARGET_LABEL.to_string())
+    let text = path_free_raw_text(&scanned.json_text, &scanned.target_input);
+    let report = parse_json(text);
+    assert_eq!(report["scan"]["target"], Value::Null);
+    assert!(
+        !text.contains("\"excerpt\""),
+        "the canonical report carries no excerpt"
     );
 }
 

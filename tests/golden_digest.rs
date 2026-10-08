@@ -673,6 +673,67 @@ fn test_nsd_v1_live_scan_is_reported_pending_when_the_archive_is_absent() {
     }
 }
 
+/// Whether the git checkout holding `target` has no modified or untracked
+/// entries. Panics (details withheld) when no repository can be opened.
+fn archive_checkout_is_clean(target: &Path) -> bool {
+    let checkout = git2::Repository::discover(target).unwrap_or_else(|_| {
+        panic!(
+            "opening the private java-fixture-01 checkout failed; details withheld \
+             (AGENTS.md, Fixture privacy)"
+        )
+    });
+    let mut status_options = git2::StatusOptions::new();
+    status_options.include_untracked(true);
+    let statuses = checkout
+        .statuses(Some(&mut status_options))
+        .unwrap_or_else(|_| {
+            panic!(
+                "reading the private java-fixture-01 checkout status failed; details \
+                 withheld (AGENTS.md, Fixture privacy)"
+            )
+        });
+    statuses.is_empty()
+}
+
+/// A recipe target that is a subdirectory of a clean checkout passes the
+/// cleanliness check, a dirty checkout still fails it, and a target outside
+/// any repository is refused loudly (ledger row 124).
+#[test]
+fn test_archive_cleanliness_accepts_a_subdirectory_target() -> Result<()> {
+    let repo_dir = tempfile::tempdir().context("creating the repository tempdir")?;
+    let repo = git2::Repository::init(repo_dir.path()).context("initialising the repository")?;
+    let target = repo_dir.path().join("module");
+    fs::create_dir(&target).context("creating the target subdirectory")?;
+    fs::write(target.join("A.java"), "class A {}\n").context("writing a tracked file")?;
+    let mut index = repo.index().context("opening the index")?;
+    index
+        .add_all(["*"], git2::IndexAddOption::DEFAULT, None)
+        .context("staging the file")?;
+    index.write().context("writing the index")?;
+    let tree = repo.find_tree(index.write_tree()?)?;
+    let signature = git2::Signature::now("nsd test", "nsd@example.invalid")?;
+    repo.commit(Some("HEAD"), &signature, &signature, "init", &tree, &[])?;
+
+    assert!(
+        archive_checkout_is_clean(&target),
+        "a subdirectory of a clean checkout must pass the cleanliness check"
+    );
+
+    fs::write(target.join("B.java"), "class B {}\n").context("writing an untracked file")?;
+    assert!(
+        !archive_checkout_is_clean(&target),
+        "an untracked file must make the checkout dirty"
+    );
+
+    let outside = tempfile::tempdir().context("creating the non-repository tempdir")?;
+    let refused = std::panic::catch_unwind(|| archive_checkout_is_clean(outside.path()));
+    assert!(
+        refused.is_err(),
+        "a target outside any repository must be refused"
+    );
+    Ok(())
+}
+
 /// D15: re-scans the archive's own recorded target with its own recorded
 /// settings -- exactly as the retired strict leg did -- and asserts the
 /// live `nsd-v1` digest equals the committed `tests/golden/java-fixture-01.
@@ -738,25 +799,8 @@ fn test_nsd_v1_digest_matches_a_live_scan_of_java_fixture_01() -> Result<()> {
         live["scan"]["revision"]["dirty"].is_null(),
         "a local scan must report scan.revision.dirty as null"
     );
-    let checkout = git2::Repository::open(&recipe.target).unwrap_or_else(|_| {
-        panic!(
-            "opening the private java-fixture-01 checkout failed; details withheld \
-             (AGENTS.md, Fixture privacy)"
-        )
-    });
-    let mut status_options = git2::StatusOptions::new();
-    status_options.include_untracked(true);
-    let checkout_is_clean = checkout
-        .statuses(Some(&mut status_options))
-        .unwrap_or_else(|_| {
-            panic!(
-                "reading the private java-fixture-01 checkout status failed; details \
-                 withheld (AGENTS.md, Fixture privacy)"
-            )
-        })
-        .is_empty();
     assert!(
-        checkout_is_clean,
+        archive_checkout_is_clean(Path::new(&recipe.target)),
         "the private java-fixture-01 checkout is dirty; details withheld \
          (AGENTS.md, Fixture privacy)"
     );

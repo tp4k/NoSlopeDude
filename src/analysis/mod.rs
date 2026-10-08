@@ -73,6 +73,8 @@ pub struct FileAnalysis {
     pub ir: IrFile,
     pub callables: Vec<AnalyzedCallable>,
     pub findings: Vec<AnalyzedFinding>,
+    /// Executable lines lowering pruned (damage, excluded callables and blocks).
+    pub unanalyzed_lines: usize,
 }
 
 /// Analyzes one file from its repo path and bytes. Checks run in the order
@@ -98,8 +100,7 @@ pub fn analyze_file(
 
     let (parsed, _syntax_error) = parse::parse_source(relative_path, language, source);
     let parsed = parsed.ok_or(UnanalyzableReason::ParserUnavailable)?;
-    let ir = lower::lower_file(&parsed);
-
+    let (ir, unanalyzed_lines) = lower::lower_file_inventoried(&parsed);
     let metrics = metrics::callables_from_ir(&parsed.relative_path, language, &ir);
     let identities = identity::identities(&ir);
     let callables: Vec<AnalyzedCallable> = metrics
@@ -133,6 +134,7 @@ pub fn analyze_file(
         ir,
         callables,
         findings,
+        unanalyzed_lines,
     })
 }
 

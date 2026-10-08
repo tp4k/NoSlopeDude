@@ -203,6 +203,116 @@ fn covers(lines: &BTreeSet<usize>, (start, end): (usize, usize)) -> bool {
     lines.range(start..=end).count() == end - start + 1
 }
 
+/// One parse-damage span of a changed candidate file, mapped to the base:
+/// the check document's `gaps` entry (D20).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MappedGap {
+    /// The base damage span the gap's lines map from, `None` for damage the
+    /// base does not hold (an added file, or lines that map from no base
+    /// damage).
+    pub base: Option<(usize, usize)>,
+    /// The damage span in the candidate.
+    pub candidate: (usize, usize),
+    /// Whether the span is the `LineMap` image of base damage, the one
+    /// definition `file_diagnostics` also uses to keep it out of A101.
+    pub tolerated: bool,
+}
+
+/// The base damage span holding a base line that the candidate lines
+/// `start..=end` map from, the earliest such span.
+fn base_span_of(
+    base: &FindingFile<'_>,
+    candidate_to_base: &BTreeMap<usize, usize>,
+    (start, end): (usize, usize),
+) -> Option<(usize, usize)> {
+    let spans: Vec<(usize, usize)> = base
+        .analysis
+        .ir
+        .damage
+        .iter()
+        .map(|damage| line_range(damage.span))
+        .collect();
+    candidate_to_base
+        .range(start..=end)
+        .filter_map(|(_, &base_line)| {
+            spans
+                .iter()
+                .copied()
+                .filter(|&(from, to)| from <= base_line && base_line <= to)
+                .min()
+        })
+        .min()
+}
+
+/// Every parse-damage span of `candidate`, mapped through the line map of
+/// its base file, sorted by (candidate start, candidate end) with exact
+/// duplicates collapsed.
+fn file_gaps(
+    base: Option<&FindingFile<'_>>,
+    candidate: &FindingFile<'_>,
+) -> Result<Vec<MappedGap>, GitError> {
+    let ir = &candidate.analysis.ir;
+    if ir.damage.is_empty() {
+        return Ok(Vec::new());
+    }
+    let line_map = base
+        .map(|base| map_lines(base.source, candidate.source))
+        .transpose()?;
+    let tolerated = tolerated_lines(base, line_map.as_ref());
+    let candidate_to_base: BTreeMap<usize, usize> = line_map
+        .iter()
+        .flat_map(|map| map.base_to_candidate.iter())
+        .map(|(&base_line, &candidate_line)| (candidate_line, base_line))
+        .collect();
+    let mut gaps: Vec<MappedGap> = ir
+        .damage
+        .iter()
+        .map(|damage| {
+            let range = line_range(damage.span);
+            MappedGap {
+                base: base.and_then(|base| base_span_of(base, &candidate_to_base, range)),
+                candidate: range,
+                tolerated: covers(&tolerated, range),
+            }
+        })
+        .collect();
+    gaps.sort_by_key(|gap| (gap.candidate, gap.base));
+    gaps.dedup();
+    Ok(gaps)
+}
+
+/// The mapped parser gaps of every changed candidate file that has damage,
+/// keyed by candidate path. Pairs files the way `evaluate_damage` does; a
+/// file without damage has no entry.
+pub fn mapped_gaps(
+    base: &[FindingFile<'_>],
+    candidate: &[FindingFile<'_>],
+    changes: &[Change],
+) -> Result<BTreeMap<RepoPath, Vec<MappedGap>>, GitError> {
+    let base_by_path: HashMap<&RepoPath, &FindingFile<'_>> =
+        base.iter().map(|file| (&file.path, file)).collect();
+    let candidate_by_path: HashMap<&RepoPath, &FindingFile<'_>> =
+        candidate.iter().map(|file| (&file.path, file)).collect();
+    let mut found = BTreeMap::new();
+    for change in changes {
+        let (base_path, candidate_path) = match change {
+            Change::Added { path, .. } => (None, path),
+            Change::Modified { path, .. } | Change::Typechange { path, .. } => (Some(path), path),
+            Change::Renamed { from, to, .. } => (Some(from), to),
+            Change::Deleted { .. } => continue,
+        };
+        let Some(&file) = candidate_by_path.get(candidate_path) else {
+            continue;
+        };
+        let base_file = base_path.and_then(|path| base_by_path.get(path).copied());
+        let gaps = file_gaps(base_file, file)?;
+        if !gaps.is_empty() {
+            found.insert(candidate_path.clone(), gaps);
+        }
+    }
+    Ok(found)
+}
+
 fn file_diagnostics(
     base: Option<&FindingFile<'_>>,
     candidate: &FindingFile<'_>,

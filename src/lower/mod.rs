@@ -14,7 +14,7 @@
 mod java;
 mod jsts;
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -108,6 +108,13 @@ pub fn lower_all(parsed_files: &[ParsedFile]) -> Vec<IrFile> {
     parsed_files.par_iter().map(lower_file).collect()
 }
 
+/// `lower_all`, with each file's `lower_file_inventoried` count alongside,
+/// index-aligned with `parsed_files`.
+pub fn lower_all_inventoried(parsed_files: &[ParsedFile]) -> (Vec<IrFile>, Vec<usize>) {
+    use rayon::prelude::*;
+    parsed_files.par_iter().map(lower_file_inventoried).unzip()
+}
+
 /// Lowers one parsed file's whole tree into its `IrNode` root.
 ///
 /// WS-6 salvage (*Architecture* -> salvage row): `parse::parse_one` no
@@ -143,6 +150,12 @@ pub fn lower_all(parsed_files: &[ParsedFile]) -> Vec<IrFile> {
 /// through `lowering_count()` below to observe that `pipeline::run` lowers
 /// each file exactly once.
 pub fn lower_file(file: &ParsedFile) -> IrFile {
+    lower_file_inventoried(file).0
+}
+
+/// `lower_file`, plus the count of executable lines pruning removed from the
+/// tree (M1-8's `unanalyzed_lines`).
+pub fn lower_file_inventoried(file: &ParsedFile) -> (IrFile, usize) {
     LOWERING_COUNT.fetch_add(1, Ordering::Relaxed);
     let mut damage = Vec::new();
     let mut callables = Vec::new();
@@ -240,9 +253,14 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
             .and_then(|old_index| owner_remap[old_index as usize]);
     }
 
+    let lines_before_pruning = (!redact_targets.is_empty()).then(|| executable_line_set(&root));
     let root = prune_damage(root, &redact_targets);
+    let unanalyzed_lines = lines_before_pruning.map_or(0, |before| {
+        let surviving = executable_line_set(&root);
+        before.difference(&surviving).count()
+    });
 
-    IrFile {
+    let ir_file = IrFile {
         relative_path: file.relative_path.clone(),
         language: file.language,
         root,
@@ -252,7 +270,23 @@ pub fn lower_file(file: &ParsedFile) -> IrFile {
         owners: kept_owners,
         excluded_callables,
         excluded_blocks,
+    };
+    (ir_file, unanalyzed_lines)
+}
+
+/// Every distinct 1-based line carrying an executable node anywhere in
+/// `root`'s tree, by an explicit work-list so tree depth cannot overflow
+/// the stack (D18).
+fn executable_line_set(root: &IrNode) -> BTreeSet<u32> {
+    let mut lines = BTreeSet::new();
+    let mut pending = vec![root];
+    while let Some(node) = pending.pop() {
+        if node.executable {
+            lines.extend(node.span.start_line..=node.span.end_line);
+        }
+        pending.extend(node.children.iter());
     }
+    lines
 }
 
 /// One (callable, block, owner) entity table's final inclusion decision,

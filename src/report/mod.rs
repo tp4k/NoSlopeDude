@@ -9,9 +9,10 @@
 //! not a second implementation of it, since `MetricsResult.erosion` itself
 //! is overall-only.
 
+mod canonical;
 mod html;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -19,12 +20,17 @@ use anyhow::Context;
 use serde::Serialize;
 
 use crate::discover::DiscoverResult;
+use crate::format::{canonical_document_pretty, SCAN_RESULT_SCOPE, SCHEMA_VERSION};
 use crate::metrics;
 use crate::model::{
-    Callable, CloneGroup, ClonesResult, LanguageFamily, MetricsResult, ParseFailure,
-    ParseFailureReason, RuleFinding, RuleId, RulesResult, ScanSettings, Target, VerbosityScore,
+    Callable, CloneGroup, ClonesResult, FileScanSummary, LanguageFamily, MetricsResult,
+    ParseFailure, ParseFailureReason, RuleFinding, RuleId, RulesResult, ScanSettings, Target,
+    VerbosityScore,
 };
 
+pub use canonical::{
+    published_name, ReportEntity, ReportFingerprints, ReportSnapshots, SCAN_SKIP_KEYS,
+};
 pub use html::render_html;
 
 /// The GitHub revision info a scan carries (D6), independent of `model`'s
@@ -40,7 +46,14 @@ pub struct ReportRevision {
 /// target string and its resolved revision (D6).
 #[derive(Debug, Clone, Serialize)]
 pub struct ReportScan {
+    /// The raw target string, kept for the HTML and terminal renderings; the
+    /// canonical JSON never carries it (see `published_target`).
+    #[serde(skip_serializing)]
     pub target: String,
+    /// `target` as `report.json` publishes it: `null` for a local target (an
+    /// absolute checkout path is not canonical), the URL for a remote one.
+    #[serde(rename = "target")]
+    pub published_target: Option<String>,
     pub revision: ReportRevision,
     pub include_tests: bool,
     pub exclude: Vec<String>,
@@ -51,15 +64,27 @@ pub struct ReportScan {
 #[derive(Debug, Clone, Serialize)]
 pub struct ReportVerbosity {
     pub flagged_lines: usize,
+    /// The analyzed executable lines, the ratio's denominator.
     pub scanned_lines: usize,
+    /// The executable lines lowering pruned, which stay out of the
+    /// denominator.
+    pub unanalyzed_lines: usize,
+    /// Whether every file of this family was analyzed in full.
+    pub complete: bool,
     pub ratio: f64,
 }
 
-impl From<&VerbosityScore> for ReportVerbosity {
-    fn from(score: &VerbosityScore) -> Self {
+impl ReportVerbosity {
+    /// `score` plus completeness: every executable line analyzed
+    /// (`unanalyzed_lines == 0`) and no file of the scope lost to a parse
+    /// failure (`parse_failed`). A total parse loss has no line count, so
+    /// the count alone cannot tell.
+    fn new(score: &VerbosityScore, parse_failed: bool) -> Self {
         ReportVerbosity {
             flagged_lines: score.flagged_lines,
             scanned_lines: score.scanned_lines,
+            unanalyzed_lines: score.unanalyzed_lines,
+            complete: score.unanalyzed_lines == 0 && !parse_failed,
             ratio: score.ratio,
         }
     }
@@ -90,6 +115,8 @@ pub struct SourceLocation {
     pub relative_path: PathBuf,
     pub start_line: usize,
     pub end_line: usize,
+    /// Read for the HTML rendering only; `report.json` carries no excerpt.
+    #[serde(skip_serializing)]
     pub excerpt: String,
     pub link: String,
     pub is_remote_link: bool,
@@ -121,7 +148,13 @@ pub struct ReportDuplicateGroup {
 /// body, not just its declaration's first line (M0c-13).
 #[derive(Debug, Clone, Serialize)]
 pub struct ReportCallable {
+    /// The raw name, kept for the HTML and terminal renderings; the
+    /// canonical JSON carries `published_name` instead.
+    #[serde(skip_serializing)]
     pub name: String,
+    /// `name` as `report.json` publishes it (see `published_name`).
+    #[serde(rename = "name")]
+    pub published_name: String,
     pub language: &'static str,
     pub cc: u32,
     pub sloc: usize,
@@ -138,6 +171,21 @@ pub struct ReportSkippedFile {
     pub relative_path: PathBuf,
     pub reason: String,
     pub detail: Option<String>,
+    /// A salvaged file's mapped parser gaps, sorted by start line; absent on
+    /// every other row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gaps: Option<Vec<ReportGap>>,
+    /// A salvaged file's count of excluded (unmeasured) callables; absent on
+    /// every other row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unmeasured_callables: Option<usize>,
+}
+
+/// One mapped parser gap: an inclusive 1-based line range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ReportGap {
+    pub start_line: usize,
+    pub end_line: usize,
 }
 
 /// The Assumptions-mandated adaptation label: this scanner's CC/verbosity
@@ -167,7 +215,15 @@ impl Default for ReportAdaptation {
 /// Everything one scan produces, in the shape every rendering shares.
 #[derive(Debug, Clone, Serialize)]
 pub struct Report {
+    pub schema_version: u64,
+    pub result_scope: &'static str,
     pub scan: ReportScan,
+    pub snapshots: ReportSnapshots,
+    pub fingerprints: ReportFingerprints,
+    /// `skipped_files` tallied per reason, every reason present.
+    pub skipped: BTreeMap<String, usize>,
+    /// Every measured callable, uncapped (`top25` keeps the first 25 by cc).
+    pub callables: Vec<ReportEntity>,
     pub scores: ReportScores,
     pub findings: Vec<ReportFinding>,
     pub duplicates: Vec<ReportDuplicateGroup>,
@@ -200,8 +256,15 @@ pub fn aggregate(input: &ReportInput) -> Report {
     // this call (a stack-local `HashMap`, threaded down by `&mut`
     // reference), not a `ReportInput` field or anything cached across runs.
     let mut excerpt_cache: ExcerptCache = HashMap::new();
+    let skipped_files = build_skipped_files(input);
     Report {
+        schema_version: SCHEMA_VERSION,
+        result_scope: SCAN_RESULT_SCOPE,
         scan: build_scan(input),
+        snapshots: canonical::scan_snapshots(input.root, input.revision),
+        fingerprints: canonical::scan_fingerprints(input.settings),
+        skipped: canonical::skip_counts(&skipped_files),
+        callables: canonical::entities(&input.metrics.callables),
         scores: build_scores(input),
         findings: input
             .rules
@@ -221,7 +284,7 @@ pub fn aggregate(input: &ReportInput) -> Report {
             .iter()
             .map(|c| build_callable(input, c, &mut excerpt_cache))
             .collect(),
-        skipped_files: build_skipped_files(input),
+        skipped_files,
         // WS-6's `SkipReason` split: a discovery-time skip only marks the
         // scan incomplete when it is an analysis failure (`Unreadable` --
         // the walk tried this path and could not read it), never a policy
@@ -229,11 +292,7 @@ pub fn aggregate(input: &ReportInput) -> Report {
         // configured against.
         incomplete: input.metrics.incomplete
             || input.rules.incomplete
-            || input
-                .discover
-                .skipped
-                .iter()
-                .any(|file| file.reason.is_analysis_failure()),
+            || discovery_analysis_failed(input),
         adaptation: ReportAdaptation::default(),
     }
 }
@@ -255,14 +314,21 @@ pub fn run(input: &ReportInput) -> anyhow::Result<Report> {
     Ok(report)
 }
 
-/// D17: `report.json` as pretty-printed JSON.
+/// D17: `report.json`, the canonical scan document (sorted keys, no
+/// excerpts), pretty-printed by the writer the check scope shares (D13).
 pub fn render_json(report: &Report) -> anyhow::Result<String> {
-    serde_json::to_string_pretty(report).context("failed to serialize the report to JSON")
+    let document =
+        serde_json::to_value(report).context("failed to serialize the report to JSON")?;
+    Ok(canonical_document_pretty(document))
 }
 
 fn build_scan(input: &ReportInput) -> ReportScan {
     ReportScan {
         target: input.target_input.to_string(),
+        published_target: match input.target {
+            Target::Remote(_) => Some(input.target_input.to_string()),
+            Target::Local(_) => None,
+        },
         revision: ReportRevision {
             sha: input.revision.sha.clone(),
             dirty: input.revision.dirty,
@@ -272,6 +338,17 @@ fn build_scan(input: &ReportInput) -> ReportScan {
         exclude: input.settings.exclude.clone(),
         min_clone_lines: input.settings.min_clone_lines,
     }
+}
+
+/// D3': whether discovery hit an analysis failure. Discovery records a path
+/// before it knows whether it is a file or a directory, so the failure is
+/// attributed to no family by suffix.
+fn discovery_analysis_failed(input: &ReportInput) -> bool {
+    input
+        .discover
+        .skipped
+        .iter()
+        .any(|file| file.reason.is_analysis_failure())
 }
 
 fn build_scores(input: &ReportInput) -> ReportScores {
@@ -290,18 +367,40 @@ fn build_scores(input: &ReportInput) -> ReportScores {
         .cloned()
         .collect();
 
+    let parse_failed = |family: LanguageFamily| {
+        input.parse_failures.iter().any(|failure| {
+            failure
+                .relative_path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .and_then(LanguageFamily::from_extension)
+                == Some(family)
+        })
+    };
+
+    let discovery_failed = discovery_analysis_failed(input);
+
     ReportScores {
         overall: ReportFamilyScores {
             erosion: normalize_zero(input.metrics.erosion),
-            verbosity: (&input.rules.verbosity.overall).into(),
+            verbosity: ReportVerbosity::new(
+                &input.rules.verbosity.overall,
+                !input.parse_failures.is_empty() || discovery_failed,
+            ),
         },
         java: ReportFamilyScores {
             erosion: normalize_zero(metrics::erosion(&java_callables)),
-            verbosity: (&input.rules.verbosity.java).into(),
+            verbosity: ReportVerbosity::new(
+                &input.rules.verbosity.java,
+                parse_failed(LanguageFamily::Java) || discovery_failed,
+            ),
         },
         js_ts: ReportFamilyScores {
             erosion: normalize_zero(metrics::erosion(&js_ts_callables)),
-            verbosity: (&input.rules.verbosity.js_ts).into(),
+            verbosity: ReportVerbosity::new(
+                &input.rules.verbosity.js_ts,
+                parse_failed(LanguageFamily::JsTs) || discovery_failed,
+            ),
         },
     }
 }
@@ -369,6 +468,7 @@ fn build_callable(
 ) -> ReportCallable {
     ReportCallable {
         name: callable.name.clone(),
+        published_name: published_name(&callable.name, callable.start_line),
         language: family_label(callable.language),
         cc: callable.cc,
         sloc: callable.sloc,
@@ -392,18 +492,36 @@ fn build_skipped_files(input: &ReportInput) -> Vec<ReportSkippedFile> {
             relative_path: file.relative_path.clone(),
             reason: file.reason.label().to_string(),
             detail: None,
+            gaps: None,
+            unmeasured_callables: None,
         })
         .collect();
-    skipped.extend(
-        input
-            .parse_failures
-            .iter()
-            .map(|failure| ReportSkippedFile {
-                relative_path: failure.relative_path.clone(),
-                reason: format!("parse_{}", failure.reason.label()),
-                detail: skipped_detail(failure),
+    let summaries: HashMap<&Path, &FileScanSummary> = input
+        .metrics
+        .file_scan_summaries
+        .iter()
+        .map(|summary| (summary.relative_path.as_path(), summary))
+        .collect();
+    skipped.extend(input.parse_failures.iter().map(|failure| {
+        // Only a salvaged file has a summary to name its gaps from.
+        let summary = summaries.get(failure.relative_path.as_path());
+        ReportSkippedFile {
+            relative_path: failure.relative_path.clone(),
+            reason: format!("parse_{}", failure.reason.label()),
+            detail: skipped_detail(failure),
+            gaps: summary.map(|summary| {
+                summary
+                    .gaps
+                    .iter()
+                    .map(|gap| ReportGap {
+                        start_line: gap.start_line,
+                        end_line: gap.end_line,
+                    })
+                    .collect()
             }),
-    );
+            unmeasured_callables: summary.map(|summary| summary.unmeasured_callables),
+        }
+    }));
     skipped.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
     skipped
 }

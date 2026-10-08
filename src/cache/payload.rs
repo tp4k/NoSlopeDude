@@ -139,6 +139,9 @@ pub struct AnalyzedPayload {
     pub callables: Vec<CachedCallable>,
     pub findings: Vec<CachedFinding>,
     pub executable_lines: Vec<usize>,
+    /// Lines the lowering left out of the measurement. No serde default: an
+    /// entry written before this field existed is a miss, never a zero.
+    pub unanalyzed_lines: usize,
     pub clone_candidates: Vec<CachedCandidate>,
 }
 
@@ -250,6 +253,7 @@ pub struct Hydrated {
     pub findings: Vec<AnalyzedFinding>,
     pub damage: Vec<HydratedDamage>,
     pub executable_lines: Vec<usize>,
+    pub unanalyzed_lines: usize,
 }
 
 impl CachedAnalysis {
@@ -319,6 +323,7 @@ impl CachedAnalysis {
             callables,
             findings,
             executable_lines: rules::executable_lines_from_ir(&analysis.ir),
+            unanalyzed_lines: analysis.unanalyzed_lines,
             clone_candidates,
         }))
     }
@@ -419,6 +424,7 @@ impl CachedAnalysis {
                 })
                 .collect(),
             executable_lines: payload.executable_lines.clone(),
+            unanalyzed_lines: payload.unanalyzed_lines,
         })
     }
 
