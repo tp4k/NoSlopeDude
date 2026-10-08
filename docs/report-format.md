@@ -209,14 +209,19 @@ neither the numerator nor the denominator.
   directory is the exception, because discovery cannot tell what it would
   have held. It is reported as `unreadable`, and so makes `complete` false,
   when it is gitignored or when an exclusion glob matches only its contents
-  (for example `--exclude 'locked/**'`). The generated and test globs match
-  only contents, so an unreadable generated or test directory itself (for
-  example `test/`, `generated/`) is also reported `unreadable`. A directory
-  that an exclusion glob matches itself (for example `--exclude 'locked'`, or
-  a dependency/build directory such as `node_modules/`, or any directory
-  below a generated or test directory such as `test/locked/`) is pruned
-  before discovery reads it, produces no `skipped_files` row and leaves
-  `complete` unchanged.
+  (for example `--exclude 'locked/**'`). The generated and test directory
+  globs match only contents, so an unreadable generated or test directory
+  itself (for example `test/`, `generated/`) is also reported `unreadable`.
+  A directory that an exclusion glob matches itself (for example
+  `--exclude 'locked'`, or a dependency/build directory such as
+  `node_modules/`, or any directory below a generated directory such as
+  `generated/locked/`, or below a test directory such as `test/locked/`
+  unless `--include-tests` is given, or a directory whose name matches a
+  generated or test file pattern such as `Types.d.ts/` or `locked.min.js/`,
+  or `locked.spec.ts/` and `LockedTest.java/` unless `--include-tests` is
+  given) is pruned before discovery reads it, produces no `skipped_files`
+  row and leaves `complete` unchanged. With `--include-tests`, an unreadable
+  `test/locked/` or `locked.spec.ts/` is reported `unreadable` instead.
 - An empty family has `scanned_lines` 0 and `ratio` `0.0`.
 
 ### Top-25 span
