@@ -966,6 +966,71 @@ fn test_failure_messages_hold_no_absolute_path() {
     assert!(!text.contains(&raw) && !text.contains(&canonical), "{text}");
 }
 
+/// Replaces a committed blob's loose object with one whose header (and so
+/// its listed size) still reads, but whose contents end short of that size,
+/// so only the full read fails. The zlib stream is one stored block.
+fn corrupt_loose_blob(fx: &Fixture, bytes: &[u8]) {
+    let oid = Oid::hash_object(git2::ObjectType::Blob, bytes).expect("hash the blob");
+    let hex = oid.to_string();
+    let object = fx
+        .repo
+        .path()
+        .join("objects")
+        .join(&hex[..2])
+        .join(&hex[2..]);
+    let mut raw = format!("blob {}\0", bytes.len()).into_bytes();
+    raw.extend_from_slice(&bytes[..bytes.len() / 2]);
+    let len = u16::try_from(raw.len()).expect("a short object");
+    let mut stream = vec![0x78, 0x01, 0x01];
+    stream.extend_from_slice(&len.to_le_bytes());
+    stream.extend_from_slice(&(!len).to_le_bytes());
+    stream.extend_from_slice(&raw);
+    let (mut a, mut b) = (1u32, 0u32);
+    for byte in &raw {
+        a = (a + u32::from(*byte)) % 65_521;
+        b = (b + a) % 65_521;
+    }
+    stream.extend_from_slice(&((b << 16) | a).to_be_bytes());
+    std::fs::remove_file(&object).expect("remove the loose object");
+    std::fs::write(&object, stream).expect("write the corrupt object");
+}
+
+#[test]
+fn test_failed_candidate_read_makes_its_family_incomplete() {
+    let fx = fixture();
+    let unchanged = simple_class("B", "");
+    fx.commit(&[
+        ("A.java", simple_class("A", "").as_bytes()),
+        ("B.java", unchanged.as_bytes()),
+    ]);
+    fx.stage(
+        "A.java",
+        simple_class("A", "        y = y * 2;\n").as_bytes(),
+    );
+    corrupt_loose_blob(&fx, unchanged.as_bytes());
+
+    let parsed = fx.staged_json();
+
+    assert!(
+        entries(&parsed)
+            .iter()
+            .any(|entry| entry["code"] == json!("NSD-G101")),
+        "{parsed}"
+    );
+    for family in ["overall", "java"] {
+        assert_eq!(
+            parsed["summaries"][family]["verbosity"]["complete"],
+            json!(false),
+            "{family}: {parsed}"
+        );
+    }
+    assert_eq!(
+        parsed["summaries"]["js_ts"]["verbosity"]["complete"],
+        json!(true),
+        "{parsed}"
+    );
+}
+
 #[test]
 fn test_check_json_fingerprint_covers_scope_and_every_severity() {
     let fx = fixture();
