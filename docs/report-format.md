@@ -325,7 +325,8 @@ compact):
   `scope` is `"changed"` while trusted V102
   is off (unchanged files are not read, no clone candidate is enumerated) and `"full"` while it is on
   (unchanged files contribute their cached facts); `files` counts the files
-  summarized.
+  summarized. A candidate file that cannot be read (`NSD-G101`) is not
+  summarized and makes its family's and `overall`'s `complete` false.
 - `coverage`: one entry per changed file, sorted by path (`path`, `analyzed_lines`,
   `unanalyzed_lines`, `complete`, `gaps`), each gap
   `{base: {start_line, end_line} or null, candidate: {...}, tolerated}`.
