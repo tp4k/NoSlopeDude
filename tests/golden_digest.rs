@@ -558,6 +558,26 @@ fn test_nsd_v1_digest_carries_no_paths_names_or_excerpts() -> Result<()> {
     assert_digest_carries_no_paths_names_or_excerpts(&committed, VerbosityShape::WithCoverage)
 }
 
+/// A digest still in the three-key M0b verbosity shape is refused under the
+/// `nsd-v1` shape, so a recapture that drops M1-8's coverage keys fails.
+#[test]
+#[should_panic(expected = "verbosity's key set must be exactly")]
+fn test_shape_check_rejects_the_m0b_verbosity_under_the_coverage_shape() {
+    let m0b = read_committed_digest(&committed_digest_path()).expect("reading the M0b digest");
+    let _ = assert_digest_carries_no_paths_names_or_excerpts(&m0b, VerbosityShape::WithCoverage);
+}
+
+/// The boolean exemption covers only `scores.*.verbosity.complete`: a
+/// boolean anywhere else in the `nsd-v1` digest is still refused.
+#[test]
+#[should_panic(expected = "clones.group_count is not a number")]
+fn test_shape_check_rejects_a_boolean_outside_verbosity_complete() {
+    let mut digest =
+        read_committed_digest(&nsd_v1_digest_path()).expect("reading the nsd-v1 digest");
+    digest["clones"]["group_count"] = Value::Bool(true);
+    let _ = assert_digest_carries_no_paths_names_or_excerpts(&digest, VerbosityShape::WithCoverage);
+}
+
 /// Unconditional: the M0b and `nsd-v1` committed digests must agree on
 /// every field that is not expected to move under the orchard swap -- the
 /// fixture's identity and revision, not its measurements.
