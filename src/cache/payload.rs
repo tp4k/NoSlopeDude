@@ -142,6 +142,7 @@ pub struct AnalyzedPayload {
     /// Lines the lowering left out of the measurement. No serde default: an
     /// entry written before this field existed is a miss, never a zero.
     pub unanalyzed_lines: usize,
+    pub scanned_lines: usize,
     pub clone_candidates: Vec<CachedCandidate>,
 }
 
@@ -325,6 +326,7 @@ impl CachedAnalysis {
             findings,
             executable_lines: rules::executable_lines_from_ir(&analysis.ir),
             unanalyzed_lines: analysis.unanalyzed_lines,
+            scanned_lines: 0,
             clone_candidates,
         }))
     }
@@ -426,7 +428,7 @@ impl CachedAnalysis {
                 .collect(),
             executable_lines: payload.executable_lines.clone(),
             unanalyzed_lines: payload.unanalyzed_lines,
-            scanned_lines: 0,
+            scanned_lines: payload.scanned_lines,
         })
     }
 
