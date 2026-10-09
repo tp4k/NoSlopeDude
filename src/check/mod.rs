@@ -1163,9 +1163,8 @@ impl Sides<'_> {
     }
 }
 
-/// The changed candidate callables, sorted by (path, start line, name): each
-/// one new, or matched to a base callable whose identity or body differs. An
-/// ambiguous or unmatched callable has no base.
+/// One changed file's coverage entry: its stored scanned-line count,
+/// unanalyzed count, and mapped gaps.
 fn changed_file_coverage(
     facts: &FileFacts,
     gaps: &BTreeMap<RepoPath, Vec<MappedGap>>,
@@ -1183,6 +1182,9 @@ fn changed_file_coverage(
     }
 }
 
+/// The changed candidate callables, sorted by (path, start line, name): each
+/// one new, or matched to a base callable whose identity or body differs. An
+/// ambiguous or unmatched callable has no base.
 fn entities_of(base: &[Loaded], changed: &[Loaded], matched: &MatchOutput) -> Vec<Entity> {
     let base_files: HashMap<&RepoPath, &Loaded> =
         base.iter().map(|file| (&file.path, file)).collect();
