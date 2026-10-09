@@ -332,4 +332,14 @@ mod tests {
 
         assert_eq!(damage_gaps(&ir), vec![range(1, 1)]);
     }
+
+    #[test]
+    fn test_damage_gaps_keep_a_multi_line_span_whole() {
+        let ir =
+            lowered("class A {\n  void m() {\n    int x = foo(1,\n      2,\n      ;\n  }\n}\n");
+
+        assert_eq!(ir.damage.len(), 1);
+        assert_ne!(ir.damage[0].span.start_line, ir.damage[0].span.end_line);
+        assert_eq!(damage_gaps(&ir), vec![range(3, 4)]);
+    }
 }
