@@ -1303,6 +1303,10 @@ mod tests {
         let changed = loaded.facts();
         assert_eq!(changed.scanned_lines(), STORED_ANALYSIS_LINES);
         assert_eq!(unchanged.scanned_lines(), STORED_PAYLOAD_LINES);
+        assert_eq!(
+            changed_file_coverage(&changed, &BTreeMap::new()).analyzed_lines,
+            STORED_ANALYSIS_LINES
+        );
         let summaries = summarize("changed", vec![&changed], &[], &[]);
         assert_eq!(summaries.overall.scanned_lines, STORED_ANALYSIS_LINES);
         let summaries = summarize("changed", vec![&unchanged], &[], &[]);
