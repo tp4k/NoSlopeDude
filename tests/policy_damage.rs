@@ -706,24 +706,39 @@ fn test_still_measured_lookup_does_not_scale_quadratically() {
     );
 }
 
-/// `evaluate_damage` alone over an added `.tsx` file of `count` top-level
+/// `evaluate_damage` alone over a modified `.tsx` file of `count` top-level
 /// blocks that each hold a legacy JSX error (so each is salvage-excluded and
-/// sits outside every callable); returns the minimum of three timings, the
-/// A101 count and the excluded-block count.
-fn added_excluded_blocks_run(count: usize) -> (std::time::Duration, usize, usize) {
+/// sits outside every callable) and gain one line in the candidate. The
+/// damage lines map to the base, so only the block loop can raise each
+/// block. Returns the minimum of three timings, the A101 count and the
+/// excluded-block count.
+fn modified_excluded_blocks_run(count: usize) -> (std::time::Duration, usize, usize) {
     const SAMPLES: usize = 3;
-    let text: String = (0..count)
-        .map(|index| format!("if (f{index}) {{\n  const c = <div>a & b</div>;\n  g();\n}}\n"))
-        .collect();
+    let text = |extra: &str| -> String {
+        (0..count)
+            .map(|index| {
+                format!("if (f{index}) {{\n  const c = <div>a & b</div>;\n{extra}  g();\n}}\n")
+            })
+            .collect()
+    };
+    let base_text = text("");
+    let candidate_text = text("  h();\n");
     let path = RepoPath::from_bytes(b"w.tsx".to_vec());
-    let analysis = analyze_file(Path::new("w.tsx"), text.as_bytes()).expect("candidate");
-    let excluded_blocks = analysis.ir.excluded_blocks.len();
+    let base_analysis = analyze_file(Path::new("w.tsx"), base_text.as_bytes()).expect("base");
+    let candidate_analysis =
+        analyze_file(Path::new("w.tsx"), candidate_text.as_bytes()).expect("candidate");
+    let excluded_blocks = candidate_analysis.ir.excluded_blocks.len();
+    let base_files = [FindingFile {
+        path: path.clone(),
+        source: base_text.as_bytes(),
+        analysis: &base_analysis,
+    }];
     let candidate_files = [FindingFile {
         path: path.clone(),
-        source: text.as_bytes(),
-        analysis: &analysis,
+        source: candidate_text.as_bytes(),
+        analysis: &candidate_analysis,
     }];
-    let changes = [Change::Added {
+    let changes = [Change::Modified {
         path,
         kind: nsd::git::snapshot::EntryKind::Regular,
     }];
@@ -731,7 +746,7 @@ fn added_excluded_blocks_run(count: usize) -> (std::time::Duration, usize, usize
     let mut sites = 0;
     for _ in 0..SAMPLES {
         let started = std::time::Instant::now();
-        let found = evaluate_damage(&[], &candidate_files, &changes).expect("evaluate");
+        let found = evaluate_damage(&base_files, &candidate_files, &changes).expect("evaluate");
         fastest = fastest.min(started.elapsed());
         sites = found.len();
     }
@@ -744,9 +759,9 @@ fn test_excluded_block_loop_does_not_scale_quadratically() {
     const SCALED_BLOCK_COUNT: usize = BLOCK_COUNT * 8;
     const SCALING_ASSERT_MULTIPLIER: u32 = 32;
 
-    let (elapsed, sites, excluded) = added_excluded_blocks_run(BLOCK_COUNT);
+    let (elapsed, sites, excluded) = modified_excluded_blocks_run(BLOCK_COUNT);
     let (scaled_elapsed, scaled_sites, scaled_excluded) =
-        added_excluded_blocks_run(SCALED_BLOCK_COUNT);
+        modified_excluded_blocks_run(SCALED_BLOCK_COUNT);
 
     assert_eq!(
         (excluded, scaled_excluded),
