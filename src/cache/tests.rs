@@ -254,6 +254,35 @@ fn test_unknown_rule_id_is_a_miss() {
 }
 
 #[test]
+fn test_entry_without_scanned_lines_is_a_miss() {
+    let (_dir, cache) = cache();
+    let analysis = analysis_of(CLEAN_SOURCE);
+    let built = CachedAnalysis::from_analysis(&analysis, CLEAN_SOURCE, MIN_LINES);
+    let key = key_of(CLEAN_SOURCE);
+    cache.put(&key, &built).expect("put");
+
+    let path = cache.entry_path(&key);
+    let text = fs::read_to_string(&path).expect("read entry");
+    let split = text.find('\n').expect("header line");
+    let mut header: serde_json::Value = serde_json::from_str(&text[..split]).expect("header");
+    let mut payload: serde_json::Value = serde_json::from_str(&text[split + 1..]).expect("payload");
+    let removed = payload["analyzed"]
+        .as_object_mut()
+        .expect("analyzed payload")
+        .remove("scanned_lines");
+    assert!(removed.is_some());
+    let forged = serde_json::to_vec(&payload).expect("encode payload");
+    header["payload_digest"] =
+        serde_json::json!(super::digest_hex(super::PAYLOAD_FAMILY_PREFIX, &[&forged]));
+    let mut bytes = serde_json::to_vec(&header).expect("encode header");
+    bytes.push(b'\n');
+    bytes.extend_from_slice(&forged);
+    fs::write(&path, bytes).expect("write entry");
+
+    assert!(cache.get(&key).expect("read").is_none());
+}
+
+#[test]
 fn test_vanished_entry_does_not_fail_the_pass() {
     use super::EvictionLimits;
     use std::time::{Duration, SystemTime};
