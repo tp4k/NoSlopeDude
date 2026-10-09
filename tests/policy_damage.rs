@@ -716,9 +716,7 @@ fn modified_excluded_blocks_run(count: usize) -> (std::time::Duration, usize, us
     const SAMPLES: usize = 3;
     let text = |extra: &str| -> String {
         (0..count)
-            .map(|index| {
-                format!("if (f{index}) {{\n  const c = <div>a & b</div>;\n{extra}  g();\n}}\n")
-            })
+            .map(|_| format!("if (a) {{\n  c = <b>a & b</b>;\n{extra}}}\n"))
             .collect()
     };
     let base_text = text("");
@@ -755,9 +753,12 @@ fn modified_excluded_blocks_run(count: usize) -> (std::time::Duration, usize, us
 
 #[test]
 fn test_excluded_block_loop_does_not_scale_quadratically() {
-    const BLOCK_COUNT: usize = 1_000;
+    const BLOCK_COUNT: usize = 3_000;
     const SCALED_BLOCK_COUNT: usize = BLOCK_COUNT * 8;
-    const SCALING_ASSERT_MULTIPLIER: u32 = 32;
+    // Tighter than the sibling tests' 32x: 8N blocks must fit the 1 MiB source
+    // ceiling, so a linear scan of `raised` measures ~34x here, an indexed
+    // loop ~9x.
+    const SCALING_ASSERT_MULTIPLIER: u32 = 20;
 
     let (elapsed, sites, excluded) = modified_excluded_blocks_run(BLOCK_COUNT);
     let (scaled_elapsed, scaled_sites, scaled_excluded) =
