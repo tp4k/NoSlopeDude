@@ -580,6 +580,26 @@ fn test_check_format_json_escapes_control_characters() {
 }
 
 #[test]
+fn test_check_format_json_escapes_control_characters_in_paths() {
+    let hostile = "src/run\u{1b}[31m\u{7}\u{7f}\u{9b}\n\"NSD-FAKE\\/Foo.java";
+    let diagnostics = [CheckDiagnostic::Complexity(Box::new(PolicyDiagnostic {
+        code: CODE_COMPLEXITY_ABOVE_THRESHOLD,
+        candidate_path: path(hostile),
+        candidate_name: "run".to_string(),
+        candidate_start_line: 1,
+        candidate_end_line: 2,
+        base: None,
+    }))];
+
+    let rendered = render_json(&diagnostics, RENDERED_STATUS);
+
+    assert_eq!(rendered.matches('\n').count(), 1, "{rendered:?}");
+    assert!(!rendered.bytes().any(|byte| byte < 0x20 && byte != b'\n'));
+    let parsed: Value = serde_json::from_str(&rendered).expect("valid JSON");
+    assert_eq!(parsed["diagnostics"][0]["path"], json!(hostile));
+}
+
+#[test]
 fn test_check_default_format_is_terminal() {
     let fx = Fixture::scenario();
 

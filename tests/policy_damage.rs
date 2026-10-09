@@ -706,6 +706,62 @@ fn test_still_measured_lookup_does_not_scale_quadratically() {
     );
 }
 
+/// `evaluate_damage` alone over an added `.tsx` file of `count` top-level
+/// blocks that each hold a legacy JSX error (so each is salvage-excluded and
+/// sits outside every callable); returns the minimum of three timings, the
+/// A101 count and the excluded-block count.
+fn added_excluded_blocks_run(count: usize) -> (std::time::Duration, usize, usize) {
+    const SAMPLES: usize = 3;
+    let text: String = (0..count)
+        .map(|index| format!("if (f{index}) {{\n  const c = <div>a & b</div>;\n  g();\n}}\n"))
+        .collect();
+    let path = RepoPath::from_bytes(b"w.tsx".to_vec());
+    let analysis = analyze_file(Path::new("w.tsx"), text.as_bytes()).expect("candidate");
+    let excluded_blocks = analysis.ir.excluded_blocks.len();
+    let candidate_files = [FindingFile {
+        path: path.clone(),
+        source: text.as_bytes(),
+        analysis: &analysis,
+    }];
+    let changes = [Change::Added {
+        path,
+        kind: nsd::git::snapshot::EntryKind::Regular,
+    }];
+    let mut fastest = std::time::Duration::MAX;
+    let mut sites = 0;
+    for _ in 0..SAMPLES {
+        let started = std::time::Instant::now();
+        let found = evaluate_damage(&[], &candidate_files, &changes).expect("evaluate");
+        fastest = fastest.min(started.elapsed());
+        sites = found.len();
+    }
+    (fastest, sites, excluded_blocks)
+}
+
+#[test]
+fn test_excluded_block_loop_does_not_scale_quadratically() {
+    const BLOCK_COUNT: usize = 1_000;
+    const SCALED_BLOCK_COUNT: usize = BLOCK_COUNT * 8;
+    const SCALING_ASSERT_MULTIPLIER: u32 = 32;
+
+    let (elapsed, sites, excluded) = added_excluded_blocks_run(BLOCK_COUNT);
+    let (scaled_elapsed, scaled_sites, scaled_excluded) =
+        added_excluded_blocks_run(SCALED_BLOCK_COUNT);
+
+    assert_eq!(
+        (excluded, scaled_excluded),
+        (BLOCK_COUNT, SCALED_BLOCK_COUNT),
+        "the fixture must reach the block loop with every block excluded"
+    );
+    assert_eq!((sites, scaled_sites), (BLOCK_COUNT, SCALED_BLOCK_COUNT));
+    assert!(
+        scaled_elapsed < elapsed * SCALING_ASSERT_MULTIPLIER,
+        "a quadratic block loop scales ~64x from N to 8N, an indexed one ~8x: evaluate_damage at \
+         N={BLOCK_COUNT} took {elapsed:?}, at 8N={SCALED_BLOCK_COUNT} took {scaled_elapsed:?}, \
+         expected 8N < {SCALING_ASSERT_MULTIPLIER}x N"
+    );
+}
+
 #[test]
 fn test_block_after_a_nested_callable_stays_inside_its_outer_callable() {
     let base_text = "function outer() {\n  function inner() {\n    return 1;\n  }\n  if (x) {\n    g();\n  }\n}\n";
