@@ -113,6 +113,46 @@ fn test_analysis_matches_the_scan_pipeline_on_every_fixture_file() {
     assert!(checked >= 20, "only {checked} fixture files were compared");
 }
 
+#[test]
+fn test_analysis_line_inventory_matches_the_scan_pipeline() {
+    let mut checked = 0usize;
+    let mut with_gaps = 0usize;
+    for tree in ["metrics", "rules", "salvage"] {
+        let root = fixtures_root().join(tree);
+        let mut files = Vec::new();
+        collect_files(&root, &mut files);
+        for file in files {
+            if Grammar::for_extension(extension_of(&file)).is_none() {
+                continue;
+            }
+            let relative = file.strip_prefix(&root).expect("under root").to_path_buf();
+            let bytes = fs::read(&file).expect("read fixture");
+            let analysis = match analyze_file(&relative, &bytes) {
+                Ok(analysis) => analysis,
+                Err(reason) => panic!("{relative:?} should be analyzable, got {reason:?}"),
+            };
+
+            let parsed = parse_with_scan_pipeline(&root, &relative);
+            let scan_metrics = metrics::run(std::slice::from_ref(&parsed), false);
+            let summary = scan_metrics
+                .file_scan_summaries
+                .first()
+                .expect("one scan summary");
+            assert_eq!(
+                analysis.scanned_lines, summary.scanned_lines,
+                "{relative:?}"
+            );
+            assert_eq!(analysis.gaps, summary.gaps, "{relative:?}");
+            if !summary.gaps.is_empty() {
+                with_gaps += 1;
+            }
+            checked += 1;
+        }
+    }
+    assert!(checked >= 20, "only {checked} fixture files were compared");
+    assert!(with_gaps >= 2, "only {with_gaps} damaged fixtures compared");
+}
+
 fn padded_java(total_bytes: usize) -> Vec<u8> {
     let mut source = b"class Padded { void m() { return; } }".to_vec();
     source.resize(total_bytes, b' ');

@@ -1251,4 +1251,55 @@ mod tests {
             b"class Foo {}"
         );
     }
+
+    #[test]
+    fn test_check_takes_scanned_lines_from_the_analysis_not_executable_lines() {
+        const STORED_ANALYSIS_LINES: usize = 1000;
+        const STORED_PAYLOAD_LINES: usize = 2000;
+        const MIN_CLONE_LINES: u32 = 10;
+        let source =
+            "class Foo {\n    int run() {\n        int a = 1;\n        return a;\n    }\n}\n";
+        let path = RepoPath::from_bytes(b"src/Foo.java".to_vec());
+        let mut analysis =
+            analyze_file(Path::new("src/Foo.java"), source.as_bytes()).expect("analyzes");
+        let derived = rules::executable_lines_from_ir(&analysis.ir).len();
+        assert!(derived > 0);
+        assert_ne!(derived, STORED_ANALYSIS_LINES);
+        assert_ne!(derived, STORED_PAYLOAD_LINES);
+
+        let payload = match CachedAnalysis::from_analysis(&analysis, source, MIN_CLONE_LINES) {
+            CachedAnalysis::Analyzed(mut payload) => {
+                payload.scanned_lines = STORED_PAYLOAD_LINES;
+                payload
+            }
+            CachedAnalysis::Unanalyzable(reason) => panic!("analyzed file cached as {reason:?}"),
+        };
+        analysis.scanned_lines = STORED_ANALYSIS_LINES;
+        let loaded = Loaded {
+            path: path.clone(),
+            bytes: source.as_bytes().to_vec(),
+            analysis,
+            unanalyzed_lines: 0,
+        };
+        let included = IncludedEntry {
+            path,
+            language: LanguageFamily::Java,
+            oid: None,
+            size: source.len() as u64,
+            too_large: false,
+            non_utf8_path: false,
+        };
+        let unchanged = match unchanged_load(&included, CachedAnalysis::Analyzed(payload)) {
+            Load::Unchanged(_, facts) => facts,
+            _ => panic!("an analyzed payload loads as an unchanged file"),
+        };
+
+        let changed = loaded.facts();
+        assert_eq!(changed.scanned_lines(), STORED_ANALYSIS_LINES);
+        assert_eq!(unchanged.scanned_lines(), STORED_PAYLOAD_LINES);
+        let summaries = summarize("changed", vec![&changed], &[], &[]);
+        assert_eq!(summaries.overall.scanned_lines, STORED_ANALYSIS_LINES);
+        let summaries = summarize("changed", vec![&unchanged], &[], &[]);
+        assert_eq!(summaries.overall.scanned_lines, STORED_PAYLOAD_LINES);
+    }
 }
