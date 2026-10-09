@@ -293,4 +293,43 @@ mod tests {
         assert_eq!(index.innermost(&IrNode::empty(span(10, 20))), Some(0));
         assert_eq!(index.innermost(&IrNode::empty(span(60, 70))), Some(1));
     }
+
+    const ADJACENT_DAMAGE_SOURCE: &str =
+        "class A {\n  int a( {\n  int b = ;\n}\nint c() { return 1; }\n int d( {\n int e = ;\n }\n}\n";
+    const SAME_LINE_DAMAGE_SOURCE: &str = "class A { void m() { int x = ; int y = ; } }\n";
+
+    fn lowered(source: &str) -> IrFile {
+        let (parsed, _) = parse::parse_source(
+            Path::new("A.java"),
+            LanguageFamily::Java,
+            source.to_string(),
+        );
+        lower::lower_file_inventoried(&parsed.expect("parser available")).0
+    }
+
+    fn range(start_line: usize, end_line: usize) -> LineRange {
+        LineRange {
+            start_line,
+            end_line,
+        }
+    }
+
+    #[test]
+    fn test_damage_gaps_are_ascending_and_keep_adjacent_ranges_apart() {
+        let mut ir = lowered(ADJACENT_DAMAGE_SOURCE);
+        ir.damage.reverse();
+
+        assert_eq!(
+            damage_gaps(&ir),
+            vec![range(2, 2), range(3, 3), range(6, 6), range(7, 7)]
+        );
+    }
+
+    #[test]
+    fn test_damage_gaps_list_a_repeated_range_once() {
+        let ir = lowered(SAME_LINE_DAMAGE_SOURCE);
+        assert!(ir.damage.len() > 1);
+
+        assert_eq!(damage_gaps(&ir), vec![range(1, 1)]);
+    }
 }
