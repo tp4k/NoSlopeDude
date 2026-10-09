@@ -76,6 +76,8 @@ pub struct FileAnalysis {
     /// Executable lines lowering pruned (damage, excluded callables and blocks).
     pub unanalyzed_lines: usize,
     /// The distinct executable lines that survived pruning.
+    pub executable_lines: Vec<usize>,
+    /// The count of `executable_lines`, stored as its own field.
     pub scanned_lines: usize,
     /// The file's damage spans as line ranges, ascending and without repeats.
     pub gaps: Vec<LineRange>,
@@ -118,7 +120,8 @@ pub fn analyze_file(
         })
         .collect();
 
-    let scanned_lines = rules::executable_lines_from_ir(&ir).len();
+    let executable_lines = rules::executable_lines_from_ir(&ir);
+    let scanned_lines = executable_lines.len();
     let gaps = damage_gaps(&ir);
     let callable_index = CallableIndex::of(&ir);
     let mut flagged = rules::findings_with_nodes(&parsed, &ir);
@@ -141,6 +144,7 @@ pub fn analyze_file(
         callables,
         findings,
         unanalyzed_lines,
+        executable_lines,
         scanned_lines,
         gaps,
     })

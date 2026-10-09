@@ -42,7 +42,6 @@ use crate::policy::exit::exit_status;
 use crate::policy::findings::{match_findings, FindingFile};
 use crate::policy::Candidate;
 use crate::profile::measurement_fingerprint;
-use crate::rules;
 use crate::suppress::apply_suppressions;
 
 use details::{skip_counts, summarize, FileFacts, FileLines};
@@ -354,7 +353,7 @@ impl Loaded {
                 .map(|analyzed| analyzed.finding.clone())
                 .collect(),
             FileLines {
-                executable_lines: rules::executable_lines_from_ir(&self.analysis.ir),
+                executable_lines: self.analysis.executable_lines.clone(),
                 scanned_lines: self.analysis.scanned_lines,
                 unanalyzed_lines: self.unanalyzed_lines,
             },
@@ -1242,6 +1241,7 @@ fn entities_of(base: &[Loaded], changed: &[Loaded], matched: &MatchOutput) -> Ve
 mod tests {
     use super::*;
     use crate::git::CODE_SNAPSHOT_UNAVAILABLE;
+    use crate::rules;
 
     #[test]
     fn test_unreadable_under_ceiling_changed_blob_maps_to_g101() {

@@ -13,7 +13,7 @@ use crate::identity::{CallableIdentity, OwnerDigest};
 use crate::ir::{CallableKind, DamageKind};
 use crate::metrics;
 use crate::model::{Callable, LanguageFamily, RuleFinding, RuleId};
-use crate::rules::{self, ALL_RULE_IDS};
+use crate::rules::ALL_RULE_IDS;
 
 const HEX_WIDTH: usize = 32;
 const HEX_RADIX: u32 = 16;
@@ -324,7 +324,7 @@ impl CachedAnalysis {
             damage,
             callables,
             findings,
-            executable_lines: rules::executable_lines_from_ir(&analysis.ir),
+            executable_lines: analysis.executable_lines.clone(),
             unanalyzed_lines: analysis.unanalyzed_lines,
             scanned_lines: analysis.scanned_lines,
             clone_candidates,
