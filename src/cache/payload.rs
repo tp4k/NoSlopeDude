@@ -254,6 +254,7 @@ pub struct Hydrated {
     pub damage: Vec<HydratedDamage>,
     pub executable_lines: Vec<usize>,
     pub unanalyzed_lines: usize,
+    pub scanned_lines: usize,
 }
 
 impl CachedAnalysis {
@@ -425,6 +426,7 @@ impl CachedAnalysis {
                 .collect(),
             executable_lines: payload.executable_lines.clone(),
             unanalyzed_lines: payload.unanalyzed_lines,
+            scanned_lines: 0,
         })
     }
 

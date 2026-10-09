@@ -15,7 +15,7 @@ use crate::identity::{self, CallableIdentity};
 use crate::ir::IrNode;
 use crate::lower::{self, IrFile};
 use crate::metrics;
-use crate::model::{Callable, LanguageFamily, RuleFinding};
+use crate::model::{Callable, LanguageFamily, LineRange, RuleFinding};
 use crate::parse;
 use crate::rules;
 
@@ -75,6 +75,10 @@ pub struct FileAnalysis {
     pub findings: Vec<AnalyzedFinding>,
     /// Executable lines lowering pruned (damage, excluded callables and blocks).
     pub unanalyzed_lines: usize,
+    /// The distinct executable lines that survived pruning.
+    pub scanned_lines: usize,
+    /// The file's damage spans as line ranges, ascending and without repeats.
+    pub gaps: Vec<LineRange>,
 }
 
 /// Analyzes one file from its repo path and bytes. Checks run in the order
@@ -135,6 +139,8 @@ pub fn analyze_file(
         callables,
         findings,
         unanalyzed_lines,
+        scanned_lines: 0,
+        gaps: Vec::new(),
     })
 }
 

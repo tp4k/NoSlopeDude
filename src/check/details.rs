@@ -144,6 +144,7 @@ impl FileFacts {
         callables: Vec<Callable>,
         mut findings: Vec<RuleFinding>,
         executable_lines: Vec<usize>,
+        _scanned_lines: usize,
         unanalyzed_lines: usize,
         damaged: bool,
     ) -> Self {
