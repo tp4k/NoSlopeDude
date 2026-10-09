@@ -326,7 +326,7 @@ impl CachedAnalysis {
             findings,
             executable_lines: rules::executable_lines_from_ir(&analysis.ir),
             unanalyzed_lines: analysis.unanalyzed_lines,
-            scanned_lines: 0,
+            scanned_lines: analysis.scanned_lines,
             clone_candidates,
         }))
     }

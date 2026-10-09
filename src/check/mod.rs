@@ -45,7 +45,7 @@ use crate::profile::measurement_fingerprint;
 use crate::rules;
 use crate::suppress::apply_suppressions;
 
-use details::{skip_counts, summarize, FileFacts};
+use details::{skip_counts, summarize, FileFacts, FileLines};
 pub use details::{
     CheckDetails, Entity, EntityBase, FamilySummary, FileCoverage, Gap, Summaries, SKIP_KEYS,
 };
@@ -353,9 +353,11 @@ impl Loaded {
                 .iter()
                 .map(|analyzed| analyzed.finding.clone())
                 .collect(),
-            rules::executable_lines_from_ir(&self.analysis.ir),
-            self.analysis.scanned_lines,
-            self.unanalyzed_lines,
+            FileLines {
+                executable_lines: rules::executable_lines_from_ir(&self.analysis.ir),
+                scanned_lines: self.analysis.scanned_lines,
+                unanalyzed_lines: self.unanalyzed_lines,
+            },
             !self.analysis.ir.damage.is_empty(),
         )
     }
@@ -630,9 +632,11 @@ fn unchanged_load(included: &IncludedEntry, found: CachedAnalysis) -> Load {
                     .into_iter()
                     .map(|analyzed| analyzed.finding)
                     .collect(),
-                hydrated.executable_lines,
-                hydrated.scanned_lines,
-                hydrated.unanalyzed_lines,
+                FileLines {
+                    executable_lines: hydrated.executable_lines,
+                    scanned_lines: hydrated.scanned_lines,
+                    unanalyzed_lines: hydrated.unanalyzed_lines,
+                },
                 !hydrated.damage.is_empty(),
             )
         });

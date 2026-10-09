@@ -118,6 +118,8 @@ pub fn analyze_file(
         })
         .collect();
 
+    let scanned_lines = rules::executable_lines_from_ir(&ir).len();
+    let gaps = damage_gaps(&ir);
     let callable_index = CallableIndex::of(&ir);
     let mut flagged = rules::findings_with_nodes(&parsed, &ir);
     flagged.sort_by(|(a, _), (b, _)| rules::cmp_findings(a, b));
@@ -139,9 +141,25 @@ pub fn analyze_file(
         callables,
         findings,
         unanalyzed_lines,
-        scanned_lines: 0,
-        gaps: Vec::new(),
+        scanned_lines,
+        gaps,
     })
+}
+
+/// Each damage span's line range, ascending and without repeats; adjacent
+/// ranges stay separate. The same list scan reports as `gaps`.
+fn damage_gaps(ir: &IrFile) -> Vec<LineRange> {
+    let mut gaps: Vec<LineRange> = ir
+        .damage
+        .iter()
+        .map(|damage| LineRange {
+            start_line: damage.span.start_line as usize,
+            end_line: damage.span.end_line as usize,
+        })
+        .collect();
+    gaps.sort_unstable();
+    gaps.dedup();
+    gaps
 }
 
 /// A digest over the normalized leaf tokens of each flagged subtree

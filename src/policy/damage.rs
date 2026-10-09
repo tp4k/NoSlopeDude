@@ -244,15 +244,15 @@ fn base_span_of(
         .min()
 }
 
-/// Every parse-damage span of `candidate`, mapped through the line map of
+/// Every parse-damage span of `candidate` (the analysis's gap inventory), mapped through the line map of
 /// its base file, sorted by (candidate start, candidate end) with exact
 /// duplicates collapsed.
 fn file_gaps(
     base: Option<&FindingFile<'_>>,
     candidate: &FindingFile<'_>,
 ) -> Result<Vec<MappedGap>, GitError> {
-    let ir = &candidate.analysis.ir;
-    if ir.damage.is_empty() {
+    let inventory = &candidate.analysis.gaps;
+    if inventory.is_empty() {
         return Ok(Vec::new());
     }
     let line_map = base
@@ -264,11 +264,10 @@ fn file_gaps(
         .flat_map(|map| map.base_to_candidate.iter())
         .map(|(&base_line, &candidate_line)| (candidate_line, base_line))
         .collect();
-    let mut gaps: Vec<MappedGap> = ir
-        .damage
+    let mut gaps: Vec<MappedGap> = inventory
         .iter()
-        .map(|damage| {
-            let range = line_range(damage.span);
+        .map(|gap| {
+            let range = (gap.start_line, gap.end_line);
             MappedGap {
                 base: base.and_then(|base| base_span_of(base, &candidate_to_base, range)),
                 candidate: range,
