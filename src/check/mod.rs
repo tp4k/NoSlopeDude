@@ -872,22 +872,7 @@ impl Sides<'_> {
 
         let mut coverage: Vec<(RepoPath, FileCoverage)> = changed_facts
             .iter()
-            .map(|facts| {
-                let file_gaps: Vec<Gap> = gaps
-                    .get(&facts.path)
-                    .map(|found| found.iter().copied().map(Gap::from).collect())
-                    .unwrap_or_default();
-                (
-                    facts.path.clone(),
-                    FileCoverage {
-                        path: facts.path.render(),
-                        analyzed_lines: facts.scanned_lines(),
-                        unanalyzed_lines: facts.unanalyzed_lines,
-                        complete: facts.unanalyzed_lines == 0 && file_gaps.is_empty(),
-                        gaps: file_gaps,
-                    },
-                )
-            })
+            .map(|facts| (facts.path.clone(), changed_file_coverage(facts, gaps)))
             .collect();
         coverage.extend(
             loads
@@ -1182,6 +1167,23 @@ impl Sides<'_> {
 /// The changed candidate callables, sorted by (path, start line, name): each
 /// one new, or matched to a base callable whose identity or body differs. An
 /// ambiguous or unmatched callable has no base.
+fn changed_file_coverage(
+    facts: &FileFacts,
+    gaps: &BTreeMap<RepoPath, Vec<MappedGap>>,
+) -> FileCoverage {
+    let file_gaps: Vec<Gap> = gaps
+        .get(&facts.path)
+        .map(|found| found.iter().copied().map(Gap::from).collect())
+        .unwrap_or_default();
+    FileCoverage {
+        path: facts.path.render(),
+        analyzed_lines: facts.scanned_lines(),
+        unanalyzed_lines: facts.unanalyzed_lines,
+        complete: facts.unanalyzed_lines == 0 && file_gaps.is_empty(),
+        gaps: file_gaps,
+    }
+}
+
 fn entities_of(base: &[Loaded], changed: &[Loaded], matched: &MatchOutput) -> Vec<Entity> {
     let base_files: HashMap<&RepoPath, &Loaded> =
         base.iter().map(|file| (&file.path, file)).collect();
