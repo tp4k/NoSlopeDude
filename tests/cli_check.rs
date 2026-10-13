@@ -12,15 +12,17 @@ use git2::{IndexEntry, IndexTime, Oid, Repository};
 use tempfile::TempDir;
 
 use nsd::check::CheckDiagnostic;
-use nsd::format::render_terminal;
+use nsd::format::{render_agent, render_terminal};
 use nsd::git::path::RepoPath;
 use nsd::policy::diagnostics::{
-    CoverageDiagnostic, FindingDiagnostic, PolicyDiagnostic, CODE_ANALYSIS_UNAVAILABLE,
-    CODE_COMPLEXITY_ABOVE_THRESHOLD, CODE_UNMATCHED_FINDING,
+    CoverageDiagnostic, FindingDiagnostic, PolicyDiagnostic, SuppressionDiagnostic,
+    CODE_ANALYSIS_UNAVAILABLE, CODE_COMPLEXITY_ABOVE_THRESHOLD, CODE_INVALID_SUPPRESSION,
+    CODE_NEW_SUPPRESSION, CODE_UNMATCHED_FINDING,
 };
+use nsd::policy::Diagnostic as ConfigNote;
 
 use nsd::analysis::UnanalyzableReason;
-use nsd::config::CODE_INVALID_CONFIG;
+use nsd::config::{Config, CODE_CONFIG_CHANGED, CODE_INVALID_CONFIG};
 
 const MODE_REGULAR: i32 = 0o100644;
 const EXIT_PASS: i32 = 0;
@@ -39,6 +41,8 @@ const DEL: u8 = 0x7f;
 const FIRST_PRINTABLE: u8 = 0x20;
 const LISTED_DIAGNOSTICS: usize = 120;
 const TERMINAL_CAP: u32 = 50;
+const AGENT_CAP: u32 = 30;
+const C101: &str = CODE_CONFIG_CHANGED;
 const WARN_E101: &str = "version: 1\npolicy:\n  NSD-E101: warn\n";
 const WARN_S102: &str = "version: 1\npolicy:\n  NSD-S102: warn\n";
 const INVALID_UTF8_TS: &[u8] = b"export const x = '\xff\xfe';\n";
@@ -469,31 +473,6 @@ fn test_render_percent_escapes_a_non_utf8_coverage_path() {
 }
 
 #[test]
-fn test_render_lists_every_diagnostic_uncapped() {
-    let diagnostics: Vec<CheckDiagnostic> = (0..LISTED_DIAGNOSTICS)
-        .rev()
-        .map(|index| {
-            CheckDiagnostic::Finding(FindingDiagnostic {
-                code: CODE_UNMATCHED_FINDING,
-                rule_id: "JAVA-EMPTY-CATCH",
-                candidate_path: RepoPath::from_bytes(format!("f{index:03}.java")),
-                candidate_start_line: 1,
-                candidate_end_line: 1,
-            })
-        })
-        .collect();
-
-    let rendered = render_terminal(&diagnostics, TERMINAL_CAP);
-
-    let lines: Vec<&str> = rendered.lines().collect();
-    assert_eq!(lines.len(), LISTED_DIAGNOSTICS);
-    for (position, line) in lines.iter().enumerate() {
-        let expected = format!("f{:03}.java", LISTED_DIAGNOSTICS - 1 - position);
-        assert!(line.contains(&expected), "line {position}: {line}");
-    }
-}
-
-#[test]
 fn test_check_staged_with_worktree_is_a_usage_error() {
     let fx = Fixture::staged_regression();
 
@@ -799,4 +778,226 @@ fn test_check_config_in_a_dir_that_merely_contains_a_link_to_the_checkout_is_use
 
     assert_eq!(exit_code(&output), Some(EXIT_PASS));
     assert!(stdout(&output).contains(E101), "{}", stdout(&output));
+}
+
+fn finding(index: usize) -> CheckDiagnostic {
+    CheckDiagnostic::Finding(FindingDiagnostic {
+        code: CODE_UNMATCHED_FINDING,
+        rule_id: "JAVA-EMPTY-CATCH",
+        candidate_path: RepoPath::from_bytes(format!("f{index:03}.java")),
+        candidate_start_line: 1,
+        candidate_end_line: 1,
+    })
+}
+
+fn invalid_suppression(index: usize) -> CheckDiagnostic {
+    CheckDiagnostic::Suppression(SuppressionDiagnostic {
+        code: CODE_INVALID_SUPPRESSION,
+        rule_id: None,
+        candidate_path: RepoPath::from_bytes(format!("s{index:03}.java")),
+        directive_line: 1,
+    })
+}
+
+fn config_changed() -> CheckDiagnostic {
+    CheckDiagnostic::Config(ConfigNote {
+        code: CODE_CONFIG_CHANGED,
+    })
+}
+
+fn terminal_listing(count: usize) -> String {
+    let diagnostics: Vec<CheckDiagnostic> = (0..count).rev().map(finding).collect();
+    render_terminal(&diagnostics, TERMINAL_CAP)
+}
+
+/// Base `nsd.yml` `base_config` and a candidate that edits it (C101) while
+/// raising `Foo.java` from CC-5 to CC-12 (E101): C101 sorts first.
+fn config_edit_and_regression(base_config: &str) -> Fixture {
+    let fx = fixture();
+    fx.commit(&[
+        ("Foo.java", java_class("Foo", LOW_CC_IFS).as_bytes()),
+        ("nsd.yml", base_config.as_bytes()),
+    ]);
+    fx.stage("Foo.java", java_class("Foo", HIGH_CC_IFS).as_bytes());
+    fx.stage("nsd.yml", format!("{base_config}# edited\n").as_bytes());
+    fx
+}
+
+#[test]
+fn test_terminal_caps_at_fifty_and_names_the_omitted_count() {
+    let rendered = terminal_listing(LISTED_DIAGNOSTICS);
+
+    let lines: Vec<&str> = rendered.lines().collect();
+    assert_eq!(lines.len(), TERMINAL_CAP as usize + 1, "{rendered}");
+    for (position, line) in lines[..TERMINAL_CAP as usize].iter().enumerate() {
+        let expected = format!("f{:03}.java", LISTED_DIAGNOSTICS - 1 - position);
+        assert!(line.contains(&expected), "line {position}: {line}");
+    }
+    assert_eq!(lines[TERMINAL_CAP as usize], "omitted diagnostics: 70");
+    assert_eq!(rendered, terminal_listing(LISTED_DIAGNOSTICS));
+}
+
+#[test]
+fn test_terminal_under_the_cap_prints_no_omitted_line() {
+    let rendered = terminal_listing(TERMINAL_CAP as usize);
+
+    assert_eq!(
+        rendered.lines().count(),
+        TERMINAL_CAP as usize,
+        "{rendered}"
+    );
+    assert!(!rendered.contains("omitted"), "{rendered}");
+    let one_over = terminal_listing(TERMINAL_CAP as usize + 1);
+    assert!(one_over.ends_with("omitted diagnostics: 1\n"), "{one_over}");
+}
+
+#[test]
+fn test_agent_lists_only_violations_capped_at_thirty() {
+    let mut diagnostics = vec![config_changed()];
+    diagnostics.extend((0..10).map(invalid_suppression));
+    diagnostics.extend((0..40).map(finding));
+    let policy = Config::default().policy;
+
+    let rendered = render_agent(&diagnostics, &policy, false, AGENT_CAP);
+
+    let lines: Vec<&str> = rendered.lines().collect();
+    assert_eq!(lines.len(), AGENT_CAP as usize + 1, "{rendered}");
+    for (position, line) in lines[..AGENT_CAP as usize].iter().enumerate() {
+        let expected = format!("f{position:03}.java");
+        assert!(line.contains(&expected), "line {position}: {line}");
+    }
+    assert!(!rendered.contains(CODE_CONFIG_CHANGED), "{rendered}");
+    assert!(!rendered.contains(CODE_INVALID_SUPPRESSION), "{rendered}");
+    assert_eq!(lines[AGENT_CAP as usize], "omitted violations: 10");
+}
+
+#[test]
+fn test_agent_follows_the_invocation_flag_for_new_suppressions() {
+    let diagnostics = [CheckDiagnostic::Suppression(SuppressionDiagnostic {
+        code: CODE_NEW_SUPPRESSION,
+        rule_id: None,
+        candidate_path: RepoPath::from_bytes("s.java"),
+        directive_line: 1,
+    })];
+    let policy = Config::default().policy;
+
+    assert!(render_agent(&diagnostics, &policy, false, AGENT_CAP).contains(CODE_NEW_SUPPRESSION));
+    assert_eq!(render_agent(&diagnostics, &policy, true, AGENT_CAP), "");
+}
+
+#[test]
+fn test_agent_escapes_control_characters() {
+    let hostile = "run\u{1b}[31m\u{7}\nNSD-FAKE";
+    let diagnostics = [complexity(hostile, RepoPath::from_bytes("src/Foo.java"))];
+
+    let rendered = render_agent(&diagnostics, &Config::default().policy, false, AGENT_CAP);
+
+    assert!(!has_raw_control_byte(rendered.as_bytes()), "{rendered:?}");
+    assert_eq!(rendered.lines().count(), 1, "{rendered:?}");
+}
+
+#[test]
+fn test_check_exit_reflects_a_diagnostic_the_cap_omitted() {
+    let fx = config_edit_and_regression("version: 1\noutput:\n  max_terminal_diagnostics: 1\n");
+
+    let output = fx.nsd(&["check", "--staged"]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_REGRESSION));
+    let listing = stdout(&output);
+    let lines: Vec<&str> = listing.lines().collect();
+    assert_eq!(lines.len(), 2, "{listing}");
+    assert!(lines[0].starts_with(C101), "{listing}");
+    assert_eq!(lines[1], "omitted diagnostics: 1");
+}
+
+#[test]
+fn test_check_format_agent_is_accepted_and_omits_non_violations() {
+    let fx = config_edit_and_regression("version: 1\n");
+
+    let output = fx.nsd(&["check", "--staged", "--format", "agent"]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_REGRESSION));
+    let listing = stdout(&output);
+    assert_eq!(listing.lines().count(), 1, "{listing}");
+    assert!(listing.starts_with(E101), "{listing}");
+    assert!(!listing.contains(C101), "{listing}");
+}
+
+#[test]
+fn test_candidate_config_cannot_change_its_own_output_cap() {
+    let fx = Fixture::staged_regression();
+    fx.stage(
+        "nsd.yml",
+        b"version: 1\noutput:\n  max_terminal_diagnostics: 1\n",
+    );
+
+    let output = fx.nsd(&["check", "--staged"]);
+
+    let listing = stdout(&output);
+    assert_eq!(listing.lines().count(), 2, "{listing}");
+    assert!(
+        listing.contains(C101) && listing.contains(E101),
+        "{listing}"
+    );
+    assert!(!listing.contains("omitted"), "{listing}");
+}
+
+#[test]
+fn test_trusted_config_output_cap_applies() {
+    let fx = fixture();
+    fx.commit(&[
+        ("Foo.java", java_class("Foo", LOW_CC_IFS).as_bytes()),
+        ("Bar.java", java_class("Bar", LOW_CC_IFS).as_bytes()),
+    ]);
+    fx.stage("Foo.java", java_class("Foo", HIGH_CC_IFS).as_bytes());
+    fx.stage("Bar.java", java_class("Bar", HIGH_CC_IFS).as_bytes());
+    let outside = TempDir::new().expect("create a directory outside the checkout");
+    let config = write_config(
+        outside.path(),
+        "trusted.yml",
+        "version: 1\noutput:\n  max_agent_diagnostics: 1\n",
+    );
+
+    let output = fx.nsd(&[
+        "check",
+        "--staged",
+        "--format",
+        "agent",
+        "--config",
+        path_str(&config),
+    ]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_REGRESSION));
+    let listing = stdout(&output);
+    let lines: Vec<&str> = listing.lines().collect();
+    assert_eq!(lines.len(), 2, "{listing}");
+    assert!(lines[0].starts_with(E101), "{listing}");
+    assert_eq!(lines[1], "omitted violations: 1");
+}
+
+#[test]
+fn test_zero_cap_lists_only_the_omitted_line() {
+    let fx = Fixture::staged_regression();
+    let outside = TempDir::new().expect("create a directory outside the checkout");
+    let config = write_config(
+        outside.path(),
+        "trusted.yml",
+        "version: 1\noutput:\n  max_terminal_diagnostics: 0\n",
+    );
+
+    let output = fx.nsd(&["check", "--staged", "--config", path_str(&config)]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_REGRESSION));
+    assert_eq!(stdout(&output), "omitted diagnostics: 1\n");
+}
+
+#[test]
+fn test_check_json_is_not_capped() {
+    let fx = config_edit_and_regression("version: 1\noutput:\n  max_terminal_diagnostics: 1\n");
+
+    let output = fx.nsd(&["check", "--staged", "--format", "json"]);
+
+    let document: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("the check prints one JSON document");
+    assert_eq!(document["diagnostics"].as_array().map(Vec::len), Some(2));
 }
