@@ -1397,3 +1397,61 @@ fn test_check_summary_counts_staged_clone_lines_like_scan() {
         "{one}"
     );
 }
+
+const WARN_E101_CONFIG: &str = "version: 1\npolicy:\n  NSD-E101: warn\n";
+const WARN_E101_V102_OFF_CONFIG: &str = "version: 1\npolicy:\n  NSD-E101: warn\n  NSD-V102: off\n";
+const LOW_CC_IFS: usize = 4;
+
+/// Base commit with a CC-low method and the base `nsd.yml` `config`; the
+/// candidate commit on top raises it to CC-12.
+fn committed_regression(config: &str) -> Fixture {
+    let fx = fixture();
+    fx.commit(&[
+        ("Foo.java", java_class("Foo", LOW_CC_IFS).as_bytes()),
+        ("nsd.yml", config.as_bytes()),
+    ]);
+    fx.commit(&[
+        ("Foo.java", java_class("Foo", HIGH_CC_IFS).as_bytes()),
+        ("nsd.yml", config.as_bytes()),
+    ]);
+    fx
+}
+
+fn erosion(document: &Value) -> f64 {
+    document["summaries"]["overall"]["erosion"]
+        .as_f64()
+        .expect("overall erosion is a number")
+}
+
+#[test]
+fn test_base_check_reports_full_scope_ratios_without_gating_them() {
+    let fx = committed_regression(WARN_E101_CONFIG);
+
+    let output = fx.nsd(&["check", "--base", "HEAD~1", "--format", "json"]);
+
+    assert_eq!(output.status.code(), Some(0), "{}", stdout(&output));
+    let document = self::document(&output);
+    assert_eq!(document["summaries"]["scope"], json!("full"));
+    let base_only = fixture();
+    base_only.commit(&[
+        ("Foo.java", java_class("Foo", LOW_CC_IFS).as_bytes()),
+        ("nsd.yml", WARN_E101_CONFIG.as_bytes()),
+    ]);
+    let base = self::document(&base_only.nsd(&["check", "--base", "HEAD", "--format", "json"]));
+    assert!(
+        erosion(&document) > erosion(&base),
+        "{} vs {}",
+        erosion(&document),
+        erosion(&base)
+    );
+}
+
+#[test]
+fn test_base_check_with_v102_off_reports_changed_scope() {
+    let fx = committed_regression(WARN_E101_V102_OFF_CONFIG);
+
+    let output = fx.nsd(&["check", "--base", "HEAD~1", "--format", "json"]);
+
+    assert_eq!(output.status.code(), Some(0), "{}", stdout(&output));
+    assert_eq!(document(&output)["summaries"]["scope"], json!("changed"));
+}

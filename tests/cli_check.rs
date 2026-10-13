@@ -1027,3 +1027,109 @@ fn test_check_json_is_not_capped() {
         serde_json::from_slice(&output.stdout).expect("the check prints one JSON document");
     assert_eq!(document["diagnostics"].as_array().map(Vec::len), Some(2));
 }
+
+const QUIET_WIDGET: &str = "class Widget {\n    void run() {\n        work();\n    }\n}\n";
+const SUPPRESSED_WIDGET: &str = "class Widget {\n    void run() {\n        // nsd-ignore[JAVA-EMPTY-CATCH]: legacy\n        try { work(); } catch (Exception e) { }\n    }\n}\n";
+const S101: &str = "NSD-S101";
+const ALLOW_FLAG: &str = "--allow-new-suppressions";
+
+/// A committed quiet `Widget.java` with a staged new suppression directive.
+fn staged_new_suppression() -> Fixture {
+    let fx = fixture();
+    fx.commit(&[("Widget.java", QUIET_WIDGET.as_bytes())]);
+    fx.stage("Widget.java", SUPPRESSED_WIDGET.as_bytes());
+    fx
+}
+
+#[test]
+fn test_check_new_suppression_exits_1_without_the_flag() {
+    let fx = staged_new_suppression();
+
+    let output = fx.nsd(&["check", "--staged"]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_REGRESSION));
+    assert!(stdout(&output).contains(S101), "{}", stdout(&output));
+}
+
+#[test]
+fn test_allow_new_suppressions_makes_s101_exit_neutral_but_still_printed() {
+    let fx = staged_new_suppression();
+
+    let output = fx.nsd(&["check", "--staged", ALLOW_FLAG]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_PASS));
+    let listing = stdout(&output);
+    assert!(
+        listing
+            .lines()
+            .any(|line| line.starts_with(S101) && line.contains("Widget.java")),
+        "{listing}"
+    );
+    let json = fx.nsd(&["check", "--staged", ALLOW_FLAG, "--format", "json"]);
+    assert_eq!(exit_code(&json), Some(EXIT_PASS));
+    assert!(stdout(&json).contains(S101), "{}", stdout(&json));
+}
+
+#[test]
+fn test_allow_new_suppressions_leaves_e101_denied() {
+    let fx = Fixture::staged_regression();
+
+    let output = fx.nsd(&["check", "--staged", ALLOW_FLAG]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_REGRESSION));
+    assert!(stdout(&output).contains(E101), "{}", stdout(&output));
+}
+
+#[test]
+fn test_allow_new_suppressions_leaves_a_denied_s102_denied() {
+    let fx = fixture();
+    fx.commit(&[
+        ("Widget.java", QUIET_WIDGET.as_bytes()),
+        ("nsd.yml", b"version: 1\npolicy:\n  NSD-S102: deny\n"),
+    ]);
+    let unused = "class Widget {\n    void run() {\n        // nsd-ignore[JAVA-EMPTY-CATCH]: stale\n        work();\n    }\n}\n";
+    fx.stage("Widget.java", unused.as_bytes());
+
+    let output = fx.nsd(&["check", "--staged", ALLOW_FLAG]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_REGRESSION));
+    assert!(stdout(&output).contains(S102), "{}", stdout(&output));
+}
+
+#[test]
+fn test_agent_format_omits_an_allowed_s101() {
+    let fx = staged_new_suppression();
+
+    let denied = fx.nsd(&["check", "--staged", "--format", "agent"]);
+    let allowed = fx.nsd(&["check", "--staged", "--format", "agent", ALLOW_FLAG]);
+
+    assert_eq!(exit_code(&denied), Some(EXIT_REGRESSION));
+    assert!(stdout(&denied).starts_with(S101), "{}", stdout(&denied));
+    assert_eq!(exit_code(&allowed), Some(EXIT_PASS));
+    assert_eq!(stdout(&allowed), "");
+}
+
+#[test]
+fn test_repository_config_cannot_enable_new_suppressions() {
+    for config in [
+        "version: 1\nallow_new_suppressions: true\n",
+        "version: 1\npolicy:\n  allow_new_suppressions: true\n",
+        "version: 1\npolicy:\n  NSD-S101: allow\n",
+    ] {
+        let fx = fixture();
+        fx.commit(&[
+            ("Widget.java", QUIET_WIDGET.as_bytes()),
+            ("nsd.yml", config.as_bytes()),
+        ]);
+        fx.stage("Widget.java", SUPPRESSED_WIDGET.as_bytes());
+
+        let output = fx.nsd(&["check", "--staged"]);
+
+        assert_eq!(exit_code(&output), Some(EXIT_ERROR), "{config}");
+        assert!(
+            stdout(&output).contains(C102),
+            "{config}: {}",
+            stdout(&output)
+        );
+    }
+}
