@@ -334,6 +334,21 @@ fn test_nested_checkout_with_a_git_directory_is_excluded() -> anyhow::Result<()>
     Ok(())
 }
 
+#[cfg(unix)]
+#[test]
+fn test_nested_checkout_with_a_dangling_git_symlink_is_excluded() -> anyhow::Result<()> {
+    let dir = tree(&[
+        ("A.java", "class A {}\n"),
+        ("vendored/lib/Inner.java", "class Inner {}\n"),
+    ]);
+    std::os::unix::fs::symlink("missing-target", dir.path().join("vendored/lib/.git"))?;
+    let result = discover(dir.path(), &settings(false, &[]))?;
+
+    assert_eq!(discovered_paths(&result), vec!["A.java"]);
+    assert_eq!(nested_rows(&result), vec!["vendored/lib"]);
+    Ok(())
+}
+
 #[test]
 fn test_gitignored_nested_checkout_keeps_its_gitignore_rows() -> anyhow::Result<()> {
     let dir = tree(&[
