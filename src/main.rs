@@ -19,9 +19,6 @@ use nsd::report;
 /// A check that could not run to a verdict exits with the error status.
 const CHECK_ERROR_EXIT: u8 = 2;
 
-/// `check` has no flag for it yet, so every invocation denies new suppressions.
-const ALLOW_NEW_SUPPRESSIONS: bool = false;
-
 /// What the trusted configuration (the defaults when none resolved) decides
 /// about the listing.
 struct Trusted {
@@ -70,7 +67,9 @@ fn run_check_command(args: &CheckArgs) -> u8 {
 fn check_command(args: &CheckArgs) -> anyhow::Result<u8> {
     let repository = std::env::current_dir().context("cannot read the current directory")?;
     let (diagnostics, status, details, trusted) = match &args.config {
-        Some(config) if config_is_inside_checkout(&repository, config)? => refused_config(),
+        Some(config) if config_is_inside_checkout(&repository, config)? => {
+            refused_config(args.allow_new_suppressions)
+        }
         _ => {
             let mode = match &args.base {
                 Some(reference) => CheckMode::Base {
@@ -83,7 +82,7 @@ fn check_command(args: &CheckArgs) -> anyhow::Result<u8> {
                 repository: &repository,
                 mode,
                 config_path: args.config.as_deref(),
-                allow_new_suppressions: ALLOW_NEW_SUPPRESSIONS,
+                allow_new_suppressions: args.allow_new_suppressions,
             });
             for warning in &outcome.warnings {
                 eprintln!("warning: {}", escape_terminal(warning));
@@ -105,7 +104,7 @@ fn check_command(args: &CheckArgs) -> anyhow::Result<u8> {
         Format::Agent => render_agent(
             &diagnostics,
             &trusted.policy,
-            ALLOW_NEW_SUPPRESSIONS,
+            args.allow_new_suppressions,
             trusted.output.max_agent_diagnostics,
         ),
         Format::Json => {
@@ -135,7 +134,9 @@ fn check_command(args: &CheckArgs) -> anyhow::Result<u8> {
 
 /// The refusal names no path: the one given may be absolute, and the listing
 /// never prints the checkout's location.
-fn refused_config() -> (Vec<CheckDiagnostic>, u8, Option<CheckDetails>, Trusted) {
+fn refused_config(
+    allow_new_suppressions: bool,
+) -> (Vec<CheckDiagnostic>, u8, Option<CheckDetails>, Trusted) {
     let diagnostics = vec![CheckDiagnostic::Failure {
         code: CODE_INVALID_CONFIG,
         message: "trusted config is inside the candidate checkout".to_string(),
@@ -144,7 +145,7 @@ fn refused_config() -> (Vec<CheckDiagnostic>, u8, Option<CheckDetails>, Trusted)
     let status = exit_status(
         diagnostics.iter().map(CheckDiagnostic::code),
         &policy,
-        ALLOW_NEW_SUPPRESSIONS,
+        allow_new_suppressions,
     );
     (diagnostics, status, None, Trusted { policy, output })
 }
