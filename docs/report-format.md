@@ -229,9 +229,10 @@ neither the numerator nor the denominator.
 `Callable` (D8) publishes both `start_line` and `end_line`
 (`IrCallable::span.end_line`, M0c-13). A top-25 row's `location` is a
 real `[start_line, end_line]` region — the callable's whole declaration
-and body, not just its first line — and the HTML `excerpt` fully brackets it
-(`report.json` carries none), read back off disk, the same as every
-finding's and every duplicate-group location's span. A single-line callable (a one-line arrow function, e.g.
+and body, not just its first line — and the HTML `excerpt` brackets it
+(`report.json` carries none), read back off disk and capped (see *Excerpt
+caps* below), the same as every finding's and every duplicate-group
+location's span. A single-line callable (a one-line arrow function, e.g.
 an expression-bodied `(b) => b`) still has `start_line == end_line`, same
 as any other one-line region.
 
@@ -243,6 +244,22 @@ CDN or external asset, and no scheme prefix anywhere except a legitimate
 value interpolated from the scanned repository — a source excerpt, a file
 path, a rule id, a callable name — passes through the module's single
 `escape_html` helper.
+
+**Excerpt caps (M6-4).** Every excerpt (a finding's, a duplicate
+occurrence's, a top-25 callable's) is capped when its `SourceLocation` is
+built, so no uncapped excerpt is kept. The first 20 lines of the span are
+kept; if those lines, joined with `\n`, exceed 4096 bytes of raw source text
+(counted before HTML escaping), the text is cut to the longest prefix of at
+most 4096 bytes that ends on a UTF-8 character boundary. An excerpt that was
+cut by either cap is followed by exactly this marker, and an excerpt that
+was not cut has none:
+
+```html
+<p class="truncation">excerpt truncated: the full span is N lines</p>
+```
+
+`N` is the span's own line count (`end_line - start_line + 1`), not the
+number of lines shown. `report.json` carries no excerpt and is unchanged.
 
 Sections, in document order, each its own `<section id="...">`:
 
