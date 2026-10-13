@@ -82,7 +82,7 @@ fn check_command(args: &CheckArgs) -> anyhow::Result<u8> {
         }
     };
     let rendered = match args.format {
-        Format::Terminal => render_terminal(&diagnostics),
+        Format::Terminal => render_terminal(&diagnostics, 50),
         Format::Json => {
             let repository_forms = repository_paths(&repository);
             let config_forms: Vec<PathBuf> = args

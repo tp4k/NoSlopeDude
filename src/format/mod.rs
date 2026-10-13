@@ -1,11 +1,13 @@
 //! Terminal listing of a check's diagnostics. Every line is escaped by
 //! `escape_terminal`, because names, paths and messages come from a PR.
 
+mod agent;
 mod json;
 
 use crate::check::CheckDiagnostic;
 use crate::git::path::RepoPath;
 
+pub use agent::render_agent;
 pub use json::{
     canonical_document, canonical_document_pretty, float, render_check_json, render_json,
     SCAN_RESULT_SCOPE, SCHEMA_VERSION,
@@ -15,7 +17,7 @@ pub use json::{
 const CANDIDATE_CONFIG_FILE: &str = "nsd.yml";
 
 /// One line per diagnostic, in the order given, each ended by a newline.
-pub fn render_terminal(diagnostics: &[CheckDiagnostic]) -> String {
+pub fn render_terminal(diagnostics: &[CheckDiagnostic], _cap: u32) -> String {
     let mut listing = String::new();
     for diagnostic in diagnostics {
         listing.push_str(&escape_terminal(&describe(diagnostic)));

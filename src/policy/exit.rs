@@ -24,7 +24,8 @@ pub fn exit_status<'a>(
     })
 }
 
-fn contribution(code: &str, policy: &PolicyConfig, allow_new_suppressions: bool) -> u8 {
+/// The exit bits one diagnostic code adds; `exit_status` ORs these.
+pub fn contribution(code: &str, policy: &PolicyConfig, allow_new_suppressions: bool) -> u8 {
     match code {
         CODE_COMPLEXITY_ABOVE_THRESHOLD => denied(policy.nsd_e101),
         CODE_COMPLEXITY_INCREASED => denied(policy.nsd_e102),

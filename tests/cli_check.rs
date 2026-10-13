@@ -38,6 +38,7 @@ const ESC: u8 = 0x1b;
 const DEL: u8 = 0x7f;
 const FIRST_PRINTABLE: u8 = 0x20;
 const LISTED_DIAGNOSTICS: usize = 120;
+const TERMINAL_CAP: u32 = 50;
 const WARN_E101: &str = "version: 1\npolicy:\n  NSD-E101: warn\n";
 const WARN_S102: &str = "version: 1\npolicy:\n  NSD-S102: warn\n";
 const INVALID_UTF8_TS: &[u8] = b"export const x = '\xff\xfe';\n";
@@ -402,7 +403,7 @@ fn test_render_escapes_control_characters_in_candidate_names() {
     let hostile = "run\u{1b}[31m\u{7}\u{7f}\u{9b}\nNSD-FAKE";
     let diagnostics = [complexity(hostile, RepoPath::from_bytes("src/Foo.java"))];
 
-    let rendered = render_terminal(&diagnostics);
+    let rendered = render_terminal(&diagnostics, TERMINAL_CAP);
 
     assert!(!has_raw_control_byte(rendered.as_bytes()), "{rendered:?}");
     assert!(!rendered.contains('\u{9b}'), "{rendered:?}");
@@ -428,7 +429,7 @@ fn test_render_escapes_control_bytes_in_paths_and_failure_messages() {
         }),
     ];
 
-    let rendered = render_terminal(&diagnostics);
+    let rendered = render_terminal(&diagnostics, TERMINAL_CAP);
 
     assert!(!has_raw_control_byte(rendered.as_bytes()), "{rendered:?}");
     assert_eq!(rendered.lines().count(), 3, "{rendered:?}");
@@ -461,7 +462,7 @@ fn test_render_percent_escapes_a_non_utf8_coverage_path() {
         reason: UnanalyzableReason::NonUtf8Path,
     })];
 
-    let rendered = render_terminal(&diagnostics);
+    let rendered = render_terminal(&diagnostics, TERMINAL_CAP);
 
     assert!(rendered.contains("src/100%25%FF.java"), "{rendered:?}");
     assert!(rendered.contains(CODE_ANALYSIS_UNAVAILABLE), "{rendered:?}");
@@ -482,7 +483,7 @@ fn test_render_lists_every_diagnostic_uncapped() {
         })
         .collect();
 
-    let rendered = render_terminal(&diagnostics);
+    let rendered = render_terminal(&diagnostics, TERMINAL_CAP);
 
     let lines: Vec<&str> = rendered.lines().collect();
     assert_eq!(lines.len(), LISTED_DIAGNOSTICS);
