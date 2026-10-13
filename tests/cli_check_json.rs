@@ -613,13 +613,16 @@ fn test_check_default_format_is_terminal() {
 }
 
 #[test]
-fn test_check_format_agent_is_a_usage_error() {
+fn test_check_format_agent_is_accepted_and_json_is_unchanged() {
     let fx = Fixture::scenario();
 
-    let output = fx.nsd(&["check", "--staged", "--format", "agent"]);
+    let agent = fx.nsd(&["check", "--staged", "--format", "agent"]);
+    let json = fx.nsd(&["check", "--staged", "--format", "json"]);
 
-    assert_eq!(output.status.code(), Some(EXIT_ERROR));
-    assert_eq!(stdout(&output), "");
+    assert_ne!(agent.status.code(), Some(EXIT_ERROR));
+    assert!(!stdout(&agent).is_empty(), "agent printed nothing");
+    assert_eq!(agent.status.code(), json.status.code());
+    assert!(stdout(&json).starts_with('{'), "{}", stdout(&json));
 }
 
 #[test]
