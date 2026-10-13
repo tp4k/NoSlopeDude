@@ -54,6 +54,10 @@ pub struct CheckArgs {
     /// Output format of the diagnostics.
     #[arg(long, value_enum, default_value_t = Format::Terminal)]
     pub format: Format,
+
+    /// Do not fail the run on new suppression directives (`NSD-S101` only).
+    #[arg(long)]
+    pub allow_new_suppressions: bool,
 }
 
 #[derive(Debug, Parser, Clone, PartialEq, Eq)]
