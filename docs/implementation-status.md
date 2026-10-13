@@ -187,8 +187,8 @@ Plan: `nsd-plan-final.md` *M3–M5*. M3-1, M3-2, M3-3, M3-4 and M4-1 are done (l
 ## M6–M7 — Output, CI hardening
 
 Plan: `nsd-plan-final.md` *M6–M7*. Done except the private-archive recapture (M7-1a, `[!]`): canonical JSON, renderers, HTML caps, exclusions, `--allow-new-suppressions` and the DoD sweep ([`dod-sweep.md`](dod-sweep.md)). History: `nsd check --format json` started as a subset. The imported engine
-already emits a scan-scoped `report.json` and standalone HTML, but none of it
-has been brought to the v1 canonical contract (`schema_version: 1`,
+had emitted a scan-scoped `report.json` and standalone HTML, but none of it
+had yet been brought to the v1 canonical contract (`schema_version: 1`,
 `result_scope`, snapshot IDs, per-reason skip counts, check scope).
 
 | ID | Deliverable | Status |
