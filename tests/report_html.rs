@@ -538,6 +538,7 @@ fn test_excerpt_over_four_kib_is_cut_on_a_char_boundary_and_marked() {
         format!("class Big {{\n    void run() {{\n        String s = \"{filler}\";\n    }}\n}}\n");
     let (_root, _out, output) = scan_sources(&[("Big.java", source.clone())]);
     let (pre, marker) = top25_excerpt(&written_html(&output), "src/Big.java", 2, 4);
+    let pre = pre.replace("&quot;", "\"");
     let full = first_lines(&source, 3);
     assert_eq!(pre.len(), 4095, "cut length in bytes");
     assert!(
