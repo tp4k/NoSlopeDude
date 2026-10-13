@@ -779,9 +779,9 @@ fn test_excluded_block_loop_does_not_scale_quadratically() {
 }
 
 /// Like `modified_excluded_blocks_run`, but each changed top-level block is
-/// preceded by an unchanged top-level function holding the same legacy JSX
-/// error, so the file has `count` excluded callables as well as `count`
-/// excluded blocks outside them. Returns the minimum of three timings, the
+/// preceded by an unchanged top-level arrow-function `const` holding the
+/// same legacy JSX error, so the file has `count` excluded callables as well
+/// as `count` excluded blocks outside them. Returns the minimum of three timings, the
 /// A101 count, the excluded-callable count and the excluded-block count.
 fn modified_excluded_callables_and_blocks_run(
     count: usize,

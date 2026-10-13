@@ -184,7 +184,7 @@ fn scan_file(
 
 /// The file's mapped parser gaps: each damage span's line range, ascending
 /// and without repeats.
-fn mapped_gaps(ir_file: &lower::IrFile) -> Vec<LineRange> {
+pub(crate) fn mapped_gaps(ir_file: &lower::IrFile) -> Vec<LineRange> {
     let mut gaps: Vec<LineRange> = ir_file
         .damage
         .iter()
