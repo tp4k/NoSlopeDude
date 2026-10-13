@@ -593,3 +593,125 @@ fn test_truncation_marker_appears_only_on_truncated_excerpts() {
     let html = written_html(&output);
     assert_eq!(html.matches(MARKER_WORD).count(), truncated);
 }
+
+/// Two classes with an identical 30-line method body: the clone group's
+/// locations span more than 20 lines, so their excerpts must be capped too.
+fn clone_source(class: &str) -> String {
+    let mut text = format!("class {class} {{\n    int run(int count) {{\n");
+    for index in 0..28 {
+        text.push_str(&format!(
+            "        if (count > {index}) {{ count += {index}; }}\n"
+        ));
+    }
+    text.push_str("        return count;\n    }\n}\n");
+    text
+}
+
+/// A redundant `else` whose block spans 25 lines: the rule finding's
+/// location is the `else` block.
+fn long_else_source() -> String {
+    let mut text = String::from(
+        "class LongElse {\n    int run(int count) {\n        if (count > 0) {\n            return 1;\n        } else {\n",
+    );
+    for index in 0..22 {
+        text.push_str(&format!("            count += {index};\n"));
+    }
+    text.push_str("            return count;\n        }\n    }\n}\n");
+    text
+}
+
+/// Asserts that every location of `locations` over 20 lines renders, inside
+/// the HTML section `section_id`, as its first 20 source lines followed by a
+/// marker naming the span's line count. Returns how many were checked.
+fn assert_long_locations_capped(
+    html: &str,
+    section_id: &str,
+    locations: &[&report::SourceLocation],
+    sources: &[(&str, String)],
+) -> usize {
+    let section = html
+        .split(&format!("id=\"{section_id}\""))
+        .nth(1)
+        .and_then(|rest| rest.split("</section>").next())
+        .unwrap_or_else(|| panic!("no {section_id} section"));
+    let mut checked = 0;
+    for location in locations
+        .iter()
+        .filter(|location| location.end_line - location.start_line + 1 > 20)
+    {
+        let path = location.relative_path.display().to_string();
+        let source = &sources
+            .iter()
+            .find(|(name, _)| path.ends_with(name))
+            .expect("source for location")
+            .1;
+        let span_lines = location.end_line - location.start_line + 1;
+        let needle = format!(
+            "{path}#L{}-L{}<pre>",
+            location.start_line, location.end_line
+        );
+        let after = section
+            .split(&needle)
+            .nth(1)
+            .unwrap_or_else(|| panic!("no {section_id} location {needle}"));
+        let (pre, rest) = after.split_once("</pre>").expect("closing pre");
+        let expected = source
+            .lines()
+            .skip(location.start_line - 1)
+            .take(20)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(
+            pre,
+            expected.replace('>', "&gt;"),
+            "{path}: first 20 lines only"
+        );
+        let marker = rest.split("</p>").next().expect("marker end");
+        assert!(
+            marker.contains(MARKER_WORD),
+            "{path}: no marker in {marker}"
+        );
+        assert!(
+            marker.contains(&span_lines.to_string()),
+            "{path}: marker should name {span_lines} lines: {marker}"
+        );
+        checked += 1;
+    }
+    checked
+}
+
+#[test]
+fn test_duplicate_group_excerpts_are_capped_and_marked() {
+    let sources = [
+        ("CloneA.java", clone_source("CloneA")),
+        ("CloneB.java", clone_source("CloneB")),
+    ];
+    let (_root, _out, output) = scan_sources(&sources);
+    let locations: Vec<_> = output
+        .report
+        .duplicates
+        .iter()
+        .flat_map(|group| &group.locations)
+        .collect();
+    let checked =
+        assert_long_locations_capped(&written_html(&output), "duplicates", &locations, &sources);
+    assert!(
+        checked >= 2,
+        "fixture should yield duplicate locations over 20 lines"
+    );
+}
+
+#[test]
+fn test_finding_excerpts_are_capped_and_marked() {
+    let sources = [("LongElse.java", long_else_source())];
+    let (_root, _out, output) = scan_sources(&sources);
+    let locations: Vec<_> = output
+        .report
+        .findings
+        .iter()
+        .map(|finding| &finding.location)
+        .collect();
+    let checked =
+        assert_long_locations_capped(&written_html(&output), "findings", &locations, &sources);
+    assert!(checked >= 1, "fixture should yield a finding over 20 lines");
+}
