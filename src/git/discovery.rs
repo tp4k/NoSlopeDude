@@ -60,8 +60,8 @@ const GENERATED_GLOBS: &[&str] = &[
     "*.d.ts",
 ];
 
-/// WebJar resource paths (D19), the one built-in exclusion this stream
-/// adds beyond the scan-discovery list.
+/// WebJar resource paths (D19). `scan` carries the same glob (`WEBJAR_GLOBS`
+/// in `discover.rs`), so the two exclusion lists agree.
 const WEBJAR_GLOB: &str = "**/META-INF/resources/webjars/**";
 
 /// One entry the compiled scope includes, carrying enough for M3-M5's

@@ -34,10 +34,11 @@ const SCAN_CONFIGURATION_FAMILY_PREFIX: &str = "nsd-scan-config-v1";
 /// Every `skipped_files` reason a scan can name, sorted: the discovery
 /// labels (`model::SkipReason`) and the `parse_`-prefixed parse failures
 /// (`model::ParseFailureReason`). Each is present in `skipped`, zeros too.
-pub const SCAN_SKIP_KEYS: [&str; 10] = [
+pub const SCAN_SKIP_KEYS: [&str; 11] = [
     "dependency_or_build_output",
     "generated_code",
     "gitignore",
+    "nested_checkout",
     "parse_grammar_setup",
     "parse_syntax_error",
     "parse_unreadable",
