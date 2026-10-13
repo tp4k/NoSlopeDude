@@ -1376,6 +1376,37 @@ fn test_overlapping_sub_runs_raise_one_diagnostic_per_maximal_occurrence() {
 }
 
 #[test]
+fn test_changed_group_subsumed_by_a_larger_group_reports_only_the_larger() {
+    let long_block = statements("a", 30);
+    let min_lines = 2;
+    let (_dir, repo) = common::init_repo();
+    let base = commit(
+        &repo,
+        &[
+            ("A.java", java("A", &long_block)),
+            ("B.java", java("B", &long_block)),
+        ],
+    );
+    let candidate = commit(
+        &repo,
+        &[
+            ("A.java", java("A", &long_block)),
+            ("B.java", java("B", &long_block)),
+            ("New.java", java("New", &long_block)),
+        ],
+    );
+
+    let found = evaluate_min(&repo, base, candidate, min_lines);
+
+    assert_eq!(sites(&found), vec![body_site("New.java", 30)]);
+    assert_eq!(found[0].matched_path.render(), "A.java");
+    assert_eq!(
+        (found[0].matched_start_line, found[0].matched_end_line),
+        (FIRST_BODY_LINE, FIRST_BODY_LINE + 29)
+    );
+}
+
+#[test]
 fn test_min_clone_lines_sets_the_qualifying_size() {
     let small = statements("a", 6);
     let (_dir, repo) = common::init_repo();

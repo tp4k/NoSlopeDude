@@ -706,6 +706,160 @@ fn test_still_measured_lookup_does_not_scale_quadratically() {
     );
 }
 
+/// `evaluate_damage` alone over a modified `.tsx` file of `count` top-level
+/// blocks that each hold a legacy JSX error (so each is salvage-excluded and
+/// sits outside every callable) and gain one line in the candidate. The
+/// damage lines map to the base, so only the block loop can raise each
+/// block. Returns the minimum of three timings, the A101 count and the
+/// excluded-block count.
+fn modified_excluded_blocks_run(count: usize) -> (std::time::Duration, usize, usize) {
+    const SAMPLES: usize = 3;
+    let text = |extra: &str| -> String {
+        (0..count)
+            .map(|_| format!("if (a) {{\n  c = <b>a & b</b>;\n{extra}}}\n"))
+            .collect()
+    };
+    let base_text = text("");
+    let candidate_text = text("  h();\n");
+    let path = RepoPath::from_bytes(b"w.tsx".to_vec());
+    let base_analysis = analyze_file(Path::new("w.tsx"), base_text.as_bytes()).expect("base");
+    let candidate_analysis =
+        analyze_file(Path::new("w.tsx"), candidate_text.as_bytes()).expect("candidate");
+    let excluded_blocks = candidate_analysis.ir.excluded_blocks.len();
+    let base_files = [FindingFile {
+        path: path.clone(),
+        source: base_text.as_bytes(),
+        analysis: &base_analysis,
+    }];
+    let candidate_files = [FindingFile {
+        path: path.clone(),
+        source: candidate_text.as_bytes(),
+        analysis: &candidate_analysis,
+    }];
+    let changes = [Change::Modified {
+        path,
+        kind: nsd::git::snapshot::EntryKind::Regular,
+    }];
+    let mut fastest = std::time::Duration::MAX;
+    let mut sites = 0;
+    for _ in 0..SAMPLES {
+        let started = std::time::Instant::now();
+        let found = evaluate_damage(&base_files, &candidate_files, &changes).expect("evaluate");
+        fastest = fastest.min(started.elapsed());
+        sites = found.len();
+    }
+    (fastest, sites, excluded_blocks)
+}
+
+#[test]
+fn test_excluded_block_loop_does_not_scale_quadratically() {
+    const BLOCK_COUNT: usize = 3_000;
+    const SCALED_BLOCK_COUNT: usize = BLOCK_COUNT * 8;
+    // Tighter than the sibling tests' 32x: 8N blocks must fit the 1 MiB source
+    // ceiling, so a linear scan of `raised` measures ~34x here, an indexed
+    // loop ~9x.
+    const SCALING_ASSERT_MULTIPLIER: u32 = 20;
+
+    let (elapsed, sites, excluded) = modified_excluded_blocks_run(BLOCK_COUNT);
+    let (scaled_elapsed, scaled_sites, scaled_excluded) =
+        modified_excluded_blocks_run(SCALED_BLOCK_COUNT);
+
+    assert_eq!(
+        (excluded, scaled_excluded),
+        (BLOCK_COUNT, SCALED_BLOCK_COUNT),
+        "the fixture must reach the block loop with every block excluded"
+    );
+    assert_eq!((sites, scaled_sites), (BLOCK_COUNT, SCALED_BLOCK_COUNT));
+    assert!(
+        scaled_elapsed < elapsed * SCALING_ASSERT_MULTIPLIER,
+        "a quadratic block loop scales ~64x from N to 8N, an indexed one ~8x: evaluate_damage at \
+         N={BLOCK_COUNT} took {elapsed:?}, at 8N={SCALED_BLOCK_COUNT} took {scaled_elapsed:?}, \
+         expected 8N < {SCALING_ASSERT_MULTIPLIER}x N"
+    );
+}
+
+/// Like `modified_excluded_blocks_run`, but each changed top-level block is
+/// preceded by an unchanged top-level function holding the same legacy JSX
+/// error, so the file has `count` excluded callables as well as `count`
+/// excluded blocks outside them. Returns the minimum of three timings, the
+/// A101 count, the excluded-callable count and the excluded-block count.
+fn modified_excluded_callables_and_blocks_run(
+    count: usize,
+) -> (std::time::Duration, usize, usize, usize) {
+    const SAMPLES: usize = 3;
+    let text = |extra: &str| -> String {
+        (0..count)
+            .map(|index| {
+                format!(
+                    "export const f{index} = () => <b>a & b</b>;\n\
+                     if (a) {{\n  c = <b>a & b</b>;\n{extra}}}\n"
+                )
+            })
+            .collect()
+    };
+    let base_text = text("");
+    let candidate_text = text("  h();\n");
+    let path = RepoPath::from_bytes(b"w.tsx".to_vec());
+    let base_analysis = analyze_file(Path::new("w.tsx"), base_text.as_bytes()).expect("base");
+    let candidate_analysis =
+        analyze_file(Path::new("w.tsx"), candidate_text.as_bytes()).expect("candidate");
+    let excluded_callables = candidate_analysis.ir.excluded_callables.len();
+    let excluded_blocks = candidate_analysis.ir.excluded_blocks.len();
+    let base_files = [FindingFile {
+        path: path.clone(),
+        source: base_text.as_bytes(),
+        analysis: &base_analysis,
+    }];
+    let candidate_files = [FindingFile {
+        path: path.clone(),
+        source: candidate_text.as_bytes(),
+        analysis: &candidate_analysis,
+    }];
+    let changes = [Change::Modified {
+        path,
+        kind: nsd::git::snapshot::EntryKind::Regular,
+    }];
+    let mut fastest = std::time::Duration::MAX;
+    let mut sites = 0;
+    for _ in 0..SAMPLES {
+        let started = std::time::Instant::now();
+        let found = evaluate_damage(&base_files, &candidate_files, &changes).expect("evaluate");
+        fastest = fastest.min(started.elapsed());
+        sites = found.len();
+    }
+    (fastest, sites, excluded_callables, excluded_blocks)
+}
+
+#[test]
+fn test_excluded_block_loop_containment_does_not_scale_quadratically() {
+    const ITEM_COUNT: usize = 1_500;
+    const SCALED_ITEM_COUNT: usize = ITEM_COUNT * 8;
+    const SCALING_ASSERT_MULTIPLIER: u32 = 20;
+
+    let (elapsed, sites, callables, blocks) =
+        modified_excluded_callables_and_blocks_run(ITEM_COUNT);
+    let (scaled_elapsed, scaled_sites, scaled_callables, scaled_blocks) =
+        modified_excluded_callables_and_blocks_run(SCALED_ITEM_COUNT);
+
+    assert_eq!(
+        (callables, scaled_callables),
+        (ITEM_COUNT, SCALED_ITEM_COUNT),
+        "the fixture must exclude one top-level callable per item"
+    );
+    assert_eq!(
+        (blocks, scaled_blocks),
+        (ITEM_COUNT, SCALED_ITEM_COUNT),
+        "the fixture must exclude one block outside the callables per item"
+    );
+    assert_eq!((sites, scaled_sites), (ITEM_COUNT, SCALED_ITEM_COUNT));
+    assert!(
+        scaled_elapsed < elapsed * SCALING_ASSERT_MULTIPLIER,
+        "a linear containment scan scales ~64x from N to 8N, an indexed one ~8x: evaluate_damage \
+         at N={ITEM_COUNT} took {elapsed:?}, at 8N={SCALED_ITEM_COUNT} took {scaled_elapsed:?}, \
+         expected 8N < {SCALING_ASSERT_MULTIPLIER}x N"
+    );
+}
+
 #[test]
 fn test_block_after_a_nested_callable_stays_inside_its_outer_callable() {
     let base_text = "function outer() {\n  function inner() {\n    return 1;\n  }\n  if (x) {\n    g();\n  }\n}\n";

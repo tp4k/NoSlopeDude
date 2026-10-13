@@ -42,10 +42,9 @@ use crate::policy::exit::exit_status;
 use crate::policy::findings::{match_findings, FindingFile};
 use crate::policy::Candidate;
 use crate::profile::measurement_fingerprint;
-use crate::rules;
 use crate::suppress::apply_suppressions;
 
-use details::{skip_counts, summarize, FileFacts};
+use details::{skip_counts, summarize, FileFacts, FileLines};
 pub use details::{
     CheckDetails, Entity, EntityBase, FamilySummary, FileCoverage, Gap, Summaries, SKIP_KEYS,
 };
@@ -353,8 +352,11 @@ impl Loaded {
                 .iter()
                 .map(|analyzed| analyzed.finding.clone())
                 .collect(),
-            rules::executable_lines_from_ir(&self.analysis.ir),
-            self.unanalyzed_lines,
+            FileLines {
+                executable_lines: self.analysis.executable_lines.clone(),
+                scanned_lines: self.analysis.scanned_lines,
+                unanalyzed_lines: self.unanalyzed_lines,
+            },
             !self.analysis.ir.damage.is_empty(),
         )
     }
@@ -629,8 +631,11 @@ fn unchanged_load(included: &IncludedEntry, found: CachedAnalysis) -> Load {
                     .into_iter()
                     .map(|analyzed| analyzed.finding)
                     .collect(),
-                hydrated.executable_lines,
-                hydrated.unanalyzed_lines,
+                FileLines {
+                    executable_lines: hydrated.executable_lines,
+                    scanned_lines: hydrated.scanned_lines,
+                    unanalyzed_lines: hydrated.unanalyzed_lines,
+                },
                 !hydrated.damage.is_empty(),
             )
         });
@@ -866,22 +871,7 @@ impl Sides<'_> {
 
         let mut coverage: Vec<(RepoPath, FileCoverage)> = changed_facts
             .iter()
-            .map(|facts| {
-                let file_gaps: Vec<Gap> = gaps
-                    .get(&facts.path)
-                    .map(|found| found.iter().copied().map(Gap::from).collect())
-                    .unwrap_or_default();
-                (
-                    facts.path.clone(),
-                    FileCoverage {
-                        path: facts.path.render(),
-                        analyzed_lines: facts.scanned_lines(),
-                        unanalyzed_lines: facts.unanalyzed_lines,
-                        complete: facts.unanalyzed_lines == 0 && file_gaps.is_empty(),
-                        gaps: file_gaps,
-                    },
-                )
-            })
+            .map(|facts| (facts.path.clone(), changed_file_coverage(facts, gaps)))
             .collect();
         coverage.extend(
             loads
@@ -1173,6 +1163,25 @@ impl Sides<'_> {
     }
 }
 
+/// One changed file's coverage entry: its stored scanned-line count,
+/// unanalyzed count, and mapped gaps.
+fn changed_file_coverage(
+    facts: &FileFacts,
+    gaps: &BTreeMap<RepoPath, Vec<MappedGap>>,
+) -> FileCoverage {
+    let file_gaps: Vec<Gap> = gaps
+        .get(&facts.path)
+        .map(|found| found.iter().copied().map(Gap::from).collect())
+        .unwrap_or_default();
+    FileCoverage {
+        path: facts.path.render(),
+        analyzed_lines: facts.scanned_lines(),
+        unanalyzed_lines: facts.unanalyzed_lines,
+        complete: facts.unanalyzed_lines == 0 && file_gaps.is_empty(),
+        gaps: file_gaps,
+    }
+}
+
 /// The changed candidate callables, sorted by (path, start line, name): each
 /// one new, or matched to a base callable whose identity or body differs. An
 /// ambiguous or unmatched callable has no base.
@@ -1234,6 +1243,7 @@ fn entities_of(base: &[Loaded], changed: &[Loaded], matched: &MatchOutput) -> Ve
 mod tests {
     use super::*;
     use crate::git::CODE_SNAPSHOT_UNAVAILABLE;
+    use crate::rules;
 
     #[test]
     fn test_unreadable_under_ceiling_changed_blob_maps_to_g101() {
@@ -1248,5 +1258,60 @@ mod tests {
             readable.expect("readable bytes pass through"),
             b"class Foo {}"
         );
+    }
+
+    #[test]
+    fn test_check_takes_scanned_lines_from_the_analysis_not_executable_lines() {
+        const STORED_ANALYSIS_LINES: usize = 1000;
+        const STORED_PAYLOAD_LINES: usize = 2000;
+        const MIN_CLONE_LINES: u32 = 10;
+        let source =
+            "class Foo {\n    int run() {\n        int a = 1;\n        return a;\n    }\n}\n";
+        let path = RepoPath::from_bytes(b"src/Foo.java".to_vec());
+        let mut analysis =
+            analyze_file(Path::new("src/Foo.java"), source.as_bytes()).expect("analyzes");
+        let derived = rules::executable_lines_from_ir(&analysis.ir).len();
+        assert!(derived > 0);
+        assert_ne!(derived, STORED_ANALYSIS_LINES);
+        assert_ne!(derived, STORED_PAYLOAD_LINES);
+
+        let payload = match CachedAnalysis::from_analysis(&analysis, source, MIN_CLONE_LINES) {
+            CachedAnalysis::Analyzed(mut payload) => {
+                payload.scanned_lines = STORED_PAYLOAD_LINES;
+                payload
+            }
+            CachedAnalysis::Unanalyzable(reason) => panic!("analyzed file cached as {reason:?}"),
+        };
+        analysis.scanned_lines = STORED_ANALYSIS_LINES;
+        let loaded = Loaded {
+            path: path.clone(),
+            bytes: source.as_bytes().to_vec(),
+            analysis,
+            unanalyzed_lines: 0,
+        };
+        let included = IncludedEntry {
+            path,
+            language: LanguageFamily::Java,
+            oid: None,
+            size: source.len() as u64,
+            too_large: false,
+            non_utf8_path: false,
+        };
+        let unchanged = match unchanged_load(&included, CachedAnalysis::Analyzed(payload)) {
+            Load::Unchanged(_, facts) => facts,
+            _ => panic!("an analyzed payload loads as an unchanged file"),
+        };
+
+        let changed = loaded.facts();
+        assert_eq!(changed.scanned_lines(), STORED_ANALYSIS_LINES);
+        assert_eq!(unchanged.scanned_lines(), STORED_PAYLOAD_LINES);
+        assert_eq!(
+            changed_file_coverage(&changed, &BTreeMap::new()).analyzed_lines,
+            STORED_ANALYSIS_LINES
+        );
+        let summaries = summarize("changed", vec![&changed], &[], &[]);
+        assert_eq!(summaries.overall.scanned_lines, STORED_ANALYSIS_LINES);
+        let summaries = summarize("changed", vec![&unchanged], &[], &[]);
+        assert_eq!(summaries.overall.scanned_lines, STORED_PAYLOAD_LINES);
     }
 }

@@ -244,15 +244,15 @@ fn base_span_of(
         .min()
 }
 
-/// Every parse-damage span of `candidate`, mapped through the line map of
+/// Every parse-damage span of `candidate` (the analysis's gap inventory), mapped through the line map of
 /// its base file, sorted by (candidate start, candidate end) with exact
 /// duplicates collapsed.
 fn file_gaps(
     base: Option<&FindingFile<'_>>,
     candidate: &FindingFile<'_>,
 ) -> Result<Vec<MappedGap>, GitError> {
-    let ir = &candidate.analysis.ir;
-    if ir.damage.is_empty() {
+    let inventory = &candidate.analysis.gaps;
+    if inventory.is_empty() {
         return Ok(Vec::new());
     }
     let line_map = base
@@ -264,11 +264,10 @@ fn file_gaps(
         .flat_map(|map| map.base_to_candidate.iter())
         .map(|(&base_line, &candidate_line)| (candidate_line, base_line))
         .collect();
-    let mut gaps: Vec<MappedGap> = ir
-        .damage
+    let mut gaps: Vec<MappedGap> = inventory
         .iter()
-        .map(|damage| {
-            let range = line_range(damage.span);
+        .map(|gap| {
+            let range = (gap.start_line, gap.end_line);
             MappedGap {
                 base: base.and_then(|base| base_span_of(base, &candidate_to_base, range)),
                 candidate: range,
@@ -433,7 +432,11 @@ pub fn evaluate_damage(
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
+    use crate::analysis::analyze_file;
+    use crate::model::LineRange;
 
     #[test]
     fn unmapped_pair_is_not_still_measured() {
@@ -463,5 +466,34 @@ mod tests {
         assert!(index.overlaps((5, 6)));
         assert!(index.overlaps((10, 12)));
         assert!(!index.overlaps((11, 12)));
+    }
+
+    #[test]
+    fn test_file_gaps_take_candidate_ranges_from_the_analysis_inventory() {
+        const INVENTORY_LINE: usize = 7;
+        let source = "class Outer {\n    int ok() {\n        return 1;\n    }\n    int broken( {\n        int y = ;\n    }\n}\n";
+        let mut analysis = analyze_file(Path::new("A.java"), source.as_bytes()).expect("analyzes");
+        let walked: Vec<(usize, usize)> = analysis
+            .ir
+            .damage
+            .iter()
+            .map(|damage| line_range(damage.span))
+            .collect();
+        assert!(!walked.is_empty());
+        assert!(!walked.contains(&(INVENTORY_LINE, INVENTORY_LINE)));
+        analysis.gaps = vec![LineRange {
+            start_line: INVENTORY_LINE,
+            end_line: INVENTORY_LINE,
+        }];
+        let candidate = FindingFile {
+            path: RepoPath::from_bytes(b"A.java".to_vec()),
+            source: source.as_bytes(),
+            analysis: &analysis,
+        };
+
+        let gaps = file_gaps(None, &candidate).expect("gaps");
+
+        let ranges: Vec<(usize, usize)> = gaps.iter().map(|gap| gap.candidate).collect();
+        assert_eq!(ranges, vec![(INVENTORY_LINE, INVENTORY_LINE)]);
     }
 }

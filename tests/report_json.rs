@@ -486,6 +486,19 @@ fn test_unparsed_file_makes_its_family_incomplete() {
     assert_eq!(java["complete"], true, "{java}");
 }
 
+/// Restores `0o755` on a path when dropped, panic included, so a failing
+/// assertion cannot leave a `chmod 000` directory the `TempDir` cannot remove.
+#[cfg(unix)]
+struct RestorePermissions(PathBuf);
+
+#[cfg(unix)]
+impl Drop for RestorePermissions {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o755));
+    }
+}
+
 /// D3': a discovery-time analysis failure (an unreadable path) makes `overall`
 /// and every family incomplete, whatever the skipped path's suffix: the walk
 /// records the path before it knows what the directory holds.
@@ -505,14 +518,14 @@ fn test_unreadable_directory_makes_overall_incomplete() {
         fs::create_dir(&locked).expect("create locked dir");
         fs::write(locked.join("Lost.java"), "class Lost {}\n").expect("write Lost.java");
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).expect("chmod 000");
+        let restore = RestorePermissions(locked.clone());
 
         if fs::read_dir(&locked).is_ok() {
-            fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).expect("restore");
             eprintln!("skipping {locked_name}: chmod 000 does not block this user (root?)");
             continue;
         }
         let (_out, output) = run_scan(dir.path(), |_| {});
-        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).expect("restore");
+        drop(restore);
 
         let value = read_report(&output);
         assert_eq!(value["incomplete"], true, "{locked_name}");
@@ -1374,6 +1387,51 @@ fn test_scan_snapshot_id_skips_ignored_untracked_entries() {
     // (c) An untracked, non-ignored file moves the ID.
     fs::write(root.join("new.java"), "public class N {}\n").expect("write new.java");
     assert_ne!(scan_id(root), after_tracked, "an untracked file counts");
+}
+
+/// D22: `.git/info/exclude` and a repo-local `core.excludesFile` are ignore
+/// sources too. Rejects a `.gitignore`-only walk, which would count the two
+/// excluded files and move the ID when they change.
+#[test]
+fn test_scan_snapshot_id_skips_info_exclude_and_core_excludes_file_entries() {
+    let repo_dir = tempfile::tempdir().expect("tempdir");
+    let root = repo_dir.path();
+    let excludes_dir = tempfile::tempdir().expect("tempdir");
+    let excludes_file = excludes_dir.path().join("excludes");
+    init_git_worktree(root);
+    fs::write(root.join("A.java"), "public class A {}\n").expect("write A.java");
+    git_commit_all(root, "initial commit");
+    fs::create_dir_all(root.join(".git/info")).expect("mkdir .git/info");
+    fs::write(root.join(".git/info/exclude"), "from_info.txt\n").expect("write info/exclude");
+    fs::write(&excludes_file, "from_global.txt\n").expect("write excludes file");
+    let excludes_path = excludes_file.to_str().expect("utf-8 path");
+    run_git(root, &["config", "core.excludesFile", excludes_path]);
+    fs::write(root.join("from_info.txt"), "one").expect("write from_info.txt");
+    fs::write(root.join("from_global.txt"), "one").expect("write from_global.txt");
+
+    let base = scan_id(root);
+
+    fs::write(root.join("from_info.txt"), "two").expect("rewrite from_info.txt");
+    fs::write(root.join("from_global.txt"), "two").expect("rewrite from_global.txt");
+    fs::write(root.join("new_info.txt"), "x").expect("write new_info.txt");
+    assert_ne!(scan_id(root), base, "control: a non-excluded file counts");
+    fs::remove_file(root.join("new_info.txt")).expect("remove new_info.txt");
+    assert_eq!(
+        scan_id(root),
+        base,
+        "entries matched by .git/info/exclude or core.excludesFile must not move the ID"
+    );
+
+    // Control: without the exclude entries the same two files count.
+    fs::write(root.join(".git/info/exclude"), "").expect("clear info/exclude");
+    let info_counted = scan_id(root);
+    assert_ne!(info_counted, base, "from_info.txt counts once not excluded");
+    fs::write(&excludes_file, "").expect("clear excludes file");
+    assert_ne!(
+        scan_id(root),
+        info_counted,
+        "from_global.txt counts once not excluded"
+    );
 }
 
 /// D22: an ignored untracked directory is pruned, never opened.

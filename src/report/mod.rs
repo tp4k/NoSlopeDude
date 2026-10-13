@@ -69,22 +69,25 @@ pub struct ReportVerbosity {
     /// The executable lines lowering pruned, which stay out of the
     /// denominator.
     pub unanalyzed_lines: usize,
-    /// Whether every file of this family was analyzed in full.
+    /// Whether every file of this family was analyzed in full: no pruned
+    /// line, no file lost to a parse failure, and no file lost to a
+    /// discovery-time analysis failure (`unreadable`).
     pub complete: bool,
     pub ratio: f64,
 }
 
 impl ReportVerbosity {
     /// `score` plus completeness: every executable line analyzed
-    /// (`unanalyzed_lines == 0`) and no file of the scope lost to a parse
-    /// failure (`parse_failed`). A total parse loss has no line count, so
-    /// the count alone cannot tell.
-    fn new(score: &VerbosityScore, parse_failed: bool) -> Self {
+    /// (`unanalyzed_lines == 0`) and no input lost (`lost_input`): neither a
+    /// file lost to a parse failure nor one lost to a discovery-time analysis
+    /// failure (`unreadable`). A lost file has no line count, so the count
+    /// alone cannot tell.
+    fn new(score: &VerbosityScore, lost_input: bool) -> Self {
         ReportVerbosity {
             flagged_lines: score.flagged_lines,
             scanned_lines: score.scanned_lines,
             unanalyzed_lines: score.unanalyzed_lines,
-            complete: score.unanalyzed_lines == 0 && !parse_failed,
+            complete: score.unanalyzed_lines == 0 && !lost_input,
             ratio: score.ratio,
         }
     }

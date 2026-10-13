@@ -394,6 +394,19 @@ fn test_date_cell_fails_when_git_status_fails() -> anyhow::Result<()> {
         "expected date_cell to fail when git status fails on a corrupt index, got success with stdout {:?}",
         String::from_utf8_lossy(&output.stdout)
     );
+
+    // The `ann=` guard in `date_cell` only matters under a command
+    // substitution, where errexit is cleared: without it the call prints
+    // `<day> ` and exits 0.
+    let sub_output = run_sourced(&format!(
+        "REPO_ROOT='{}'; cell=\"$(date_cell)\"",
+        repo.display()
+    ))?;
+    assert!(
+        !sub_output.status.success(),
+        "expected date_cell to fail on a corrupt index via command substitution, got success with stdout {:?}",
+        String::from_utf8_lossy(&sub_output.stdout)
+    );
     Ok(())
 }
 

@@ -465,3 +465,22 @@ fn test_payload_round_trip_keeps_unanalyzed_lines() {
         .expect("hydrates");
     assert_eq!(hydrated.unanalyzed_lines, 0);
 }
+
+#[test]
+fn test_payload_round_trip_keeps_scanned_lines() {
+    let damaged = include_str!("fixtures/salvage/Mixed.java");
+    let analysis = analyze("Mixed.java", damaged);
+    assert!(analysis.scanned_lines > 0);
+    let hydrated = CachedAnalysis::from_analysis(&analysis, damaged, MIN_LINES)
+        .hydrate(Path::new("Mixed.java"), LanguageFamily::Java)
+        .expect("hydrates");
+    assert_eq!(hydrated.scanned_lines, analysis.scanned_lines);
+
+    let clean = analyze("A.java", JAVA_SOURCE);
+    assert!(clean.scanned_lines > 0);
+    assert_ne!(clean.scanned_lines, analysis.scanned_lines);
+    let hydrated = CachedAnalysis::from_analysis(&clean, JAVA_SOURCE, MIN_LINES)
+        .hydrate(Path::new("A.java"), LanguageFamily::Java)
+        .expect("hydrates");
+    assert_eq!(hydrated.scanned_lines, clean.scanned_lines);
+}

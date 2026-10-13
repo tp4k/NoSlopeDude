@@ -13,7 +13,7 @@ use crate::identity::{CallableIdentity, OwnerDigest};
 use crate::ir::{CallableKind, DamageKind};
 use crate::metrics;
 use crate::model::{Callable, LanguageFamily, RuleFinding, RuleId};
-use crate::rules::{self, ALL_RULE_IDS};
+use crate::rules::ALL_RULE_IDS;
 
 const HEX_WIDTH: usize = 32;
 const HEX_RADIX: u32 = 16;
@@ -142,6 +142,7 @@ pub struct AnalyzedPayload {
     /// Lines the lowering left out of the measurement. No serde default: an
     /// entry written before this field existed is a miss, never a zero.
     pub unanalyzed_lines: usize,
+    pub scanned_lines: usize,
     pub clone_candidates: Vec<CachedCandidate>,
 }
 
@@ -254,6 +255,7 @@ pub struct Hydrated {
     pub damage: Vec<HydratedDamage>,
     pub executable_lines: Vec<usize>,
     pub unanalyzed_lines: usize,
+    pub scanned_lines: usize,
 }
 
 impl CachedAnalysis {
@@ -322,8 +324,9 @@ impl CachedAnalysis {
             damage,
             callables,
             findings,
-            executable_lines: rules::executable_lines_from_ir(&analysis.ir),
+            executable_lines: analysis.executable_lines.clone(),
             unanalyzed_lines: analysis.unanalyzed_lines,
+            scanned_lines: analysis.scanned_lines,
             clone_candidates,
         }))
     }
@@ -425,6 +428,7 @@ impl CachedAnalysis {
                 .collect(),
             executable_lines: payload.executable_lines.clone(),
             unanalyzed_lines: payload.unanalyzed_lines,
+            scanned_lines: payload.scanned_lines,
         })
     }
 

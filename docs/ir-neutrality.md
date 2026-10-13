@@ -255,7 +255,7 @@ present and still losing its own now-universally-suppressed
 in the clean corpus moved.
 
 **Capture**: `NSD_NEUTRALITY_CAPTURE=1 bash scripts/neutrality_gate.sh
---capture` (delegating to `cargo test --test neutrality`) re-captured
+--capture` [Superseded: the legacy `NSD_NEUTRALITY_CAPTURE` is now `NSD_NEUTRALITY_CAPTURE_CLEAN` / `NSD_NEUTRALITY_CAPTURE_MALFORMED`; see "Running the gate".] (delegating to `cargo test --test neutrality`) re-captured
 `clean.report.json` from `HEAD`. The resulting diff is bounded to exactly
 what the analysis above predicted: all three `skipped_files` entries
 (`JavaVarargsAnnotation.java`, `JsxUnterminatedEntity.tsx`,
@@ -266,7 +266,7 @@ what the analysis above predicted: all three `skipped_files` entries
 from that; `erosion` itself does not move on any of the three aggregates,
 and `incomplete` stays `true` on both sides. The same capture invocation
 also rewrites `malformed.report.json` unconditionally (both corpus tests
-share the one `NSD_NEUTRALITY_CAPTURE` env var); that file's would-be
+share the one `NSD_NEUTRALITY_CAPTURE` env var [Superseded: that variable is now `NSD_NEUTRALITY_CAPTURE_CLEAN` / `NSD_NEUTRALITY_CAPTURE_MALFORMED`; see "Running the gate".]); that file's would-be
 change was reverted byte-for-byte before committing, since it was not
 authorized and this stream's own `DECLARED_DELTAS` mechanism already
 tolerates the same divergence there without a baseline change — see the
@@ -294,7 +294,7 @@ file is no longer a whole-file skip; no new finding: `safe` trips none of
 the six rules; no `top25` change).
 
 **Capture**: `NSD_NEUTRALITY_CAPTURE=1 cargo test --test neutrality
-test_clean_corpus_report_is_byte_identical_to_the_pre_ir_baseline`
+test_clean_corpus_report_is_byte_identical_to_the_pre_ir_baseline` [Superseded: the legacy `NSD_NEUTRALITY_CAPTURE` is now `NSD_NEUTRALITY_CAPTURE_CLEAN` / `NSD_NEUTRALITY_CAPTURE_MALFORMED`; see "Running the gate".]
 re-captured `clean.report.json` from `HEAD`; `git status --short`
 afterwards showed exactly that one golden file and `tests/neutrality.rs`
 itself changed (`malformed.report.json` untouched, since this narrower
@@ -501,7 +501,7 @@ moved pointers are fully explained (below) rather than merely observed.
 
 **`clean.report.json` — recaptured. Exactly four JSON pointers changed**
 (`bash scripts/neutrality_gate.sh --capture`, i.e.
-`NSD_NEUTRALITY_CAPTURE=1 cargo test --test neutrality`, then a full
+`NSD_NEUTRALITY_CAPTURE=1 cargo test --test neutrality` [Superseded: the legacy `NSD_NEUTRALITY_CAPTURE` is now `NSD_NEUTRALITY_CAPTURE_CLEAN` / `NSD_NEUTRALITY_CAPTURE_MALFORMED`; see "Running the gate".], then a full
 before/after pointer diff of the committed file against a
 `3dd9ae2`-built control's baseline to confirm nothing else moved):
 
@@ -545,7 +545,7 @@ real callables.
 
 **`malformed.report.json` — unchanged, deliberately not recaptured.**
 Running the capture command touches both baseline files at once (they
-share one `NSD_NEUTRALITY_CAPTURE=1 cargo test --test neutrality`
+share one `NSD_NEUTRALITY_CAPTURE=1 cargo test --test neutrality` [Superseded: the legacy `NSD_NEUTRALITY_CAPTURE` is now `NSD_NEUTRALITY_CAPTURE_CLEAN` / `NSD_NEUTRALITY_CAPTURE_MALFORMED`; see "Running the gate".]
 invocation), and doing so once did overwrite this file too — that
 recapture was reverted (`git checkout -- tests/golden/neutrality/
 malformed.report.json`) after confirming the observed delta
@@ -573,7 +573,7 @@ regression, provided the moved pointers are fully explained (below)
 rather than merely observed.
 
 **`clean.report.json` — recaptured.** Exactly 66 JSON pointers changed
-(`NSD_NEUTRALITY_CAPTURE=1 cargo test --test neutrality`, then `git diff`
+(`NSD_NEUTRALITY_CAPTURE=1 cargo test --test neutrality` [Superseded: the legacy `NSD_NEUTRALITY_CAPTURE` is now `NSD_NEUTRALITY_CAPTURE_CLEAN` / `NSD_NEUTRALITY_CAPTURE_MALFORMED`; see "Running the gate".], then `git diff`
 grepped for every changed key name to confirm only three keys ever
 appear: `end_line`, `excerpt`, `link` — 66 additions paired with 66
 deletions, i.e. 22 of the corpus's 25 top-25 entries, three fields each).

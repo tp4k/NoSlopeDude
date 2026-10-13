@@ -131,10 +131,20 @@ pub(super) struct FileFacts {
     pub(super) language: LanguageFamily,
     /// The distinct executable lines that survived lowering.
     pub(super) executable_lines: Vec<usize>,
+    /// The distinct executable lines that survived lowering, as the
+    /// analysis counted them.
+    scanned_lines: usize,
     pub(super) unanalyzed_lines: usize,
     pub(super) damaged: bool,
     callables: Vec<Callable>,
     findings: Vec<RuleFinding>,
+}
+
+/// The line counts of one analyzed file, as the analysis stored them.
+pub(super) struct FileLines {
+    pub(super) executable_lines: Vec<usize>,
+    pub(super) scanned_lines: usize,
+    pub(super) unanalyzed_lines: usize,
 }
 
 impl FileFacts {
@@ -143,8 +153,7 @@ impl FileFacts {
         language: LanguageFamily,
         callables: Vec<Callable>,
         mut findings: Vec<RuleFinding>,
-        executable_lines: Vec<usize>,
-        unanalyzed_lines: usize,
+        lines: FileLines,
         damaged: bool,
     ) -> Self {
         // One key for the file's lines and its findings, whatever spelling
@@ -156,8 +165,9 @@ impl FileFacts {
         FileFacts {
             path,
             language,
-            executable_lines,
-            unanalyzed_lines,
+            executable_lines: lines.executable_lines,
+            scanned_lines: lines.scanned_lines,
+            unanalyzed_lines: lines.unanalyzed_lines,
             damaged,
             callables,
             findings,
@@ -165,7 +175,7 @@ impl FileFacts {
     }
 
     pub(super) fn scanned_lines(&self) -> usize {
-        self.executable_lines.len()
+        self.scanned_lines
     }
 }
 
