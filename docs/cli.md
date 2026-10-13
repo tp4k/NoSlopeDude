@@ -25,9 +25,10 @@ clone of the default branch) and reports on `.java`, `.js`, `.jsx`, `.mjs`,
 
 Applied regardless of `.gitignore`, unless overridden by scanning a path that itself matches none of them:
 
-- **Dependencies and build output**: `node_modules/`, `target/`, `build/`, `dist/`, `out/`, `bin/`, `.gradle/`, `.mvn/`, `vendor/`, `coverage/`, `.next/`, `.nuxt/`
+- **Dependencies and build output**: `node_modules/`, `target/`, `build/`, `dist/`, `out/`, `bin/`, `.gradle/`, `.mvn/`, `vendor/`, `coverage/`, `.next/`, `.nuxt/`, `**/META-INF/resources/webjars/**` (WebJar resources, kept even with `--include-tests`)
 - **Generated code**: `**/generated/**`, `**/gen/**`, `*.min.js`, `*.bundle.js`, `*_pb.js`, `*.d.ts`
-- **Tests** (unless `--include-tests`): `**/test/**`, `**/tests/**`, `**/__tests__/**`, `**/__mocks__/**`, `**/testFixtures/**`, `**/src/test/**`, `*Test.java`, `*Tests.java`, `*TestCase.java`, `*.test.*`, `*.spec.*`
+- **Tests** (unless `--include-tests`): `**/test/**`, `**/tests/**`, `**/__tests__/**`, `**/__mocks__/**`, `**/testFixtures/**`, `**/src/test/**`, `*Test.java`, `*Tests.java`, `*TestCase.java`, `*.test.*`, `*.spec.*`, `**/fixture/**`, `**/fixtures/**`, `**/__fixtures__/**`, `**/e2e/**`, `**/qa/**`, `*.e2e-spec.*`
+- **Nested checkouts**: a directory below the scan root that directly contains its own `.git` is not descended and is listed as one `nested_checkout` skip, unless a `.gitignore`, a default, test or user exclusion already covers the paths below it (those files keep their own reason). `--include-tests` therefore turns a `fixtures/` checkout from `test` rows into one `nested_checkout` row.
 
 A scanned folder's own `.gitignore` is always respected, even when the folder is not itself a git repository.
 

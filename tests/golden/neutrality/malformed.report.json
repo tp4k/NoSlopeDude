@@ -61,6 +61,7 @@
     "dependency_or_build_output": 0,
     "generated_code": 0,
     "gitignore": 0,
+    "nested_checkout": 0,
     "parse_grammar_setup": 0,
     "parse_syntax_error": 3,
     "parse_unreadable": 0,

@@ -490,6 +490,26 @@ the variables. `PRE_IR_SHA` and `scripts/neutrality_gate.sh` are untouched.
 The malformed baseline's `callables` is `[]` (every fixture's one callable is
 damaged); `DECLARED_DELTAS` stays empty.
 
+## M7-1: baselines moved by the `nested_checkout` skip key
+
+`scan`'s `skipped` object gained an 11th key, `nested_checkout` (sorted between
+`gitignore` and `parse_grammar_setup`), so every scan report carries
+`"nested_checkout": 0` for a corpus with no nested checkout. WS-3 also added
+the WebJar glob and the fixture, `e2e` and QA test globs; none matches a path
+below `tests/fixtures/` as the harness copies it (no `fixture`, `fixtures`,
+`__fixtures__`, `e2e`, `qa` or `webjars` component, no `.e2e-spec.` name), so
+no file moved between discovered and skipped.
+
+The semantic Proof B ran **before** recapturing:
+`tests/neutrality.rs::test_previous_baselines_differ_only_by_enumerated_format_deltas`
+passed against the old baselines, and the byte-identity tests failed only on
+the one added pointer `/skipped/nested_checkout`. Both baselines were then
+recaptured with `NSD_NEUTRALITY_CAPTURE_CLEAN=1 NSD_NEUTRALITY_CAPTURE_MALFORMED=1
+cargo test --locked --test neutrality`; `git diff` of `tests/golden/neutrality/`
+shows exactly one added line per file, `"nested_checkout": 0,`, and
+`cargo test --locked --test neutrality` passes without the variables. No
+measurement moved.
+
 ## M0c-10: baselines moved by the Java grammar swap
 
 The Java grammar swap (`tree-sitter-java` 0.23.5 →

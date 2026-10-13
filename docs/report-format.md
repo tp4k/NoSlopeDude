@@ -29,7 +29,7 @@ the raw name.
   "result_scope": "scan",
   "snapshots": { "scan": "blake3:<32 hex>", "unavailable_reason": null },
   "fingerprints": { "configuration": "blake3:<32 hex>", "measurement": "blake3:<32 hex>" },
-  "skipped": { "dependency_or_build_output": 0, "generated_code": 0, "gitignore": 0, "parse_grammar_setup": 0, "parse_syntax_error": 0, "parse_unreadable": 0, "parse_unsupported_extension": 0, "test": 0, "unreadable": 0, "user_exclude": 0 },
+  "skipped": { "dependency_or_build_output": 0, "generated_code": 0, "gitignore": 0, "nested_checkout": 0, "parse_grammar_setup": 0, "parse_syntax_error": 0, "parse_unreadable": 0, "parse_unsupported_extension": 0, "test": 0, "unreadable": 0, "user_exclude": 0 },
   "callables": [
     { "path": "src/Sample.java", "name": "run", "start_line": 3, "end_line": 9, "cc": 2, "sloc": 6, "mass": 4.47213595499958 }
   ],
@@ -147,7 +147,7 @@ repository-configured filter driver would execute. For a remote
   `--min-clone-lines`; `fingerprints.configuration` digests `--include-tests`,
   the `--exclude` globs in order and `--min-clone-lines` (family
   `nsd-scan-config-v1`). Neither holds a path.
-- `skipped` counts `skipped_files` by reason, every one of the ten possible
+- `skipped` counts `skipped_files` by reason, every one of the eleven possible
   reasons present, zeros included. `skipped_files` stays the per-file list.
 - `callables` is every measured callable, uncapped (`top25` stays the capped
   ranking), sorted by path (as a string), `start_line`, `end_line`, `name`,
@@ -160,10 +160,16 @@ The report is byte-identical across repeated runs, checkout roots and
 ### `skipped_files.reason`
 
 One of `SkipReason`'s labels (`gitignore`, `dependency_or_build_output`,
-`generated_code`, `test`, `user_exclude`, `unreadable` — a discovery-time
-skip, D16) or `"parse_<ParseFailureReason label>"` (a parse failure, D18,
+`generated_code`, `test`, `user_exclude`, `nested_checkout`, `unreadable` — a
+discovery-time skip, D16) or `"parse_<ParseFailureReason label>"` (a parse failure, D18,
 e.g. `parse_syntax_error`) — the `parse_` prefix is how the two kinds of
 skip are told apart in one merged list.
+
+A `nested_checkout` row (M7-1) names a directory, not a file: a directory
+below the scan root that directly contains its own `.git` (a directory, a file
+or a symlink) and that no `.gitignore`, default, test or user exclusion
+already covers. Its files are neither discovered nor listed. It is a policy
+exclusion and never makes a scan `incomplete`.
 
 A `parse_syntax_error` row is the one exception to "contributes nothing":
 the file salvage-parses (WS-6), so only its damaged entities are excluded

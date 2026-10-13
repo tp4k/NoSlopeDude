@@ -1978,6 +1978,7 @@
     "dependency_or_build_output": 4,
     "generated_code": 3,
     "gitignore": 1,
+    "nested_checkout": 0,
     "parse_grammar_setup": 0,
     "parse_syntax_error": 4,
     "parse_unreadable": 0,
