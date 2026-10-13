@@ -15,7 +15,7 @@ use rayon::prelude::*;
 use crate::analysis::{analyze_file, FileAnalysis, UnanalyzableReason};
 use crate::cache::{Cache, CacheError, CacheKey, CachedAnalysis, CachedReason};
 use crate::clones::{enumerate_candidates, maximal_groups, Candidate as CloneRun};
-use crate::config::{Config, PolicyConfig, Severity};
+use crate::config::{Config, OutputConfig, PolicyConfig, Severity};
 use crate::git::diff::{
     diff_commit_to_commit, diff_commit_to_index, diff_commit_to_worktree, Change,
 };
@@ -117,6 +117,11 @@ pub struct CheckOutcome {
     pub diagnostics: Vec<CheckDiagnostic>,
     /// `policy::exit::exit_status` over `diagnostics`.
     pub exit_status: u8,
+    /// The trusted policy `exit_status` was computed under (the defaults
+    /// when no configuration resolved).
+    pub policy: PolicyConfig,
+    /// The trusted output caps (the defaults when no configuration resolved).
+    pub output: OutputConfig,
     /// Exit-neutral notes about the run, outside `diagnostics`: at most one,
     /// raised when the analysis cache failed and the run continued uncached.
     pub warnings: Vec<String>,
@@ -128,10 +133,11 @@ pub struct CheckOutcome {
 /// Runs one check. Never fails: an internal error is an `NSD-G101` (or the
 /// `resolve` error's own code) in the outcome.
 pub fn run_check(request: &CheckRequest<'_>) -> CheckOutcome {
-    let (diagnostics, policy, warnings, details) = match execute(request) {
+    let (diagnostics, trusted, warnings, details) = match execute(request) {
         Ok(checked) => checked,
-        Err(diagnostics) => (diagnostics, Config::default().policy, Vec::new(), None),
+        Err(diagnostics) => (diagnostics, Config::default(), Vec::new(), None),
     };
+    let Config { policy, output, .. } = trusted;
     let exit_status = exit_status(
         diagnostics.iter().map(CheckDiagnostic::code),
         &policy,
@@ -140,6 +146,8 @@ pub fn run_check(request: &CheckRequest<'_>) -> CheckOutcome {
     CheckOutcome {
         diagnostics,
         exit_status,
+        policy,
+        output,
         warnings,
         details,
     }
@@ -242,7 +250,7 @@ fn open_sides(
 
 type Checked = (
     Vec<CheckDiagnostic>,
-    PolicyConfig,
+    Config,
     Vec<String>,
     Option<CheckDetails>,
 );
@@ -300,7 +308,7 @@ fn execute(request: &CheckRequest<'_>) -> Result<Checked, Vec<CheckDiagnostic>> 
     });
     Ok((
         diagnostics,
-        resolution.config.policy,
+        resolution.config,
         session.into_warnings(),
         details,
     ))

@@ -9,8 +9,8 @@ use git2::Repository;
 
 use nsd::check::{run_check, CheckDetails, CheckDiagnostic, CheckMode, CheckRequest};
 use nsd::cli::{CheckArgs, Cli, Command, Format, ScanArgs};
-use nsd::config::{Config, CODE_INVALID_CONFIG};
-use nsd::format::{escape_terminal, render_check_json, render_terminal};
+use nsd::config::{Config, OutputConfig, PolicyConfig, CODE_INVALID_CONFIG};
+use nsd::format::{escape_terminal, render_agent, render_check_json, render_terminal};
 use nsd::model::ScanSettings;
 use nsd::pipeline;
 use nsd::policy::exit::exit_status;
@@ -18,6 +18,16 @@ use nsd::report;
 
 /// A check that could not run to a verdict exits with the error status.
 const CHECK_ERROR_EXIT: u8 = 2;
+
+/// `check` has no flag for it yet, so every invocation denies new suppressions.
+const ALLOW_NEW_SUPPRESSIONS: bool = false;
+
+/// What the trusted configuration (the defaults when none resolved) decides
+/// about the listing.
+struct Trusted {
+    policy: PolicyConfig,
+    output: OutputConfig,
+}
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -59,7 +69,7 @@ fn run_check_command(args: &CheckArgs) -> u8 {
 
 fn check_command(args: &CheckArgs) -> anyhow::Result<u8> {
     let repository = std::env::current_dir().context("cannot read the current directory")?;
-    let (diagnostics, status, details) = match &args.config {
+    let (diagnostics, status, details, trusted) = match &args.config {
         Some(config) if config_is_inside_checkout(&repository, config)? => refused_config(),
         _ => {
             let mode = match &args.base {
@@ -73,16 +83,31 @@ fn check_command(args: &CheckArgs) -> anyhow::Result<u8> {
                 repository: &repository,
                 mode,
                 config_path: args.config.as_deref(),
-                allow_new_suppressions: false,
+                allow_new_suppressions: ALLOW_NEW_SUPPRESSIONS,
             });
             for warning in &outcome.warnings {
                 eprintln!("warning: {}", escape_terminal(warning));
             }
-            (outcome.diagnostics, outcome.exit_status, outcome.details)
+            let trusted = Trusted {
+                policy: outcome.policy,
+                output: outcome.output,
+            };
+            (
+                outcome.diagnostics,
+                outcome.exit_status,
+                outcome.details,
+                trusted,
+            )
         }
     };
     let rendered = match args.format {
-        Format::Terminal => render_terminal(&diagnostics, 50),
+        Format::Terminal => render_terminal(&diagnostics, trusted.output.max_terminal_diagnostics),
+        Format::Agent => render_agent(
+            &diagnostics,
+            &trusted.policy,
+            ALLOW_NEW_SUPPRESSIONS,
+            trusted.output.max_agent_diagnostics,
+        ),
         Format::Json => {
             let repository_forms = repository_paths(&repository);
             let config_forms: Vec<PathBuf> = args
@@ -110,17 +135,18 @@ fn check_command(args: &CheckArgs) -> anyhow::Result<u8> {
 
 /// The refusal names no path: the one given may be absolute, and the listing
 /// never prints the checkout's location.
-fn refused_config() -> (Vec<CheckDiagnostic>, u8, Option<CheckDetails>) {
+fn refused_config() -> (Vec<CheckDiagnostic>, u8, Option<CheckDetails>, Trusted) {
     let diagnostics = vec![CheckDiagnostic::Failure {
         code: CODE_INVALID_CONFIG,
         message: "trusted config is inside the candidate checkout".to_string(),
     }];
+    let Config { policy, output, .. } = Config::default();
     let status = exit_status(
         diagnostics.iter().map(CheckDiagnostic::code),
-        &Config::default().policy,
-        false,
+        &policy,
+        ALLOW_NEW_SUPPRESSIONS,
     );
-    (diagnostics, status, None)
+    (diagnostics, status, None, Trusted { policy, output })
 }
 
 /// Every spelling of the checkout a failure message could name: the working

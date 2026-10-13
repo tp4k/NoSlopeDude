@@ -24,10 +24,12 @@ pub enum Command {
 /// How `check` prints its diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Format {
-    /// One escaped line per diagnostic.
+    /// One escaped line per diagnostic, capped by `output.max_terminal_diagnostics`.
     Terminal,
     /// One canonical JSON document.
     Json,
+    /// One escaped line per violation, capped by `output.max_agent_diagnostics`.
+    Agent,
 }
 
 #[derive(Debug, Parser, Clone, PartialEq, Eq)]
