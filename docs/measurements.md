@@ -902,3 +902,4 @@ C6 were each individually reverted for failing it, so this cumulative
 number is consistent with — but does not re-derive — those per-item
 verdicts. Both scratch worktrees (`ws14-A`, `ws14-B`) were removed via
 `git worktree remove --force` after the last pair.
+| 2026-10-13 (nsd@bce31e41f88aa9b6021ad74e80a515472d95ebb4) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 583701 | 3.37s | 1821.20 MB | true | 7715 |
