@@ -924,6 +924,32 @@ fn test_check_format_agent_is_accepted_and_omits_non_violations() {
 }
 
 #[test]
+fn test_check_format_agent_follows_the_trusted_policy() {
+    let from_base = config_edit_and_regression(WARN_E101);
+
+    let output = from_base.nsd(&["check", "--staged", "--format", "agent"]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_PASS));
+    assert_eq!(stdout(&output), "");
+
+    let supplied = Fixture::staged_regression();
+    let outside = TempDir::new().expect("create a directory outside the checkout");
+    let config = write_config(outside.path(), "trusted.yml", WARN_E101);
+
+    let output = supplied.nsd(&[
+        "check",
+        "--staged",
+        "--format",
+        "agent",
+        "--config",
+        path_str(&config),
+    ]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_PASS));
+    assert_eq!(stdout(&output), "");
+}
+
+#[test]
 fn test_candidate_config_cannot_change_its_own_output_cap() {
     let fx = Fixture::staged_regression();
     fx.stage(
