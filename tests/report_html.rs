@@ -442,3 +442,153 @@ fn test_two_locations_in_one_file_render_identical_excerpts_to_single_reads() {
         );
     }
 }
+
+// M6-4: each excerpt is capped at 20 lines / 4 KiB with an explicit marker.
+
+const MARKER_WORD: &str = "truncated";
+
+/// One Java class per file; its single method occupies lines 2..=1+`lines`.
+fn java_method_source(class: &str, lines: usize) -> String {
+    let mut text = format!("class {class} {{\n    void run() {{\n");
+    for index in 0..lines - 2 {
+        text.push_str(&format!("        count += {index};\n"));
+    }
+    text.push_str("    }\n}\n");
+    text
+}
+
+fn scan_sources(
+    files: &[(&str, String)],
+) -> (tempfile::TempDir, tempfile::TempDir, PipelineOutput) {
+    let root = tempfile::tempdir().expect("tempdir");
+    fs::create_dir_all(root.path().join("src")).expect("src dir");
+    for (name, text) in files {
+        fs::write(root.path().join("src").join(name), text).expect("write source");
+    }
+    let (output_dir, output) = run_scan(root.path(), |_| {});
+    (root, output_dir, output)
+}
+
+/// The top-25 `<pre>` text of `path`'s span, and what follows it up to the
+/// end of its cell (the marker, if any).
+fn top25_excerpt(html: &str, path: &str, start: usize, end: usize) -> (String, String) {
+    let section = html.split("id=\"top25\"").nth(1).expect("top25 section");
+    let needle = format!("{path}#L{start}-L{end}<pre>");
+    let after_needle = section
+        .split(&needle)
+        .nth(1)
+        .unwrap_or_else(|| panic!("no top25 location {needle}"));
+    let (pre, rest) = after_needle.split_once("</pre>").expect("closing pre");
+    let marker = rest.split("</td>").next().expect("cell end");
+    (pre.to_string(), marker.to_string())
+}
+
+fn first_lines(text: &str, count: usize) -> String {
+    text.lines()
+        .skip(1)
+        .take(count)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn test_excerpt_of_exactly_twenty_lines_is_not_truncated() {
+    let source = java_method_source("F20", 20);
+    let (_root, _out, output) = scan_sources(&[("F20.java", source.clone())]);
+    let (pre, marker) = top25_excerpt(&written_html(&output), "src/F20.java", 2, 21);
+    assert_eq!(pre, first_lines(&source, 20));
+    assert!(
+        !marker.contains(MARKER_WORD),
+        "a 20-line excerpt got a marker: {marker}"
+    );
+}
+
+#[test]
+fn test_excerpt_over_twenty_lines_keeps_the_first_twenty_and_marks_truncation() {
+    let source21 = java_method_source("F21", 21);
+    let source57 = java_method_source("F57", 57);
+    let (_root, _out, output) = scan_sources(&[
+        ("F21.java", source21.clone()),
+        ("F57.java", source57.clone()),
+    ]);
+    let html = written_html(&output);
+    for (path, source, span_lines) in [
+        ("src/F21.java", &source21, 21),
+        ("src/F57.java", &source57, 57),
+    ] {
+        let (pre, marker) = top25_excerpt(&html, path, 2, 1 + span_lines);
+        assert_eq!(pre, first_lines(source, 20), "{path}");
+        assert!(
+            marker.contains(MARKER_WORD),
+            "{path}: no marker in {marker}"
+        );
+        assert!(
+            marker.contains(&span_lines.to_string()),
+            "{path}: marker should name {span_lines} lines: {marker}"
+        );
+    }
+}
+
+#[test]
+fn test_excerpt_over_four_kib_is_cut_on_a_char_boundary_and_marked() {
+    // Every `é` starts at an odd byte offset of the excerpt, so byte 4096
+    // falls inside a character; the longest valid prefix is 4095 bytes.
+    let filler = "é".repeat(2200);
+    let source =
+        format!("class Big {{\n    void run() {{\n        String s = \"{filler}\";\n    }}\n}}\n");
+    let (_root, _out, output) = scan_sources(&[("Big.java", source.clone())]);
+    let (pre, marker) = top25_excerpt(&written_html(&output), "src/Big.java", 2, 4);
+    let full = first_lines(&source, 3);
+    assert_eq!(pre.len(), 4095, "cut length in bytes");
+    assert!(
+        full.starts_with(&pre),
+        "the cut must be a prefix of the span"
+    );
+    assert!(marker.contains(MARKER_WORD), "no marker in {marker}");
+    assert!(marker.contains('3'), "marker should name 3 lines: {marker}");
+}
+
+#[test]
+fn test_excerpt_of_exactly_4096_bytes_is_not_truncated() {
+    // Raw bytes are exactly 4096; the HTML-escaped form is far longer, so a
+    // cap applied after escaping would truncate it.
+    let head = "    void run() {";
+    let tail = "    }";
+    let middle_prefix = "        String s = \"";
+    let middle_suffix = "\";";
+    let fixed = head.len() + tail.len() + middle_prefix.len() + middle_suffix.len() + 2;
+    let filler = "<".repeat(4096 - fixed);
+    let source =
+        format!("class Edge {{\n{head}\n{middle_prefix}{filler}{middle_suffix}\n{tail}\n}}\n");
+    let excerpt = first_lines(&source, 3);
+    assert_eq!(excerpt.len(), 4096, "fixture must sit exactly on the cap");
+    let (_root, _out, output) = scan_sources(&[("Edge.java", source)]);
+    let (pre, marker) = top25_excerpt(&written_html(&output), "src/Edge.java", 2, 4);
+    assert_eq!(pre, excerpt.replace('<', "&lt;").replace('"', "&quot;"));
+    assert!(
+        !marker.contains(MARKER_WORD),
+        "a 4096-byte excerpt got a marker: {marker}"
+    );
+}
+
+#[test]
+fn test_truncation_marker_appears_only_on_truncated_excerpts() {
+    let (_root, _out, output) = scan_sources(&[
+        ("A20.java", java_method_source("A20", 20)),
+        ("B21.java", java_method_source("B21", 21)),
+        ("C30.java", java_method_source("C30", 30)),
+    ]);
+    let report = &output.report;
+    let spans = report
+        .findings
+        .iter()
+        .map(|finding| &finding.location)
+        .chain(report.duplicates.iter().flat_map(|group| &group.locations))
+        .chain(report.top25.iter().map(|callable| &callable.location));
+    let truncated = spans
+        .filter(|location| location.end_line - location.start_line + 1 > 20)
+        .count();
+    assert!(truncated >= 2, "fixture should truncate at least two spans");
+    let html = written_html(&output);
+    assert_eq!(html.matches(MARKER_WORD).count(), truncated);
+}
