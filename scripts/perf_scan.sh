@@ -138,6 +138,13 @@ date_cell() {
   printf '%s %s' "$day" "$ann"
 }
 
+# build_plain_tree <fixture root> <dest dir>
+# Not implemented yet (scaffold).
+build_plain_tree() {
+  echo "error: build_plain_tree not implemented" >&2
+  return 1
+}
+
 main() {
   local fixture_root="${1:-${TMPDIR:-/tmp}/nsd-perf-fixture}"
   local spring_dir="$fixture_root/spring-framework"
