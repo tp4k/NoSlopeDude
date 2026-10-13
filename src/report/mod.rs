@@ -121,6 +121,10 @@ pub struct SourceLocation {
     /// Read for the HTML rendering only; `report.json` carries no excerpt.
     #[serde(skip_serializing)]
     pub excerpt: String,
+    /// Whether `excerpt` was cut by the line or byte cap (M6-4); the HTML
+    /// then adds a marker. Not published in `report.json`.
+    #[serde(skip_serializing)]
+    pub truncated: bool,
     pub link: String,
     pub is_remote_link: bool,
 }
@@ -550,7 +554,7 @@ fn build_location(
     end_line: usize,
     excerpt_cache: &mut ExcerptCache,
 ) -> SourceLocation {
-    let excerpt = read_excerpt(
+    let (excerpt, truncated) = read_excerpt(
         excerpt_cache,
         input.root,
         relative_path,
@@ -572,10 +576,15 @@ fn build_location(
         start_line,
         end_line,
         excerpt,
+        truncated,
         link,
         is_remote_link,
     }
 }
+
+/// M6-4: the per-excerpt caps.
+const EXCERPT_MAX_LINES: usize = 20;
+const EXCERPT_MAX_BYTES: usize = 4096;
 
 /// C7: `read_excerpt`'s per-file read/split, keyed by `relative_path`, live
 /// only for one `aggregate` call (a stack-local in `aggregate` itself,
@@ -609,20 +618,38 @@ fn cached_lines<'a>(
 /// failure reading a file that already parsed successfully is not one of
 /// D18's three reserved fatal cases, so it degrades to an empty excerpt
 /// rather than failing the whole report.
+///
+/// M6-4: the excerpt keeps at most `EXCERPT_MAX_LINES` lines, then at most
+/// `EXCERPT_MAX_BYTES` raw bytes cut on a character boundary; the flag says
+/// whether either cap removed anything.
 fn read_excerpt(
     excerpt_cache: &mut ExcerptCache,
     root: &Path,
     relative_path: &Path,
     start_line: usize,
     end_line: usize,
-) -> String {
+) -> (String, bool) {
     let lines = cached_lines(excerpt_cache, root, relative_path);
     let start_index = start_line.saturating_sub(1);
     let end_index = end_line.min(lines.len());
     if start_index >= end_index {
-        return String::new();
+        return (String::new(), false);
     }
-    lines[start_index..end_index].join("\n")
+    let span = &lines[start_index..end_index];
+    let kept_lines = &span[..span.len().min(EXCERPT_MAX_LINES)];
+    let text = kept_lines.join("\n");
+    let cut = floor_char_boundary(&text, EXCERPT_MAX_BYTES);
+    let truncated = kept_lines.len() < span.len() || cut < text.len();
+    (text[..cut].to_string(), truncated)
+}
+
+/// The largest index `<= max` that is a character boundary of `text`.
+fn floor_char_boundary(text: &str, max: usize) -> usize {
+    let mut index = max.min(text.len());
+    while !text.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
 }
 
 fn local_link_label(relative_path: &Path, start_line: usize, end_line: usize) -> String {

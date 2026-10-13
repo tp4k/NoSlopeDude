@@ -129,6 +129,13 @@ fn render_location(out: &mut String, location: &SourceLocation) {
         let _ = write!(out, "{}", escape_html(&location.link));
     }
     let _ = write!(out, "<pre>{}</pre>", escape_html(&location.excerpt));
+    if location.truncated {
+        let _ = write!(
+            out,
+            "<p class=\"truncation\">excerpt truncated: the full span is {} lines</p>",
+            location.end_line.saturating_sub(location.start_line) + 1
+        );
+    }
 }
 
 fn render_findings_section(out: &mut String, report: &Report) {
