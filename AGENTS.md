@@ -46,16 +46,15 @@ for the per-step detail and evidence:
   consolidation, versioned BLAKE3, golden digest; IR, both lowerings,
   analyzers retargeted, salvage, neutrality gate incl. the `java-fixture-01`
   strict leg; Orchard grammar swap and the `nsd-v1` freeze.
-- **M1–M2: done except M1-8**, which is not started and moved into the M6 run
-  by user decision; M1-4 is `[~]` in its row. Snapshots, diffs, identity,
-  configuration and base policy trust.
+- **M1–M2: done**, M1-8 included (it moved into the M6 run by user decision).
+  Snapshots, diffs, identity, configuration and base policy trust.
 - **M3–M5: done.** All twelve diagnostics, suppressions, V102, exit
   aggregation, the `nsd check` subcommand, and the per-blob cache with LRU
   eviction.
-- **M6–M7: in progress.** Check-scope JSON is partly done (M6-1, M6-2); M1-8,
-  the scan-scope canonical report, renderers, HTML caps, nested-checkout
-  exclusion for `scan`, and the M7-2 delivery sweep remain.
-- Everything is merged to `main` (last: PR #6); there is no unmerged branch.
+- **M6–M7: done.** Check-scope JSON, the scan-scope canonical report,
+  renderers, HTML caps, nested-checkout exclusion for `scan`, the M7-2 delivery
+  sweep, and the M7-1a golden recapture (closed at `a7a7119`).
+- Everything is merged to `main` (last: PR #12); there is no unmerged branch.
   If this list disagrees with the status file, the status file wins.
 
 The import constraints still bind anything that touches imported material or

@@ -14,7 +14,7 @@ use tempfile::TempDir;
 use nsd::analysis::UnanalyzableReason;
 use nsd::check::CheckDiagnostic;
 use nsd::config::{CODE_CONFIG_CHANGED, CODE_INVALID_CONFIG};
-use nsd::format::render_json;
+use nsd::format::{render_check_json, render_json};
 use nsd::git::path::RepoPath;
 use nsd::git::snapshot::{CommitSnapshot, IndexSnapshot};
 use nsd::git::snapshot_id::SnapshotId;
@@ -1454,4 +1454,91 @@ fn test_base_check_with_v102_off_reports_changed_scope() {
 
     assert_eq!(output.status.code(), Some(0), "{}", stdout(&output));
     assert_eq!(document(&output)["summaries"]["scope"], json!("changed"));
+}
+
+#[cfg(unix)]
+#[test]
+fn test_failure_messages_hide_a_non_utf8_hidden_path() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    use std::path::PathBuf;
+
+    let scratch = TempDir::new().expect("create a scratch directory");
+    let missing_parent = PathBuf::from(OsString::from_vec(b"/no-such-parent-\xff/repo".to_vec()));
+    let existing_parent = scratch
+        .path()
+        .join(OsString::from_vec(b"name-\xff".to_vec()));
+    for hidden in [&missing_parent, &existing_parent] {
+        let lossy = hidden.to_string_lossy().into_owned();
+        assert!(lossy.contains('\u{fffd}'));
+        let failure = [CheckDiagnostic::Failure {
+            code: "NSD-G101",
+            message: format!("cannot open {}", hidden.display()),
+        }];
+
+        let as_repository = render_check_json(&failure, 2, None, &[hidden.as_path()], &[]);
+        let as_config = render_check_json(&failure, 2, None, &[], &[hidden.as_path()]);
+
+        assert!(as_repository.contains("<repository>"), "{as_repository}");
+        assert!(!as_repository.contains(&lossy), "{as_repository}");
+        assert!(as_config.contains("<config>"), "{as_config}");
+        assert!(!as_config.contains(&lossy), "{as_config}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn test_failure_messages_hide_the_resolved_lossy_spelling_and_keep_short_forms() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let scratch = TempDir::new().expect("create a scratch directory");
+    let real = scratch.path().join("real");
+    std::fs::create_dir(&real).expect("create the real directory");
+    let link = scratch.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).expect("link the real directory");
+    let name = OsString::from_vec(b"name-\xff".to_vec());
+    let given = link.join(&name);
+    let resolved = real.canonicalize().expect("canonicalize").join(&name);
+    let lossy = resolved.to_string_lossy().into_owned();
+    let failure = [CheckDiagnostic::Failure {
+        code: "NSD-G101",
+        message: format!("cannot open {}", resolved.display()),
+    }];
+
+    let text = render_check_json(&failure, 2, None, &[given.as_path()], &[]);
+
+    assert!(text.contains("<repository>"), "{text}");
+    assert!(!text.contains(&lossy), "{text}");
+
+    let root = [CheckDiagnostic::Failure {
+        code: "NSD-G101",
+        message: "cannot open /etc/hosts".to_string(),
+    }];
+    let text = render_check_json(&root, 2, None, &[Path::new("/")], &[]);
+    assert!(text.contains("/etc/hosts"), "{text}");
+}
+
+#[cfg(unix)]
+#[test]
+fn test_failure_messages_keep_text_when_the_hidden_path_is_one_character() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let failure = [CheckDiagnostic::Failure {
+        code: "NSD-G101",
+        message: "cannot read \u{FFFD} or é in ab".to_string(),
+    }];
+
+    let invalid = Path::new(OsStr::from_bytes(b"\xff"));
+    let text = render_check_json(&failure, 2, None, &[invalid], &[]);
+    assert!(text.contains('\u{FFFD}'), "{text}");
+
+    let accented = Path::new("é");
+    let text = render_check_json(&failure, 2, None, &[accented], &[]);
+    assert!(text.contains('é'), "{text}");
+
+    let two = Path::new("ab");
+    let text = render_check_json(&failure, 2, None, &[two], &[]);
+    assert!(!text.contains(" ab"), "{text}");
 }

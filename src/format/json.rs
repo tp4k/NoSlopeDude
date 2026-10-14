@@ -227,8 +227,9 @@ impl Hidden {
 
 /// `path` as given and in its resolved form (the missing tail of a path that
 /// does not exist is kept), without a trailing separator. A spelling of one
-/// character or none, such as `/`, is dropped: replacing it would shred the
-/// message.
+/// character or none, such as `/`, `é` or the lone U+FFFD of one invalid
+/// byte, is dropped: replacing it would shred the message. A form that is not UTF-8 contributes its lossy spelling, which is
+/// what `display()` prints.
 fn spellings(path: &Path) -> Vec<String> {
     let mut found: Vec<PathBuf> = vec![path.to_path_buf()];
     if let Ok(resolved) = path.canonicalize() {
@@ -240,9 +241,9 @@ fn spellings(path: &Path) -> Vec<String> {
     }
     found
         .iter()
-        .filter_map(|form| form.to_str())
+        .map(|form| form.to_string_lossy())
         .map(|text| text.trim_end_matches('/').to_string())
-        .filter(|text| text.len() > 1)
+        .filter(|text| text.chars().count() > 1)
         .collect()
 }
 

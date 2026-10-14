@@ -1133,3 +1133,35 @@ fn test_repository_config_cannot_enable_new_suppressions() {
         );
     }
 }
+
+#[test]
+fn test_render_escapes_bidi_controls_in_candidate_names() {
+    let bidi = [
+        0x061c, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068,
+        0x2069,
+    ];
+    for code_point in bidi {
+        let character = char::from_u32(code_point).expect("a scalar value");
+        let name = format!("a{character}b");
+        let diagnostics = [complexity(&name, RepoPath::from_bytes("src/Foo.java"))];
+
+        for rendered in [
+            render_terminal(&diagnostics, TERMINAL_CAP),
+            render_agent(&diagnostics, &Config::default().policy, false, AGENT_CAP),
+        ] {
+            assert!(
+                !rendered.contains(character),
+                "{code_point:x}: {rendered:?}"
+            );
+            assert!(
+                rendered.contains(&format!("a\\u{{{code_point:x}}}b")),
+                "{code_point:x}: {rendered:?}"
+            );
+        }
+    }
+
+    let kept = "a\u{200d}b\u{e9}\u{2065}\u{202f}\u{ad}\u{feff}";
+    let diagnostics = [complexity(kept, RepoPath::from_bytes("src/Foo.java"))];
+    let rendered = render_terminal(&diagnostics, TERMINAL_CAP);
+    assert!(rendered.contains(kept), "{rendered:?}");
+}
