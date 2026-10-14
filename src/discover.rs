@@ -509,4 +509,24 @@ mod tests {
         assert_eq!(ELIGIBLE_FILE_CALLS.with(std::cell::Cell::get), 1);
         Ok(())
     }
+
+    #[test]
+    fn test_eligible_checkout_counts_its_eligibility_check() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        std::fs::create_dir_all(dir.path().join("c"))?;
+        std::fs::write(dir.path().join("c/.git"), "gitdir: elsewhere\n")?;
+        std::fs::write(dir.path().join("c/B.java"), "class B {}\n")?;
+        let settings = ScanSettings {
+            output: PathBuf::from("unused"),
+            include_tests: false,
+            exclude: Vec::new(),
+            min_clone_lines: 10,
+        };
+
+        ELIGIBLE_FILE_CALLS.with(|calls| calls.set(0));
+        discover(dir.path(), &settings)?;
+
+        assert_eq!(ELIGIBLE_FILE_CALLS.with(std::cell::Cell::get), 1);
+        Ok(())
+    }
 }
