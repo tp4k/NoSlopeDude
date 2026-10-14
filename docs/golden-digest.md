@@ -160,8 +160,10 @@ The archive checkout's cleanliness check opens the recipe target with
 `git2::Repository::discover`, so a `recipe.target` that is a subdirectory of
 the checkout passes it; a target outside any repository still fails loudly.
 
-The file was re-captured once after the last M6 format change (status row
-M6-2b, `46f1525`), on `main@b069e55`; see *M6-2b recapture delta* below.
+The file was re-captured after the last M6 format change (status row M6-2b,
+`46f1525`), on `main@b069e55`, and once more after M7-1's new `skipped` key and
+default globs (status row M7-1a, `a7a7119`), on `main@67a0c5e`; see *M6-2b
+recapture delta* and *M7-1a recapture delta* below.
 
 Re-capturing (implementer-only; overwrites the committed file) sets a
 second, separate opt-in alongside the archive path:
@@ -200,3 +202,37 @@ an empty `git status --porcelain --untracked-files=all`.
 
 Removed excerpts and the null `scan.target` cannot move the digest, because
 `normalize` erases both before the body is hashed.
+
+### M7-1a recapture delta
+
+Re-captured at `a7a7119` on `main@67a0c5e` with
+`NSD_ARCHIVED_REPORT=… NSD_GOLDEN_CAPTURE=1`, then verified with
+`NSD_REQUIRE_ARCHIVE_VERIFIED=1` (25 passed, no PENDING notice) and without
+the capture variable. The archive checkout was at the pinned `revision_sha`
+with a clean `git status`, and the live scan was complete. Before the capture,
+`test_nsd_v1_digest_matches_a_live_scan_of_java_fixture_01` failed on digest
+equality.
+
+The delta was measured by diffing, by key path, a live scan built from
+`c745f8d` (the last `src` commit before M7-1, which reproduces the previous
+committed digest) against a live scan at `main@67a0c5e`, both with the archive
+recipe (`include_tests` false, no excludes, `min_clone_lines` 10). The six new
+test globs moved no file (`skips_by_reason.test` stays 853). Exactly one file
+moved: one WebJar file (built-in exclusion), from scanned to skipped as
+`dependency_or_build_output`.
+
+| field | delta | attributed to |
+|---|---|---|
+| `body_blake3` | **changed** (`blake3:ce58a4d80304c246a51b62420af4e46a` → `blake3:9db99d29028507858afab544b5830d3d`) | the `skipped.nested_checkout` key (`0`) and the WebJar file leaving callables, findings, scores, `top25` and `skipped_files`; nothing else differs |
+| `skips_by_reason.dependency_or_build_output` | 1 → 2 | the WebJar glob, one file |
+| `skips_by_reason.test` | 853, unchanged | no test-glob match with `include_tests` false |
+| `findings_by_rule_id` | `JSTS-EMPTY-CATCH` (7) and `JSTS-UNREACHABLE-AFTER-RETURN` (1) removed; `JAVA-*` unchanged | the findings of the WebJar file |
+| `scores.js_ts` | erosion 0.14008623369905362 → 0.0; verbosity `flagged_lines` 1 → 0, `ratio` 0.3333333333333333 → 0.0, `scanned_lines` 3 → 0 | the WebJar file was the only `js_ts` input |
+| `scores.overall` | erosion 0.13313797553867948 → 0.13294913151043064; `flagged_lines` 2153 → 2152; `ratio` 0.009970962408591792 → 0.009966469683777625; `scanned_lines` 215927 → 215924 | the `js_ts` contribution removed; overall now equals java |
+| `top25` | the five `js_ts` rows (sloc 1) dropped; the other 20 rows keep their order; five java rows at ranks 26–30 fill the tail | the WebJar file leaving callables (21168 → 20164) |
+| `clones` | 71 groups, 1372 redundant lines, unchanged | duplicates identical |
+| `label`, `language`, `authorship`, `revision_sha`, `hash_version`, `scores.java` | none | no measurement moved |
+
+The report's `fingerprints`, `snapshots`, `scan` and `adaptation` are identical
+before and after, so no discovery-default fingerprint moved. No difference
+without an M7-1 cause was found.
