@@ -116,9 +116,10 @@ pub fn discover(root: &Path, settings: &ScanSettings) -> anyhow::Result<Discover
                     }
                     match nested_checkout_of(entry, &root_owned, &combined, &ineligible_checkouts) {
                         Some(relative) => {
-                            if let Ok(mut found) = nested_checkouts.lock() {
-                                found.push(relative);
-                            }
+                            nested_checkouts
+                                .lock()
+                                .expect("nested checkout list lock poisoned")
+                                .push(relative);
                             false
                         }
                         None => true,
