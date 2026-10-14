@@ -304,16 +304,16 @@ pub fn compute_verbosity(
     let mut unanalyzed_java = 0usize;
     let mut unanalyzed_js_ts = 0usize;
     for file in files {
-        scanned_overall += file.scanned_lines;
-        unanalyzed_overall += file.unanalyzed_lines;
+        scanned_overall = scanned_overall.saturating_add(file.scanned_lines);
+        unanalyzed_overall = unanalyzed_overall.saturating_add(file.unanalyzed_lines);
         match file.language {
             LanguageFamily::Java => {
-                scanned_java += file.scanned_lines;
-                unanalyzed_java += file.unanalyzed_lines;
+                scanned_java = scanned_java.saturating_add(file.scanned_lines);
+                unanalyzed_java = unanalyzed_java.saturating_add(file.unanalyzed_lines);
             }
             LanguageFamily::JsTs => {
-                scanned_js_ts += file.scanned_lines;
-                unanalyzed_js_ts += file.unanalyzed_lines;
+                scanned_js_ts = scanned_js_ts.saturating_add(file.scanned_lines);
+                unanalyzed_js_ts = unanalyzed_js_ts.saturating_add(file.unanalyzed_lines);
             }
         }
     }

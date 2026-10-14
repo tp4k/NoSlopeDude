@@ -66,7 +66,7 @@ Each line starts with the code. What follows depends on the code (`<span>` is `<
 | `NSD-C101` | `nsd.yml` |
 | `NSD-C102`, `NSD-G101` | a free-text message, with no path in a fixed position |
 
-Non-UTF-8 path bytes print as `%XX`, and control characters in any text print as `\u{..}`.
+Non-UTF-8 path bytes print as `%XX`, and control characters and Unicode bidi controls (U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069) in any text print as `\u{..}`.
 
 ### Output caps
 
@@ -111,7 +111,7 @@ nsd check --staged --allow-new-suppressions
 
 ### CI
 
-Check the branch head against its merge base with the target branch. CI must fetch enough history to contain that merge base (for example a full clone, not a shallow one), or the run fails with `NSD-G101` and exit `2`.
+Check the branch head against its merge base with the target branch. CI must fetch enough history to contain that merge base (for example a full clone, not a shallow one), or the run fails with `NSD-G101` and exit `2`. Run the command from a pipeline definition the pull request cannot change, because a pull request that edits its own pipeline can skip or weaken the check.
 
 ```sh
 nsd check --base origin/main

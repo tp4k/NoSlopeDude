@@ -45,13 +45,22 @@ pub(crate) fn capped_listing<'a>(
     listing
 }
 
-/// Replaces every control character (C0, DEL and C1) with `\u{..}`, so text
-/// from a PR can neither move the cursor, start an escape sequence nor end
-/// its own line.
+/// The Unicode Bidi_Control code points: ALM, LRM, RLM, the embeddings and
+/// overrides, and the isolates. They reorder how a line reads (Trojan Source).
+fn is_bidi_control(character: char) -> bool {
+    matches!(
+        character,
+        '\u{61c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
+    )
+}
+
+/// Replaces every control character (C0, DEL and C1) and every bidi control
+/// with `\u{..}`, so text from a PR can neither move the cursor, start an
+/// escape sequence, end its own line nor reorder the line around it.
 pub fn escape_terminal(text: &str) -> String {
     let mut escaped = String::with_capacity(text.len());
     for character in text.chars() {
-        if character.is_control() {
+        if character.is_control() || is_bidi_control(character) {
             escaped.push_str(&format!("\\u{{{:x}}}", u32::from(character)));
         } else {
             escaped.push(character);
