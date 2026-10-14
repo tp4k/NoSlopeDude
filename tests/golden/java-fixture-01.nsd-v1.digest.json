@@ -1,15 +1,13 @@
 {
   "authorship": "unknown",
-  "body_blake3": "blake3:ce58a4d80304c246a51b62420af4e46a",
+  "body_blake3": "blake3:9db99d29028507858afab544b5830d3d",
   "clones": {
     "group_count": 71,
     "total_redundant_lines": 1372
   },
   "findings_by_rule_id": {
     "JAVA-EMPTY-CATCH": 2,
-    "JAVA-REDUNDANT-ELSE-AFTER-RETURN": 330,
-    "JSTS-EMPTY-CATCH": 7,
-    "JSTS-UNREACHABLE-AFTER-RETURN": 1
+    "JAVA-REDUNDANT-ELSE-AFTER-RETURN": 330
   },
   "hash_version": 1,
   "label": "java-fixture-01",
@@ -27,28 +25,28 @@
       }
     },
     "js_ts": {
-      "erosion": 0.14008623369905362,
+      "erosion": 0.0,
       "verbosity": {
         "complete": true,
-        "flagged_lines": 1,
-        "ratio": 0.3333333333333333,
-        "scanned_lines": 3,
+        "flagged_lines": 0,
+        "ratio": 0.0,
+        "scanned_lines": 0,
         "unanalyzed_lines": 0
       }
     },
     "overall": {
-      "erosion": 0.13313797553867948,
+      "erosion": 0.13294913151043064,
       "verbosity": {
         "complete": true,
-        "flagged_lines": 2153,
-        "ratio": 0.009970962408591792,
-        "scanned_lines": 215927,
+        "flagged_lines": 2152,
+        "ratio": 0.009966469683777625,
+        "scanned_lines": 215924,
         "unanalyzed_lines": 0
       }
     }
   },
   "skips_by_reason": {
-    "dependency_or_build_output": 1,
+    "dependency_or_build_output": 2,
     "test": 853
   },
   "top25": [
@@ -66,16 +64,6 @@
       29,
       134,
       335.6992701809165
-    ],
-    [
-      29,
-      1,
-      29.0
-    ],
-    [
-      26,
-      1,
-      26.0
     ],
     [
       25,
@@ -98,11 +86,6 @@
       193.80144478305627
     ],
     [
-      23,
-      1,
-      23.0
-    ],
-    [
       22,
       40,
       139.1402170474087
@@ -121,11 +104,6 @@
       22,
       63,
       174.61958653026298
-    ],
-    [
-      22,
-      1,
-      22.0
     ],
     [
       21,
@@ -163,11 +141,6 @@
       152.31546211727817
     ],
     [
-      20,
-      1,
-      20.0
-    ],
-    [
       19,
       125,
       212.42645786248002
@@ -176,6 +149,31 @@
       19,
       65,
       153.18289721767243
+    ],
+    [
+      19,
+      53,
+      138.32208789632983
+    ],
+    [
+      18,
+      61,
+      140.58449416631976
+    ],
+    [
+      18,
+      66,
+      146.2326912834473
+    ],
+    [
+      18,
+      88,
+      168.85496735364347
+    ],
+    [
+      18,
+      35,
+      106.4894360957931
     ]
   ]
 }
