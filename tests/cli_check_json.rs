@@ -1518,3 +1518,27 @@ fn test_failure_messages_hide_the_resolved_lossy_spelling_and_keep_short_forms()
     let text = render_check_json(&root, 2, None, &[Path::new("/")], &[]);
     assert!(text.contains("/etc/hosts"), "{text}");
 }
+
+#[cfg(unix)]
+#[test]
+fn test_failure_messages_keep_text_when_the_hidden_path_is_one_character() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let failure = [CheckDiagnostic::Failure {
+        code: "NSD-G101",
+        message: "cannot read \u{FFFD} or é in ab".to_string(),
+    }];
+
+    let invalid = Path::new(OsStr::from_bytes(b"\xff"));
+    let text = render_check_json(&failure, 2, None, &[invalid], &[]);
+    assert!(text.contains('\u{FFFD}'), "{text}");
+
+    let accented = Path::new("é");
+    let text = render_check_json(&failure, 2, None, &[accented], &[]);
+    assert!(text.contains('é'), "{text}");
+
+    let two = Path::new("ab");
+    let text = render_check_json(&failure, 2, None, &[two], &[]);
+    assert!(!text.contains(" ab"), "{text}");
+}
