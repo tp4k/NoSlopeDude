@@ -459,6 +459,21 @@ scanned shas · the scanner's own reported scanned-source-line count
 | 2026-09-28 (nsd@53eab9f54ed50b2db7965985a0cb314cfaa333e2 — WS-14 (Part C cumulative) alternating, B4, used in the decision set) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 3.28s | 1785.73 MB | true | 7662 |
 | 2026-09-28 (nsd@079ca5288bda6db24a26d0ecaca38e56c47639c8 — WS-14 (Part C cumulative) alternating, A5, used in the decision set; ps top-2 before this run: WindowServer 19.4%, StocksWidget 17.0% (quiet)) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 4.17s | 1791.02 MB | true | 7662 |
 | 2026-09-28 (nsd@53eab9f54ed50b2db7965985a0cb314cfaa333e2 — WS-14 (Part C cumulative) alternating, B5, used in the decision set) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 584779 | 3.37s | 1785.23 MB | true | 7662 |
+| 2026-10-13 (nsd@bce31e41f88aa9b6021ad74e80a515472d95ebb4) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 583701 | 3.37s | 1821.20 MB | true | 7715 |
+| 2026-10-13 (nsd@3b2c40e29155521fa422f3cb46b940e46dcc9b02 — second independent run, same plain-tree fixture) | Darwin 25.6.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 583701 | 3.32s | 1821.91 MB | true | 7715 |
+
+The two 2026-10-13 rows scan a plain copy of both clones without their `.git`
+entries (`scripts/perf_scan.sh` `build_plain_tree`), because the nested-checkout
+rule would otherwise exclude both clones. Against the 2026-09-28 rows,
+`scanned_lines` is -1078 and `skipped files` is +53. Measured against the
+pre-WS-3 binary (`03f2192`) on the same fixture (584779 lines, 7665 skipped),
+WS-3 adds exactly 50 `test` rows and removes none: 43 under `**/e2e/**` (9 of
+them also match `*.e2e-spec.*`) and 7 matching only `*.e2e-spec.*`; none comes
+from the `**/fixtures/**`, `**/fixture/**`, `**/__fixtures__/**`, `**/qa/**` or
+WebJar globs. All -1078 lines are js_ts (294902 -> 293824; java unchanged at
+289877). The remaining +3 skipped against 2026-09-28 predate WS-3 (`03f2192`
+already reports 7665). These attribution numbers were measured by the WS-3
+round-2 reviewer and not re-derived in round 3.
 
 ## Part C (run 2026-09-25-1744-m1m2-followup)
 

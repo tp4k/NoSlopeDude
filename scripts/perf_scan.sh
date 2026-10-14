@@ -4,7 +4,8 @@
 # the scanner's own scanned-source-line count, wall-clock seconds, peak RSS
 # in MB, date+HEAD sha, machine) to docs/measurements.md. Refuses to run if
 # the fixture (see scripts/fetch_perf_fixture.sh) is not present, rather
-# than measuring an empty tree.
+# than measuring an empty tree. The scan runs on a plain copy of both clones
+# without their `.git` entries (see build_plain_tree).
 #
 # `report.json` parsing lives in plain functions below, not inlined into
 # `main`, so `tests/perf_scan.rs` can `source` this file and call them
@@ -138,6 +139,27 @@ date_cell() {
   printf '%s %s' "$day" "$ann"
 }
 
+# build_plain_tree <fixture root> <dest dir>
+# Copies the working tree of each fixture clone (spring-framework, angular)
+# into <dest dir>/<clone>, leaving out only that clone's top-level `.git`
+# entry. `nsd scan` treats a directory that holds its own `.git` as a nested
+# checkout and skips it (M7-1), so scanning the clones in place would read 0
+# lines; a plain tree keeps one scan and a file set comparable with earlier
+# measurements rows. `git archive` is not used (it honours `export-ignore`
+# and would drop files) and neither is `git worktree` (its `.git` file is
+# itself a nested-checkout marker). Nothing under the fixture root is changed.
+build_plain_tree() {
+  local fixture_root="$1" dest="$2" clone entry
+  for clone in spring-framework angular; do
+    mkdir -p "$dest/$clone" || return 1
+    for entry in "$fixture_root/$clone"/* "$fixture_root/$clone"/.[!.]* "$fixture_root/$clone"/..?*; do
+      [ -e "$entry" ] || [ -L "$entry" ] || continue
+      [ "$(basename "$entry")" = ".git" ] && continue
+      cp -RP "$entry" "$dest/$clone/" || return 1
+    done
+  done
+}
+
 main() {
   local fixture_root="${1:-${TMPDIR:-/tmp}/nsd-perf-fixture}"
   local spring_dir="$fixture_root/spring-framework"
@@ -161,9 +183,12 @@ main() {
   # that as "unbound variable").
   output_dir="$(mktemp -d)"
   time_log="$(mktemp)"
-  trap 'rm -rf "$output_dir" "$time_log"' EXIT
+  plain_dir="$(mktemp -d "${TMPDIR:-/tmp}/nsd-perf-plain.XXXXXX")"
+  trap 'rm -rf "$output_dir" "$time_log" "$plain_dir"' EXIT
 
-  /usr/bin/time -l "$bin" scan "$fixture_root" --output "$output_dir" >/dev/null 2>"$time_log"
+  build_plain_tree "$fixture_root" "$plain_dir"
+
+  /usr/bin/time -l "$bin" scan "$plain_dir" --output "$output_dir" >/dev/null 2>"$time_log"
 
   local wall_seconds peak_rss_bytes peak_rss_mb
   wall_seconds="$(grep ' real' "$time_log" | awk '{print $1}')"

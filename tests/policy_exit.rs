@@ -1,7 +1,7 @@
 //! M5-3: exit aggregation over the twelve diagnostics.
 
 use nsd::config::{Config, PolicyConfig, Severity};
-use nsd::policy::exit::exit_status;
+use nsd::policy::exit::{contribution, exit_status};
 
 const E101: &str = "NSD-E101";
 const E102: &str = "NSD-E102";
@@ -153,4 +153,30 @@ fn test_exit_is_order_and_multiplicity_independent() {
     }
     assert_eq!(status(&[E101, E101, E101]), 1);
     assert_eq!(status(&[A102, A102]), 2);
+}
+
+#[test]
+fn test_contribution_is_what_exit_status_ors_for_every_code() {
+    for severity in SEVERITIES {
+        let policy = PolicyConfig {
+            nsd_e101: severity,
+            nsd_e102: severity,
+            nsd_v101: severity,
+            nsd_v102: severity,
+            nsd_s102: severity,
+        };
+        for allow in [false, true] {
+            for code in [
+                E101, E102, V101, V102, S101, S102, A101, A102, G101, G102, C101, C102, "NSD-X999",
+            ] {
+                assert_eq!(
+                    contribution(code, &policy, allow),
+                    exit_status([code], &policy, allow),
+                    "{code} {severity:?} {allow}"
+                );
+            }
+        }
+    }
+    assert_eq!(contribution(S101, &default_policy(), false), 1);
+    assert_eq!(contribution(S101, &default_policy(), true), 0);
 }

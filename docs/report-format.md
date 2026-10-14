@@ -29,7 +29,7 @@ the raw name.
   "result_scope": "scan",
   "snapshots": { "scan": "blake3:<32 hex>", "unavailable_reason": null },
   "fingerprints": { "configuration": "blake3:<32 hex>", "measurement": "blake3:<32 hex>" },
-  "skipped": { "dependency_or_build_output": 0, "generated_code": 0, "gitignore": 0, "parse_grammar_setup": 0, "parse_syntax_error": 0, "parse_unreadable": 0, "parse_unsupported_extension": 0, "test": 0, "unreadable": 0, "user_exclude": 0 },
+  "skipped": { "dependency_or_build_output": 0, "generated_code": 0, "gitignore": 0, "nested_checkout": 0, "parse_grammar_setup": 0, "parse_syntax_error": 0, "parse_unreadable": 0, "parse_unsupported_extension": 0, "test": 0, "unreadable": 0, "user_exclude": 0 },
   "callables": [
     { "path": "src/Sample.java", "name": "run", "start_line": 3, "end_line": 9, "cc": 2, "sloc": 6, "mass": 4.47213595499958 }
   ],
@@ -147,7 +147,7 @@ repository-configured filter driver would execute. For a remote
   `--min-clone-lines`; `fingerprints.configuration` digests `--include-tests`,
   the `--exclude` globs in order and `--min-clone-lines` (family
   `nsd-scan-config-v1`). Neither holds a path.
-- `skipped` counts `skipped_files` by reason, every one of the ten possible
+- `skipped` counts `skipped_files` by reason, every one of the eleven possible
   reasons present, zeros included. `skipped_files` stays the per-file list.
 - `callables` is every measured callable, uncapped (`top25` stays the capped
   ranking), sorted by path (as a string), `start_line`, `end_line`, `name`,
@@ -160,10 +160,18 @@ The report is byte-identical across repeated runs, checkout roots and
 ### `skipped_files.reason`
 
 One of `SkipReason`'s labels (`gitignore`, `dependency_or_build_output`,
-`generated_code`, `test`, `user_exclude`, `unreadable` — a discovery-time
-skip, D16) or `"parse_<ParseFailureReason label>"` (a parse failure, D18,
+`generated_code`, `test`, `user_exclude`, `nested_checkout`, `unreadable` — a
+discovery-time skip, D16) or `"parse_<ParseFailureReason label>"` (a parse failure, D18,
 e.g. `parse_syntax_error`) — the `parse_` prefix is how the two kinds of
 skip are told apart in one merged list.
+
+A `nested_checkout` row (M7-1) names a directory, not a file: a directory
+below the scan root that directly contains its own `.git` (a directory, a file
+or a symlink) and that holds at least one eligible file, meaning a
+scanned-extension file that is neither gitignored nor covered by a default,
+test or user exclusion. Its files are neither discovered nor listed. It is a
+policy exclusion and never makes a scan `incomplete`. A checkout with no
+eligible file gives no row; its files keep their own reasons.
 
 A `parse_syntax_error` row is the one exception to "contributes nothing":
 the file salvage-parses (WS-6), so only its damaged entities are excluded
@@ -229,9 +237,10 @@ neither the numerator nor the denominator.
 `Callable` (D8) publishes both `start_line` and `end_line`
 (`IrCallable::span.end_line`, M0c-13). A top-25 row's `location` is a
 real `[start_line, end_line]` region — the callable's whole declaration
-and body, not just its first line — and the HTML `excerpt` fully brackets it
-(`report.json` carries none), read back off disk, the same as every
-finding's and every duplicate-group location's span. A single-line callable (a one-line arrow function, e.g.
+and body, not just its first line — and the HTML `excerpt` brackets it
+(`report.json` carries none), read back off disk and capped (see *Excerpt
+caps* below), the same as every finding's and every duplicate-group
+location's span. A single-line callable (a one-line arrow function, e.g.
 an expression-bodied `(b) => b`) still has `start_line == end_line`, same
 as any other one-line region.
 
@@ -243,6 +252,22 @@ CDN or external asset, and no scheme prefix anywhere except a legitimate
 value interpolated from the scanned repository — a source excerpt, a file
 path, a rule id, a callable name — passes through the module's single
 `escape_html` helper.
+
+**Excerpt caps (M6-4).** Every excerpt (a finding's, a duplicate
+occurrence's, a top-25 callable's) is capped when its `SourceLocation` is
+built, so no uncapped excerpt is kept. The first 20 lines of the span are
+kept; if those lines, joined with `\n`, exceed 4096 bytes of raw source text
+(counted before HTML escaping), the text is cut to the longest prefix of at
+most 4096 bytes that ends on a UTF-8 character boundary. An excerpt that was
+cut by either cap is followed by exactly this marker, and an excerpt that
+was not cut has none:
+
+```html
+<p class="truncation">excerpt truncated: the full span is N lines</p>
+```
+
+`N` is the span's own line count (`end_line - start_line + 1`), not the
+number of lines shown. `report.json` carries no excerpt and is unchanged.
 
 Sections, in document order, each its own `<section id="...">`:
 

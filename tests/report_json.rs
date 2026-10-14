@@ -572,6 +572,37 @@ fn test_policy_exclusion_keeps_scores_complete() {
     }
 }
 
+/// M7-1: a nested checkout is one counted policy-exclusion row and leaves
+/// every `complete` true.
+#[test]
+fn test_nested_checkout_is_counted_and_leaves_scores_complete() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::write(dir.path().join("A.java"), "class A {\n    int x = 1;\n}\n").expect("write");
+    fs::create_dir_all(dir.path().join("vendored/lib")).expect("mkdir");
+    fs::write(dir.path().join("vendored/lib/.git"), "gitdir: elsewhere\n").expect("write .git");
+    fs::write(
+        dir.path().join("vendored/lib/Inner.java"),
+        "class Inner {}\n",
+    )
+    .expect("write");
+
+    let value = scan_value(dir.path(), |_| {});
+
+    let rows: Vec<&serde_json::Value> = value["skipped_files"]
+        .as_array()
+        .expect("skipped_files")
+        .iter()
+        .filter(|row| row["reason"] == "nested_checkout")
+        .collect();
+    assert_eq!(rows.len(), 1, "{value}");
+    assert_eq!(rows[0]["relative_path"], "vendored/lib", "{value}");
+    assert_eq!(value["skipped"]["nested_checkout"], 1, "{value}");
+    assert_eq!(value["incomplete"], false, "{value}");
+    for verbosity in verbosity_objects(&value) {
+        assert_eq!(verbosity["complete"], true, "{verbosity}");
+    }
+}
+
 #[test]
 fn test_terminal_summary_carries_the_scores() {
     // The terminal summary (main.rs prints `report::terminal_summary`) had
@@ -1023,10 +1054,11 @@ type Mutation = dyn Fn(&mut ScanSettings);
 
 /// Every `skipped_files` reason a scan can name: the discovery labels, then
 /// the parse failures prefixed `parse_`.
-const SCAN_SKIP_KEYS: [&str; 10] = [
+const SCAN_SKIP_KEYS: [&str; 11] = [
     "dependency_or_build_output",
     "generated_code",
     "gitignore",
+    "nested_checkout",
     "parse_grammar_setup",
     "parse_syntax_error",
     "parse_unreadable",

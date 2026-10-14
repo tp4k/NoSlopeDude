@@ -122,7 +122,7 @@ pub fn analyze_file(
 
     let executable_lines = rules::executable_lines_from_ir(&ir);
     let scanned_lines = executable_lines.len();
-    let gaps = damage_gaps(&ir);
+    let gaps = metrics::mapped_gaps(&ir);
     let callable_index = CallableIndex::of(&ir);
     let mut flagged = rules::findings_with_nodes(&parsed, &ir);
     flagged.sort_by(|(a, _), (b, _)| rules::cmp_findings(a, b));
@@ -148,22 +148,6 @@ pub fn analyze_file(
         scanned_lines,
         gaps,
     })
-}
-
-/// Each damage span's line range, ascending and without repeats; adjacent
-/// ranges stay separate. The same list scan reports as `gaps`.
-fn damage_gaps(ir: &IrFile) -> Vec<LineRange> {
-    let mut gaps: Vec<LineRange> = ir
-        .damage
-        .iter()
-        .map(|damage| LineRange {
-            start_line: damage.span.start_line as usize,
-            end_line: damage.span.end_line as usize,
-        })
-        .collect();
-    gaps.sort_unstable();
-    gaps.dedup();
-    gaps
 }
 
 /// A digest over the normalized leaf tokens of each flagged subtree
@@ -319,31 +303,31 @@ mod tests {
     }
 
     #[test]
-    fn test_damage_gaps_are_ascending_and_keep_adjacent_ranges_apart() {
+    fn test_mapped_gaps_are_ascending_and_keep_adjacent_ranges_apart() {
         let mut ir = lowered(ADJACENT_DAMAGE_SOURCE);
         ir.damage.reverse();
 
         assert_eq!(
-            damage_gaps(&ir),
+            metrics::mapped_gaps(&ir),
             vec![range(2, 2), range(3, 3), range(6, 6), range(7, 7)]
         );
     }
 
     #[test]
-    fn test_damage_gaps_list_a_repeated_range_once() {
+    fn test_mapped_gaps_list_a_repeated_range_once() {
         let ir = lowered(SAME_LINE_DAMAGE_SOURCE);
         assert!(ir.damage.len() > 1);
 
-        assert_eq!(damage_gaps(&ir), vec![range(1, 1)]);
+        assert_eq!(metrics::mapped_gaps(&ir), vec![range(1, 1)]);
     }
 
     #[test]
-    fn test_damage_gaps_keep_a_multi_line_span_whole() {
+    fn test_mapped_gaps_keep_a_multi_line_span_whole() {
         let ir =
             lowered("class A {\n  void m() {\n    int x = foo(1,\n      2,\n      ;\n  }\n}\n");
 
         assert_eq!(ir.damage.len(), 1);
         assert_ne!(ir.damage[0].span.start_line, ir.damage[0].span.end_line);
-        assert_eq!(damage_gaps(&ir), vec![range(3, 4)]);
+        assert_eq!(metrics::mapped_gaps(&ir), vec![range(3, 4)]);
     }
 }

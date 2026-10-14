@@ -603,7 +603,7 @@ fn refresh_from_disk(
 
 /// Whether `dir` directly contains its own `.git` (file or directory) — the
 /// D7 nested-checkout marker.
-fn has_git_marker(dir: &Path) -> bool {
+pub(crate) fn has_git_marker(dir: &Path) -> bool {
     fs::symlink_metadata(dir.join(GIT_DIR_NAME)).is_ok()
 }
 

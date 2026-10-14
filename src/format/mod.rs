@@ -1,25 +1,46 @@
 //! Terminal listing of a check's diagnostics. Every line is escaped by
 //! `escape_terminal`, because names, paths and messages come from a PR.
 
+mod agent;
 mod json;
 
 use crate::check::CheckDiagnostic;
 use crate::git::path::RepoPath;
 
+pub use agent::render_agent;
 pub use json::{
     canonical_document, canonical_document_pretty, float, render_check_json, render_json,
     SCAN_RESULT_SCOPE, SCHEMA_VERSION,
 };
 
+/// Prefix of the terminal listing's omitted-count line.
+const OMITTED_DIAGNOSTICS_LABEL: &str = "omitted diagnostics:";
+
 /// The file a `CheckDiagnostic::Config` is about.
 const CANDIDATE_CONFIG_FILE: &str = "nsd.yml";
 
-/// One line per diagnostic, in the order given, each ended by a newline.
-pub fn render_terminal(diagnostics: &[CheckDiagnostic]) -> String {
+/// One line per diagnostic, in the order given, each ended by a newline: the
+/// first `cap` of them, then `omitted diagnostics: N` when `N` were dropped.
+pub fn render_terminal(diagnostics: &[CheckDiagnostic], cap: u32) -> String {
+    capped_listing(diagnostics.iter(), cap, OMITTED_DIAGNOSTICS_LABEL)
+}
+
+/// The listing of the first `cap` of `diagnostics`, escaped, followed by one
+/// `<label> <omitted count>` line when any were dropped.
+pub(crate) fn capped_listing<'a>(
+    diagnostics: impl ExactSizeIterator<Item = &'a CheckDiagnostic>,
+    cap: u32,
+    omitted_label: &str,
+) -> String {
+    let total = diagnostics.len();
+    let kept = usize::try_from(cap).map_or(total, |cap| cap.min(total));
     let mut listing = String::new();
-    for diagnostic in diagnostics {
+    for diagnostic in diagnostics.take(kept) {
         listing.push_str(&escape_terminal(&describe(diagnostic)));
         listing.push('\n');
+    }
+    if total > kept {
+        listing.push_str(&format!("{omitted_label} {}\n", total - kept));
     }
     listing
 }

@@ -7,11 +7,13 @@
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
 use ignore::overrides::{Override, OverrideBuilder};
 use ignore::{DirEntry, WalkBuilder};
 
+use crate::git::snapshot::has_git_marker;
 use crate::model::{DiscoveredFile, LanguageFamily, ScanSettings, SkipReason, SkippedFile};
 
 /// The name of the directory every walk below refuses to descend into.
@@ -41,6 +43,11 @@ const GENERATED_GLOBS: &[&str] = &[
     "*.d.ts",
 ];
 
+/// WebJar resource paths: an immutable built-in exclusion, kept out of
+/// `TEST_GLOBS` so `--include-tests` cannot bring them back. The same string
+/// as `git::discovery`'s `WEBJAR_GLOB`.
+const WEBJAR_GLOBS: &[&str] = &["**/META-INF/resources/webjars/**"];
+
 const TEST_GLOBS: &[&str] = &[
     "**/test/**",
     "**/tests/**",
@@ -53,6 +60,12 @@ const TEST_GLOBS: &[&str] = &[
     "*TestCase.java",
     "*.test.*",
     "*.spec.*",
+    "**/fixture/**",
+    "**/fixtures/**",
+    "**/__fixtures__/**",
+    "**/e2e/**",
+    "**/qa/**",
+    "*.e2e-spec.*",
 ];
 
 /// Every discovered and skipped file from one walk of a scanned root.
@@ -76,31 +89,62 @@ pub struct DiscoverResult {
 pub fn discover(root: &Path, settings: &ScanSettings) -> anyhow::Result<DiscoverResult> {
     let user_exclude = build_override(root, settings.exclude.iter().map(String::as_str))?;
     let generated = build_override(root, GENERATED_GLOBS.iter().copied())?;
-    let dependency_build = build_override(root, DEPENDENCY_BUILD_GLOBS.iter().copied())?;
+    let dependency_build = build_override(
+        root,
+        DEPENDENCY_BUILD_GLOBS.iter().chain(WEBJAR_GLOBS).copied(),
+    )?;
     let combined = build_combined_override(root, settings)?;
 
     let mut unreadable = Vec::new();
     let mut unreadable_from_gitignore_only = Vec::new();
     let root_owned = root.to_path_buf();
 
+    let nested_checkouts: Arc<Mutex<Vec<PathBuf>>> = Arc::default();
+    let ineligible_checkouts: Arc<Mutex<HashSet<PathBuf>>> = Arc::default();
+    let gitignore_only = walk_known_extensions(
+        root,
+        {
+            let combined = combined.clone();
+            let root_owned = root_owned.clone();
+            let nested_checkouts = Arc::clone(&nested_checkouts);
+            let ineligible_checkouts = Arc::clone(&ineligible_checkouts);
+            move |builder: &mut WalkBuilder| {
+                builder.hidden(false).git_ignore(true).require_git(false);
+                builder.filter_entry(move |entry| {
+                    if is_git_dir(entry) {
+                        return false;
+                    }
+                    match nested_checkout_of(entry, &root_owned, &combined, &ineligible_checkouts) {
+                        Some(relative) => {
+                            if let Ok(mut found) = nested_checkouts.lock() {
+                                found.push(relative);
+                            }
+                            false
+                        }
+                        None => true,
+                    }
+                });
+            }
+        },
+        &mut unreadable_from_gitignore_only,
+    )?;
+    let nested_checkouts: HashSet<PathBuf> = nested_checkouts
+        .lock()
+        .map(|found| found.iter().cloned().collect())
+        .unwrap_or_default();
     let raw = walk_known_extensions(
         root,
         {
             let combined = combined.clone();
+            let nested_checkouts = nested_checkouts.clone();
             move |builder: &mut WalkBuilder| {
                 builder.standard_filters(false);
-                builder.filter_entry(move |entry| walkable_by_raw(entry, &root_owned, &combined));
+                builder.filter_entry(move |entry| {
+                    walkable_by_raw(entry, &root_owned, &combined, &nested_checkouts)
+                });
             }
         },
         &mut unreadable,
-    )?;
-    let gitignore_only = walk_known_extensions(
-        root,
-        |builder: &mut WalkBuilder| {
-            builder.hidden(false).git_ignore(true).require_git(false);
-            builder.filter_entry(|entry| !is_git_dir(entry));
-        },
-        &mut unreadable_from_gitignore_only,
     )?;
 
     let mut discovered: Vec<DiscoveredFile> = gitignore_only
@@ -140,6 +184,10 @@ pub fn discover(root: &Path, settings: &ScanSettings) -> anyhow::Result<Discover
                     }
                 }),
         )
+        .chain(nested_checkouts.iter().map(|relative_path| SkippedFile {
+            relative_path: relative_path.clone(),
+            reason: SkipReason::NestedCheckout,
+        }))
         .chain(unreadable.into_iter().map(|relative_path| SkippedFile {
             relative_path,
             reason: SkipReason::Unreadable,
@@ -201,6 +249,7 @@ fn build_combined_override(root: &Path, settings: &ScanSettings) -> anyhow::Resu
     let mut builder = OverrideBuilder::new(root);
     add_ignored_globs(&mut builder, DEPENDENCY_BUILD_GLOBS.iter().copied())?;
     add_ignored_globs(&mut builder, GENERATED_GLOBS.iter().copied())?;
+    add_ignored_globs(&mut builder, WEBJAR_GLOBS.iter().copied())?;
     if !settings.include_tests {
         add_ignored_globs(&mut builder, TEST_GLOBS.iter().copied())?;
     }
@@ -292,7 +341,12 @@ fn walk_known_extensions(
 /// D16's dependency/build directories are exactly the ones a real project's
 /// `.gitignore` doesn't need to repeat, so leaving them unpruned here is what
 /// made `raw` descend into all of them on every scan.
-fn walkable_by_raw(entry: &DirEntry, root: &Path, combined: &Override) -> bool {
+fn walkable_by_raw(
+    entry: &DirEntry,
+    root: &Path,
+    combined: &Override,
+    nested_checkouts: &HashSet<PathBuf>,
+) -> bool {
     if is_git_dir(entry) {
         return false;
     }
@@ -307,7 +361,80 @@ fn walkable_by_raw(entry: &DirEntry, root: &Path, combined: &Override) -> bool {
         Ok(relative) if !relative.as_os_str().is_empty() => relative,
         _ => return true,
     };
-    !combined.matched(relative, true).is_ignore()
+    !nested_checkouts.contains(relative) && !combined.matched(relative, true).is_ignore()
+}
+
+/// The scan-root-relative path of `entry` when it is a nested checkout (M7-1):
+/// a directory strictly below `root` that directly contains a `.git` entry and
+/// holds at least one eligible file, meaning a scanned-extension file that
+/// `discover` would otherwise list. A checkout whose files are all gitignored
+/// or excluded keeps those per-file reasons, so a filename-specific exclusion
+/// cannot open a checkout whose other files remain eligible. A candidate with
+/// no eligible file is recorded in `ineligible`, and every candidate below it
+/// is skipped without a walk: the outer walk already covered those files.
+fn nested_checkout_of(
+    entry: &DirEntry,
+    root: &Path,
+    combined: &Override,
+    ineligible: &Mutex<HashSet<PathBuf>>,
+) -> Option<PathBuf> {
+    let is_dir = entry
+        .file_type()
+        .is_some_and(|file_type| file_type.is_dir());
+    if !is_dir || !has_git_marker(entry.path()) {
+        return None;
+    }
+    let relative = entry.path().strip_prefix(root).ok()?;
+    if relative.as_os_str().is_empty() {
+        return None;
+    }
+    let mut known = ineligible.lock().ok()?;
+    if relative
+        .ancestors()
+        .any(|ancestor| known.contains(ancestor))
+    {
+        return None;
+    }
+    if !has_eligible_file(entry.path(), root, combined) {
+        known.insert(relative.to_path_buf());
+        return None;
+    }
+    Some(relative.to_path_buf())
+}
+
+/// Whether any file below `dir` would be discovered: a scanned extension, not
+/// gitignored (same walker settings as the main walk), and not matched by
+/// `combined`. Stops at the first such file.
+fn has_eligible_file(dir: &Path, root: &Path, combined: &Override) -> bool {
+    let mut builder = WalkBuilder::new(dir);
+    builder.hidden(false).git_ignore(true).require_git(false);
+    let root_owned = root.to_path_buf();
+    let combined_owned = combined.clone();
+    builder.filter_entry(move |entry| {
+        if is_git_dir(entry) {
+            return false;
+        }
+        let is_dir = entry
+            .file_type()
+            .is_some_and(|file_type| file_type.is_dir());
+        match entry.path().strip_prefix(&root_owned) {
+            Ok(relative) if is_dir => !combined_owned.matched(relative, true).is_ignore(),
+            _ => true,
+        }
+    });
+    builder.build().filter_map(Result::ok).any(|entry| {
+        let is_file = entry
+            .file_type()
+            .is_some_and(|file_type| file_type.is_file());
+        let Ok(relative) = entry.path().strip_prefix(root) else {
+            return false;
+        };
+        is_file
+            && extension_of(relative)
+                .and_then(LanguageFamily::from_extension)
+                .is_some()
+            && !is_ignored(combined, relative)
+    })
 }
 
 /// Whether `entry` is a `.git` directory — excluded from every walk so none

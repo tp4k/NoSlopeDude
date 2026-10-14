@@ -523,3 +523,62 @@ fn test_date_cell_fails_when_date_fails() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+#[cfg(unix)]
+#[test]
+fn test_build_plain_tree_drops_each_clones_git_entry_and_keeps_everything_else(
+) -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let root = dir.path().join("fixture");
+    let dest = dir.path().join("plain");
+    std::fs::create_dir_all(&dest)?;
+    for clone in ["spring-framework", "angular"] {
+        let base = root.join(clone);
+        std::fs::create_dir_all(base.join(".git/objects"))?;
+        std::fs::write(base.join(".git/HEAD"), "ref: refs/heads/main\n")?;
+        std::fs::create_dir_all(base.join("src/sub"))?;
+        std::fs::write(base.join("src/sub/A.java"), "class A {}\n")?;
+        std::fs::write(base.join(".gitignore"), "target/\n")?;
+        // `.git` below the clone's top level (e.g. a vendored directory)
+        // is ordinary content of the working tree and must survive.
+        std::fs::create_dir_all(base.join("vendor/.git"))?;
+        std::fs::write(base.join("vendor/.git/keep"), "x")?;
+    }
+
+    let output = run_sourced(&format!(
+        "build_plain_tree '{}' '{}'",
+        root.display(),
+        dest.display()
+    ))?;
+    assert!(
+        output.status.success(),
+        "build_plain_tree failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    for clone in ["spring-framework", "angular"] {
+        let base = dest.join(clone);
+        assert!(
+            !base.join(".git").exists(),
+            "{clone}: top-level .git must not be copied"
+        );
+        assert_eq!(
+            std::fs::read_to_string(base.join("src/sub/A.java"))?,
+            "class A {}\n",
+            "{clone}: working-tree file missing"
+        );
+        assert!(
+            base.join(".gitignore").is_file(),
+            "{clone}: dotfile .gitignore missing"
+        );
+        assert!(
+            base.join("vendor/.git/keep").is_file(),
+            "{clone}: a non-top-level .git must survive"
+        );
+        assert!(
+            root.join(clone).join(".git/HEAD").is_file(),
+            "{clone}: the source clone must be untouched"
+        );
+    }
+    Ok(())
+}

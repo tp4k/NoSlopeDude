@@ -79,6 +79,9 @@ pub enum SkipReason {
     GeneratedCode,
     Test,
     UserExclude,
+    /// A directory below the scan root that directly contains its own `.git`
+    /// entry (M7-1): one row for the directory, never its files.
+    NestedCheckout,
     /// A per-entry walk error (D18: not one of the three reserved fatal
     /// cases), e.g. a subdirectory with no read permission.
     Unreadable,
@@ -92,6 +95,7 @@ impl SkipReason {
             SkipReason::GeneratedCode => "generated_code",
             SkipReason::Test => "test",
             SkipReason::UserExclude => "user_exclude",
+            SkipReason::NestedCheckout => "nested_checkout",
             SkipReason::Unreadable => "unreadable",
         }
     }
@@ -107,7 +111,8 @@ impl SkipReason {
             | SkipReason::DependencyOrBuildOutput
             | SkipReason::GeneratedCode
             | SkipReason::Test
-            | SkipReason::UserExclude => SkipCategory::PolicyExclusion,
+            | SkipReason::UserExclude
+            | SkipReason::NestedCheckout => SkipCategory::PolicyExclusion,
             SkipReason::Unreadable => SkipCategory::AnalysisFailure,
         }
     }
