@@ -715,3 +715,30 @@ fn test_finding_excerpts_are_capped_and_marked() {
         assert_long_locations_capped(&written_html(&output), "findings", &locations, &sources);
     assert!(checked >= 1, "fixture should yield a finding over 20 lines");
 }
+
+#[test]
+#[should_panic(expected = "no marker")]
+fn test_capped_helper_rejects_a_location_missing_its_own_marker() {
+    let sources = [
+        ("CloneA.java", clone_source("CloneA")),
+        ("CloneB.java", clone_source("CloneB")),
+    ];
+    let (_root, _out, output) = scan_sources(&sources);
+    let locations: Vec<_> = output
+        .report
+        .duplicates
+        .iter()
+        .flat_map(|group| &group.locations)
+        .collect();
+    let html = written_html(&output);
+    let start = html
+        .find("<p class=\"truncation\">")
+        .expect("first marker present");
+    let end = start + html[start..].find("</p>").expect("marker end") + "</p>".len();
+    let stripped = format!("{}{}", &html[..start], &html[end..]);
+    assert_eq!(
+        stripped.matches("<p class=\"truncation\">").count(),
+        html.matches("<p class=\"truncation\">").count() - 1
+    );
+    assert_long_locations_capped(&stripped, "duplicates", &locations, &sources);
+}
