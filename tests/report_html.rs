@@ -666,7 +666,10 @@ fn assert_long_locations_capped(
             expected.replace('>', "&gt;"),
             "{path}: first 20 lines only"
         );
-        let marker = rest.split("</p>").next().expect("marker end");
+        let marker = rest
+            .strip_prefix("<p class=\"truncation\">")
+            .and_then(|tail| tail.split("</p>").next())
+            .unwrap_or("");
         assert!(
             marker.contains(MARKER_WORD),
             "{path}: no marker in {marker}"
