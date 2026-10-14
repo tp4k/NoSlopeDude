@@ -488,3 +488,73 @@ fn test_include_tests_discovers_fixture_e2e_and_qa_paths() -> anyhow::Result<()>
     assert_eq!(discovered_paths(&result), expected);
     Ok(())
 }
+
+fn checkout_tree(extra: &[(&'static str, &'static str)]) -> tempfile::TempDir {
+    let mut files = vec![
+        ("A.java", "class A {}\n"),
+        ("lib/.git", "gitdir: elsewhere\n"),
+    ];
+    files.extend_from_slice(extra);
+    tree(&files)
+}
+
+#[test]
+fn test_filename_exclusion_does_not_open_a_nested_checkout() -> anyhow::Result<()> {
+    let dir = checkout_tree(&[("lib/Inner.java", "class Inner {}\n")]);
+    for glob in ["**/x", "x"] {
+        let result = discover(dir.path(), &settings(false, &[glob]))?;
+        assert_eq!(discovered_paths(&result), vec!["A.java"], "{glob}");
+        assert_eq!(nested_rows(&result), vec!["lib"], "{glob}");
+        assert_eq!(reason_for(&result, "lib/Inner.java"), None, "{glob}");
+    }
+    Ok(())
+}
+
+#[test]
+fn test_nested_checkout_whose_files_are_all_gitignored_keeps_gitignore_rows() -> anyhow::Result<()>
+{
+    let dir = checkout_tree(&[
+        (".gitignore", "lib/*\n"),
+        ("lib/Inner.java", "class Inner {}\n"),
+    ]);
+    let result = discover(dir.path(), &settings(false, &[]))?;
+
+    assert_eq!(discovered_paths(&result), vec!["A.java"]);
+    assert_eq!(nested_rows(&result), Vec::<String>::new());
+    assert_eq!(
+        reason_for(&result, "lib/Inner.java"),
+        Some(SkipReason::Gitignore)
+    );
+    Ok(())
+}
+
+#[test]
+fn test_nested_checkout_whose_files_are_all_excluded_keeps_their_reasons() -> anyhow::Result<()> {
+    let only = checkout_tree(&[("lib/Inner.java", "class Inner {}\n")]);
+    let result = discover(only.path(), &settings(false, &["**/Inner.java"]))?;
+    assert_eq!(nested_rows(&result), Vec::<String>::new());
+    assert_eq!(
+        reason_for(&result, "lib/Inner.java"),
+        Some(SkipReason::UserExclude)
+    );
+
+    let sibling = checkout_tree(&[
+        ("lib/Inner.java", "class Inner {}\n"),
+        ("lib/Other.java", "class Other {}\n"),
+    ]);
+    let result = discover(sibling.path(), &settings(false, &["**/Inner.java"]))?;
+    assert_eq!(discovered_paths(&result), vec!["A.java"]);
+    assert_eq!(nested_rows(&result), vec!["lib"]);
+    assert_eq!(result.skipped.len(), 1, "{:?}", result.skipped);
+    Ok(())
+}
+
+#[test]
+fn test_nested_checkout_without_scannable_files_gives_no_row() -> anyhow::Result<()> {
+    let dir = checkout_tree(&[("lib/README.md", "docs\n"), ("lib/x.py", "x = 1\n")]);
+    let result = discover(dir.path(), &settings(false, &[]))?;
+
+    assert_eq!(discovered_paths(&result), vec!["A.java"]);
+    assert!(result.skipped.is_empty(), "{:?}", result.skipped);
+    Ok(())
+}
