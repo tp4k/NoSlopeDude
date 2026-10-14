@@ -363,9 +363,11 @@ fn walkable_by_raw(
 }
 
 /// The scan-root-relative path of `entry` when it is a nested checkout (M7-1):
-/// a directory strictly below `root` that directly contains a `.git` entry,
-/// and below which no default, test, or user exclusion already applies. The
-/// exclusion check runs on a child path, so a `**/<name>/**` glob counts.
+/// a directory strictly below `root` that directly contains a `.git` entry and
+/// holds at least one eligible file, meaning a scanned-extension file that
+/// `discover` would otherwise list. A checkout whose files are all gitignored
+/// or excluded keeps those per-file reasons, so a filename-specific exclusion
+/// cannot open a checkout whose other files remain eligible.
 fn nested_checkout_of(entry: &DirEntry, root: &Path, combined: &Override) -> Option<PathBuf> {
     let is_dir = entry
         .file_type()
@@ -374,10 +376,45 @@ fn nested_checkout_of(entry: &DirEntry, root: &Path, combined: &Override) -> Opt
         return None;
     }
     let relative = entry.path().strip_prefix(root).ok()?;
-    if relative.as_os_str().is_empty() || is_ignored(combined, &relative.join("x")) {
+    if relative.as_os_str().is_empty() || !has_eligible_file(entry.path(), root, combined) {
         return None;
     }
     Some(relative.to_path_buf())
+}
+
+/// Whether any file below `dir` would be discovered: a scanned extension, not
+/// gitignored (same walker settings as the main walk), and not matched by
+/// `combined`. Stops at the first such file.
+fn has_eligible_file(dir: &Path, root: &Path, combined: &Override) -> bool {
+    let mut builder = WalkBuilder::new(dir);
+    builder.hidden(false).git_ignore(true).require_git(false);
+    let root_owned = root.to_path_buf();
+    let combined_owned = combined.clone();
+    builder.filter_entry(move |entry| {
+        if is_git_dir(entry) {
+            return false;
+        }
+        let is_dir = entry
+            .file_type()
+            .is_some_and(|file_type| file_type.is_dir());
+        match entry.path().strip_prefix(&root_owned) {
+            Ok(relative) if is_dir => !combined_owned.matched(relative, true).is_ignore(),
+            _ => true,
+        }
+    });
+    builder.build().filter_map(Result::ok).any(|entry| {
+        let is_file = entry
+            .file_type()
+            .is_some_and(|file_type| file_type.is_file());
+        let Ok(relative) = entry.path().strip_prefix(root) else {
+            return false;
+        };
+        is_file
+            && extension_of(relative)
+                .and_then(LanguageFamily::from_extension)
+                .is_some()
+            && !is_ignored(combined, relative)
+    })
 }
 
 /// Whether `entry` is a `.git` directory — excluded from every walk so none
