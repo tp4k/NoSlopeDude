@@ -1485,3 +1485,36 @@ fn test_failure_messages_hide_a_non_utf8_hidden_path() {
         assert!(!as_config.contains(&lossy), "{as_config}");
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn test_failure_messages_hide_the_resolved_lossy_spelling_and_keep_short_forms() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let scratch = TempDir::new().expect("create a scratch directory");
+    let real = scratch.path().join("real");
+    std::fs::create_dir(&real).expect("create the real directory");
+    let link = scratch.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).expect("link the real directory");
+    let name = OsString::from_vec(b"name-\xff".to_vec());
+    let given = link.join(&name);
+    let resolved = real.canonicalize().expect("canonicalize").join(&name);
+    let lossy = resolved.to_string_lossy().into_owned();
+    let failure = [CheckDiagnostic::Failure {
+        code: "NSD-G101",
+        message: format!("cannot open {}", resolved.display()),
+    }];
+
+    let text = render_check_json(&failure, 2, None, &[given.as_path()], &[]);
+
+    assert!(text.contains("<repository>"), "{text}");
+    assert!(!text.contains(&lossy), "{text}");
+
+    let root = [CheckDiagnostic::Failure {
+        code: "NSD-G101",
+        message: "cannot open /etc/hosts".to_string(),
+    }];
+    let text = render_check_json(&root, 2, None, &[Path::new("/")], &[]);
+    assert!(text.contains("/etc/hosts"), "{text}");
+}
