@@ -14,7 +14,7 @@ use tempfile::TempDir;
 use nsd::analysis::UnanalyzableReason;
 use nsd::check::CheckDiagnostic;
 use nsd::config::{CODE_CONFIG_CHANGED, CODE_INVALID_CONFIG};
-use nsd::format::render_json;
+use nsd::format::{render_check_json, render_json};
 use nsd::git::path::RepoPath;
 use nsd::git::snapshot::{CommitSnapshot, IndexSnapshot};
 use nsd::git::snapshot_id::SnapshotId;
@@ -1454,4 +1454,34 @@ fn test_base_check_with_v102_off_reports_changed_scope() {
 
     assert_eq!(output.status.code(), Some(0), "{}", stdout(&output));
     assert_eq!(document(&output)["summaries"]["scope"], json!("changed"));
+}
+
+#[cfg(unix)]
+#[test]
+fn test_failure_messages_hide_a_non_utf8_hidden_path() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    use std::path::PathBuf;
+
+    let scratch = TempDir::new().expect("create a scratch directory");
+    let missing_parent = PathBuf::from(OsString::from_vec(b"/no-such-parent-\xff/repo".to_vec()));
+    let existing_parent = scratch
+        .path()
+        .join(OsString::from_vec(b"name-\xff".to_vec()));
+    for hidden in [&missing_parent, &existing_parent] {
+        let lossy = hidden.to_string_lossy().into_owned();
+        assert!(lossy.contains('\u{fffd}'));
+        let failure = [CheckDiagnostic::Failure {
+            code: "NSD-G101",
+            message: format!("cannot open {}", hidden.display()),
+        }];
+
+        let as_repository = render_check_json(&failure, 2, None, &[hidden.as_path()], &[]);
+        let as_config = render_check_json(&failure, 2, None, &[], &[hidden.as_path()]);
+
+        assert!(as_repository.contains("<repository>"), "{as_repository}");
+        assert!(!as_repository.contains(&lossy), "{as_repository}");
+        assert!(as_config.contains("<config>"), "{as_config}");
+        assert!(!as_config.contains(&lossy), "{as_config}");
+    }
 }

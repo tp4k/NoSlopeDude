@@ -414,3 +414,27 @@ fn test_verbosity_denominator_excludes_unanalyzed_lines() {
     }
     assert_eq!(rules_result.verbosity.js_ts.unanalyzed_lines, 0);
 }
+
+#[test]
+fn test_line_counts_saturate_instead_of_overflowing() {
+    let file = |name: &str, language, scanned_lines, unanalyzed_lines| FileLanguageLines {
+        relative_path: PathBuf::from(name),
+        language,
+        scanned_lines,
+        unanalyzed_lines,
+        executable_lines: Vec::new(),
+    };
+    let files = vec![
+        file("A.java", JAVA, usize::MAX, usize::MAX),
+        file("B.java", JAVA, 1, 1),
+        file("a.ts", JS_TS, usize::MAX, usize::MAX),
+        file("b.ts", JS_TS, 1, 1),
+    ];
+
+    let verbosity = rules::compute_verbosity(&files, &[], &[]);
+
+    for score in [&verbosity.overall, &verbosity.java, &verbosity.js_ts] {
+        assert_eq!(score.scanned_lines, usize::MAX, "{score:?}");
+        assert_eq!(score.unanalyzed_lines, usize::MAX, "{score:?}");
+    }
+}
