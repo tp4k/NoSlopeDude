@@ -556,8 +556,23 @@ fn test_nested_checkout_without_scannable_files_gives_no_row() -> anyhow::Result
 
     assert_eq!(discovered_paths(&result), vec!["A.java"]);
     assert!(result.skipped.is_empty(), "{:?}", result.skipped);
+
+    let git_dir = tree(&[
+        ("A.java", "class A {}\n"),
+        ("lib/.git/HEAD", "ref: refs/heads/main\n"),
+        ("lib/.git/hooks/h.js", "x\n"),
+        ("lib/README.md", "docs\n"),
+    ]);
+    let result = discover(git_dir.path(), &settings(false, &[]))?;
+    assert_eq!(discovered_paths(&result), vec!["A.java"]);
+    assert!(result.skipped.is_empty(), "{:?}", result.skipped);
+
+    let dir_named_like_a_file = checkout_tree(&[("lib/three.js/README.md", "d\n")]);
+    let result = discover(dir_named_like_a_file.path(), &settings(false, &[]))?;
+    assert!(result.skipped.is_empty(), "{:?}", result.skipped);
     Ok(())
 }
+
 #[test]
 fn test_nested_checkout_with_only_a_deep_eligible_file_still_gives_a_row() -> anyhow::Result<()> {
     let dir = checkout_tree(&[("lib/a/b/Deep.java", "class Deep {}\n")]);
@@ -595,5 +610,44 @@ fn test_checkout_inside_a_pruned_checkout_gives_no_second_row() -> anyhow::Resul
 
     assert_eq!(nested_rows(&result), vec!["lib"]);
     assert_eq!(result.skipped.len(), 1, "{:?}", result.skipped);
+    Ok(())
+}
+
+#[test]
+fn test_nested_checkout_with_only_a_hidden_dir_eligible_file_still_gives_a_row(
+) -> anyhow::Result<()> {
+    let dir = checkout_tree(&[("lib/.src/X.java", "class X {}\n")]);
+    let result = discover(dir.path(), &settings(false, &[]))?;
+
+    assert_eq!(discovered_paths(&result), vec!["A.java"]);
+    assert_eq!(nested_rows(&result), vec!["lib"]);
+    assert_eq!(reason_for(&result, "lib/.src/X.java"), None);
+    Ok(())
+}
+
+#[test]
+fn test_chain_of_nested_checkouts_without_eligible_files_keeps_every_files_reason(
+) -> anyhow::Result<()> {
+    const LEVELS: usize = 5;
+    let mut owned = vec![("A.java".to_owned(), "class A {}\n")];
+    let mut prefix = String::new();
+    for level in 0..LEVELS {
+        prefix.push_str(&format!("l{level}/"));
+        owned.push((format!("{prefix}.git"), "gitdir: elsewhere\n"));
+        owned.push((format!("{prefix}Skip.java"), "class Skip {}\n"));
+    }
+    let files: Vec<(&str, &str)> = owned
+        .iter()
+        .map(|(path, contents)| (path.as_str(), *contents))
+        .collect();
+    let dir = tree(&files);
+    let result = discover(dir.path(), &settings(false, &["**/Skip.java"]))?;
+
+    assert_eq!(discovered_paths(&result), vec!["A.java"]);
+    assert_eq!(nested_rows(&result), Vec::<String>::new());
+    assert_eq!(result.skipped.len(), LEVELS, "{:?}", result.skipped);
+    for (path, _) in owned.iter().filter(|(path, _)| path.ends_with("Skip.java")) {
+        assert_eq!(reason_for(&result, path), Some(SkipReason::UserExclude));
+    }
     Ok(())
 }
