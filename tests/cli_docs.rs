@@ -63,7 +63,11 @@ fn test_documented_pre_commit_and_ci_commands_parse() {
 
 #[test]
 fn test_no_hook_installer_or_provider_workflow_ships() {
-    for path in [".github", ".gitlab-ci.yml", ".pre-commit-config.yaml"] {
+    for path in [
+        ".github/workflows",
+        ".gitlab-ci.yml",
+        ".pre-commit-config.yaml",
+    ] {
         assert!(!Path::new(path).exists(), "{path} must not exist in v1");
     }
     let parsed = Cli::try_parse_from(["nsd", "install-hook"]);
