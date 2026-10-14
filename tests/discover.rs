@@ -558,3 +558,42 @@ fn test_nested_checkout_without_scannable_files_gives_no_row() -> anyhow::Result
     assert!(result.skipped.is_empty(), "{:?}", result.skipped);
     Ok(())
 }
+#[test]
+fn test_nested_checkout_with_only_a_deep_eligible_file_still_gives_a_row() -> anyhow::Result<()> {
+    let dir = checkout_tree(&[("lib/a/b/Deep.java", "class Deep {}\n")]);
+    let result = discover(dir.path(), &settings(false, &[]))?;
+
+    assert_eq!(discovered_paths(&result), vec!["A.java"]);
+    assert_eq!(nested_rows(&result), vec!["lib"]);
+    Ok(())
+}
+
+#[test]
+fn test_nested_checkout_own_gitignore_hides_its_only_file() -> anyhow::Result<()> {
+    let dir = checkout_tree(&[
+        ("lib/.gitignore", "Inner.java\n"),
+        ("lib/Inner.java", "class Inner {}\n"),
+    ]);
+    let result = discover(dir.path(), &settings(false, &[]))?;
+
+    assert_eq!(nested_rows(&result), Vec::<String>::new());
+    assert_eq!(
+        reason_for(&result, "lib/Inner.java"),
+        Some(SkipReason::Gitignore)
+    );
+    Ok(())
+}
+
+#[test]
+fn test_checkout_inside_a_pruned_checkout_gives_no_second_row() -> anyhow::Result<()> {
+    let dir = checkout_tree(&[
+        ("lib/Inner.java", "class Inner {}\n"),
+        ("lib/sub/.git", "gitdir: elsewhere\n"),
+        ("lib/sub/S.java", "class S {}\n"),
+    ]);
+    let result = discover(dir.path(), &settings(false, &[]))?;
+
+    assert_eq!(nested_rows(&result), vec!["lib"]);
+    assert_eq!(result.skipped.len(), 1, "{:?}", result.skipped);
+    Ok(())
+}
