@@ -100,19 +100,21 @@ pub fn discover(root: &Path, settings: &ScanSettings) -> anyhow::Result<Discover
     let root_owned = root.to_path_buf();
 
     let nested_checkouts: Arc<Mutex<Vec<PathBuf>>> = Arc::default();
+    let ineligible_checkouts: Arc<Mutex<HashSet<PathBuf>>> = Arc::default();
     let gitignore_only = walk_known_extensions(
         root,
         {
             let combined = combined.clone();
             let root_owned = root_owned.clone();
             let nested_checkouts = Arc::clone(&nested_checkouts);
+            let ineligible_checkouts = Arc::clone(&ineligible_checkouts);
             move |builder: &mut WalkBuilder| {
                 builder.hidden(false).git_ignore(true).require_git(false);
                 builder.filter_entry(move |entry| {
                     if is_git_dir(entry) {
                         return false;
                     }
-                    match nested_checkout_of(entry, &root_owned, &combined) {
+                    match nested_checkout_of(entry, &root_owned, &combined, &ineligible_checkouts) {
                         Some(relative) => {
                             if let Ok(mut found) = nested_checkouts.lock() {
                                 found.push(relative);
@@ -367,8 +369,15 @@ fn walkable_by_raw(
 /// holds at least one eligible file, meaning a scanned-extension file that
 /// `discover` would otherwise list. A checkout whose files are all gitignored
 /// or excluded keeps those per-file reasons, so a filename-specific exclusion
-/// cannot open a checkout whose other files remain eligible.
-fn nested_checkout_of(entry: &DirEntry, root: &Path, combined: &Override) -> Option<PathBuf> {
+/// cannot open a checkout whose other files remain eligible. A candidate with
+/// no eligible file is recorded in `ineligible`, and every candidate below it
+/// is skipped without a walk: the outer walk already covered those files.
+fn nested_checkout_of(
+    entry: &DirEntry,
+    root: &Path,
+    combined: &Override,
+    ineligible: &Mutex<HashSet<PathBuf>>,
+) -> Option<PathBuf> {
     let is_dir = entry
         .file_type()
         .is_some_and(|file_type| file_type.is_dir());
@@ -376,7 +385,18 @@ fn nested_checkout_of(entry: &DirEntry, root: &Path, combined: &Override) -> Opt
         return None;
     }
     let relative = entry.path().strip_prefix(root).ok()?;
-    if relative.as_os_str().is_empty() || !has_eligible_file(entry.path(), root, combined) {
+    if relative.as_os_str().is_empty() {
+        return None;
+    }
+    let mut known = ineligible.lock().ok()?;
+    if relative
+        .ancestors()
+        .any(|ancestor| known.contains(ancestor))
+    {
+        return None;
+    }
+    if !has_eligible_file(entry.path(), root, combined) {
+        known.insert(relative.to_path_buf());
         return None;
     }
     Some(relative.to_path_buf())

@@ -169,9 +169,9 @@ A `nested_checkout` row (M7-1) names a directory, not a file: a directory
 below the scan root that directly contains its own `.git` (a directory, a file
 or a symlink) and that holds at least one eligible file, meaning a
 scanned-extension file that is neither gitignored nor covered by a default,
-test or user exclusion. A checkout with no eligible file gives no row; its
-files keep their own reasons. Its files are neither discovered nor listed. It is a policy
-exclusion and never makes a scan `incomplete`.
+test or user exclusion. Its files are neither discovered nor listed. It is a
+policy exclusion and never makes a scan `incomplete`. A checkout with no
+eligible file gives no row; its files keep their own reasons.
 
 A `parse_syntax_error` row is the one exception to "contributes nothing":
 the file salvage-parses (WS-6), so only its damaged entities are excluded
