@@ -745,3 +745,30 @@ fn test_capped_helper_rejects_a_location_missing_its_own_marker() {
     );
     assert_long_locations_capped(&stripped, "duplicates", &locations, &sources);
 }
+
+#[test]
+#[should_panic(expected = "marker should name")]
+fn test_capped_helper_rejects_a_location_whose_marker_names_the_wrong_span() {
+    let sources = [
+        ("CloneA.java", clone_source("CloneA")),
+        ("CloneB.java", clone_source("CloneB")),
+    ];
+    let (_root, _out, output) = scan_sources(&sources);
+    let locations: Vec<_> = output
+        .report
+        .duplicates
+        .iter()
+        .flat_map(|group| &group.locations)
+        .collect();
+    let html = written_html(&output);
+    let start = html
+        .find("<p class=\"truncation\">")
+        .expect("first marker present");
+    let end = start + html[start..].find("</p>").expect("marker end") + "</p>".len();
+    let wrong = format!(
+        "{}<p class=\"truncation\">excerpt truncated: the full span is 7777 lines</p>{}",
+        &html[..start],
+        &html[end..]
+    );
+    assert_long_locations_capped(&wrong, "duplicates", &locations, &sources);
+}
