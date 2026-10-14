@@ -402,10 +402,19 @@ fn nested_checkout_of(
     Some(relative.to_path_buf())
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Calls to `has_eligible_file` on this thread; the walk is serial, so one
+    /// `discover` call counts entirely on the calling thread.
+    static ELIGIBLE_FILE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Whether any file below `dir` would be discovered: a scanned extension, not
 /// gitignored (same walker settings as the main walk), and not matched by
 /// `combined`. Stops at the first such file.
 fn has_eligible_file(dir: &Path, root: &Path, combined: &Override) -> bool {
+    #[cfg(test)]
+    ELIGIBLE_FILE_CALLS.with(|calls| calls.set(calls.get() + 1));
     let mut builder = WalkBuilder::new(dir);
     builder.hidden(false).git_ignore(true).require_git(false);
     let root_owned = root.to_path_buf();
@@ -464,4 +473,40 @@ fn error_path(error: &ignore::Error) -> Option<PathBuf> {
 
 fn extension_of(path: &Path) -> Option<&str> {
     path.extension().and_then(|extension| extension.to_str())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LEVELS: usize = 5;
+
+    #[test]
+    fn test_chain_of_five_ineligible_checkouts_checks_eligibility_once() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let mut files = vec![("A.java".to_owned(), "class A {}\n")];
+        let mut prefix = String::new();
+        for level in 0..LEVELS {
+            prefix.push_str(&format!("l{level}/"));
+            files.push((format!("{prefix}.git"), "gitdir: elsewhere\n"));
+            files.push((format!("{prefix}Skip.java"), "class Skip {}\n"));
+        }
+        for (relative, contents) in &files {
+            let path = dir.path().join(relative);
+            std::fs::create_dir_all(path.parent().context("parent")?)?;
+            std::fs::write(path, contents)?;
+        }
+        let settings = ScanSettings {
+            output: PathBuf::from("unused"),
+            include_tests: false,
+            exclude: vec!["**/Skip.java".to_owned()],
+            min_clone_lines: 10,
+        };
+
+        ELIGIBLE_FILE_CALLS.with(|calls| calls.set(0));
+        discover(dir.path(), &settings)?;
+
+        assert_eq!(ELIGIBLE_FILE_CALLS.with(std::cell::Cell::get), 1);
+        Ok(())
+    }
 }
