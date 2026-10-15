@@ -1,1 +1,45 @@
+# Smoke run of nsd on its own repository. It proves that nsd builds, that its
+# test suite passes and that `nsd check --base` runs end to end against the
+# real change set of each event. It gates NO first-party source: the
+# repository has no Java/JS/TS outside tests/fixtures and tests/golden, which
+# the root nsd.yml excludes, and nsd does not analyze Rust.
 name: self-check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  self-check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build
+        run: cargo build --locked --release
+      - name: Test
+        run: cargo test --locked
+      - name: Resolve base
+        id: base
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_BEFORE: ${{ github.event.before }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          BASE="$(bash scripts/self_check_base.sh "$EVENT_NAME" "$EVENT_BEFORE" "$BASE_REF")"
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
+      - name: Change set
+        if: steps.base.outputs.base != ''
+        env:
+          BASE: ${{ steps.base.outputs.base }}
+        run: git diff --stat "$(git merge-base "$BASE" HEAD)" HEAD
+      - name: nsd check
+        if: steps.base.outputs.base != ''
+        env:
+          BASE: ${{ steps.base.outputs.base }}
+        run: ./target/release/nsd check --base "$BASE"
