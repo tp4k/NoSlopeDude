@@ -304,6 +304,30 @@ fn test_argument_error_escapes_an_unrecognized_subcommand() -> anyhow::Result<()
 }
 
 #[test]
+fn test_argument_error_value_equal_to_a_clap_style_code_leaves_clap_text_alone(
+) -> anyhow::Result<()> {
+    let (code, _, stderr) = run_nsd(&["scan", "--", ".", "\u{1b}[1m"])?;
+    assert_eq!(code, Some(2), "stderr: {stderr:?}");
+    assert!(
+        stderr.starts_with("error: unexpected argument '\\u{1b}[1m' found\n"),
+        "got: {stderr:?}"
+    );
+    assert!(
+        stderr
+            .lines()
+            .any(|line| line.starts_with("Usage: nsd scan [OPTIONS] --output <OUTPUT>")),
+        "the usage line reads as clap renders it: {stderr:?}"
+    );
+    assert_eq!(
+        stderr.matches("\\u{1b}").count(),
+        1,
+        "only the value is escaped: {stderr:?}"
+    );
+    assert!(!stderr.contains('\u{1b}'), "raw ESC in: {stderr:?}");
+    Ok(())
+}
+
+#[test]
 fn test_argument_error_without_hostile_characters_prints_clap_rendering_unchanged(
 ) -> anyhow::Result<()> {
     let cases: [&[&str]; 6] = [
