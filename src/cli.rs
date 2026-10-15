@@ -4,8 +4,6 @@ use std::path::PathBuf;
 
 use clap::{ArgGroup, Parser, Subcommand, ValueEnum};
 
-use crate::model::DEFAULT_MIN_CLONE_LINES;
-
 #[derive(Debug, Parser)]
 #[command(name = "nsd", about = "Code quality scanner for Java and JS/TS")]
 pub struct Cli {
@@ -77,7 +75,8 @@ pub struct ScanArgs {
     #[arg(long = "exclude")]
     pub exclude: Vec<String>,
 
-    /// Minimum number of duplicated source lines to report as a clone.
-    #[arg(long, default_value_t = DEFAULT_MIN_CLONE_LINES)]
-    pub min_clone_lines: u32,
+    /// Minimum number of duplicated source lines to report as a clone
+    /// (default: `measurement.min_clone_lines` of the root `nsd.yml`, else 10).
+    #[arg(long)]
+    pub min_clone_lines: Option<u32>,
 }

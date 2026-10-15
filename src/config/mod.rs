@@ -485,28 +485,59 @@ pub fn load_trusted(path: &Path) -> Result<Config, ConfigError> {
             )))
         }
     }
-    let file = fs::File::open(path).map_err(|err| {
+    let bytes = read_capped(path, "trusted config")?;
+    Config::parse(&bytes)
+}
+
+/// Loads the `nsd.yml` of a scanned root for `nsd scan` (A2): `Ok(None)`
+/// when the root has no entry named exactly `nsd.yml`, `NSD-C102` when it
+/// is a symlink or not a regular file (never followed: a scanned folder or
+/// a cloned repository is untrusted content), exceeds
+/// `SOURCE_CEILING_BYTES`, or has an invalid shape. The name is matched
+/// against the directory listing, not opened, so a case-insensitive
+/// filesystem cannot serve `NSD.yml` for it. Only the root is looked at.
+pub fn load_scan_root(root: &Path) -> Result<Option<Config>, ConfigError> {
+    let unreadable = |err: std::io::Error| {
         ConfigError::new(format!(
-            "cannot read trusted config {}: {err}",
-            path.display()
+            "cannot read {CONFIG_FILE_NAME} in the scanned root: {err}"
         ))
-    })?;
+    };
+    let mut found = false;
+    for entry in fs::read_dir(root).map_err(unreadable)? {
+        found |= entry.map_err(unreadable)?.file_name() == CONFIG_FILE_NAME;
+    }
+    if !found {
+        return Ok(None);
+    }
+    let path = root.join(CONFIG_FILE_NAME);
+    let metadata = fs::symlink_metadata(&path).map_err(unreadable)?;
+    if !metadata.is_file() {
+        return Err(ConfigError::new(format!(
+            "{CONFIG_FILE_NAME} in the scanned root is not a regular file (a symlink is not followed)"
+        )));
+    }
+    let bytes = read_capped(&path, &format!("{CONFIG_FILE_NAME} in the scanned root"))?;
+    Config::parse(&bytes).map(Some)
+}
+
+/// Reads at most `SOURCE_CEILING_BYTES` of `path`; one byte more is
+/// `NSD-C102`. `label` names the file in the error text.
+fn read_capped(path: &Path, label: &str) -> Result<Vec<u8>, ConfigError> {
+    let unreadable = |err: std::io::Error| {
+        ConfigError::new(format!("cannot read {label} {}: {err}", path.display()))
+    };
+    let file = fs::File::open(path).map_err(unreadable)?;
     let mut bytes = Vec::new();
     file.take(SOURCE_CEILING_BYTES + 1)
         .read_to_end(&mut bytes)
-        .map_err(|err| {
-            ConfigError::new(format!(
-                "cannot read trusted config {}: {err}",
-                path.display()
-            ))
-        })?;
+        .map_err(unreadable)?;
     if bytes.len() as u64 > SOURCE_CEILING_BYTES {
         return Err(ConfigError::new(format!(
-            "trusted config {} exceeds the {SOURCE_CEILING_BYTES}-byte read ceiling",
+            "{label} {} exceeds the {SOURCE_CEILING_BYTES}-byte read ceiling",
             path.display()
         )));
     }
-    Config::parse(&bytes)
+    Ok(bytes)
 }
 
 /// Rejects an empty scalar carrying an explicit tag (`exclude: !!seq`,
