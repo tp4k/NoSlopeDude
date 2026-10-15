@@ -10,7 +10,7 @@ Scans a local folder or a public GitHub repository (a shallow, single-branch
 clone of the default branch) and reports on `.java`, `.js`, `.jsx`, `.mjs`,
 `.cjs`, `.ts`, and `.tsx` source files.
 
-The terminal summary and `scan`'s runtime error messages have control and bidirectional-formatting characters escaped as `check`'s diagnostics do; a path that is not valid UTF-8 prints with U+FFFD for each invalid byte in `scan`, not with the `%XX` form `check` uses. Argument-parsing errors printed by the command-line parser are escaped the same way, including a newline inside an argument value, which prints as `\u{a}` instead of starting a new line. Argument-parsing errors print without colour.
+The terminal summary and `scan`'s runtime error messages have control and bidirectional-formatting characters escaped as `check`'s diagnostics do; a path that is not valid UTF-8 prints with U+FFFD in place of each invalid byte sequence in `scan`, not with the `%XX` form `check` uses. Argument-parsing errors printed by the command-line parser are escaped the same way, including a newline inside an argument value, which prints as `\u{a}` instead of starting a new line. Argument-parsing errors print without colour.
 
 ### Arguments
 
