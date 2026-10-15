@@ -23,6 +23,7 @@ fn git(repo: &Path, args: &[&str]) -> anyhow::Result<String> {
         .arg(repo)
         .args(["-c", "user.name=t", "-c", "user.email=t@t"])
         .args(["-c", "commit.gpgsign=false"])
+        .args(["-c", "maintenance.auto=false", "-c", "gc.auto=0"])
         .args(args)
         .output()?;
     anyhow::ensure!(
@@ -72,7 +73,7 @@ echo "$n" >"$FAKE_STATE/count"
 mkdir -p "$git_dir/nsd/cache/v1"
 head -c 1048576 /dev/zero >"$git_dir/nsd/cache/v1/blob"
 if [ -n "$FAKE_DIFFER" ]; then echo "{\"run\":$n}"; else echo '{"summaries":[]}'; fi
-exit 0
+exit ${FAKE_EXIT:-0}
 "#;
 
 struct Harness {
@@ -106,6 +107,15 @@ fn harness() -> anyhow::Result<Harness> {
 }
 
 fn run_main(h: &Harness, differ: bool, template: Option<&Path>) -> anyhow::Result<Output> {
+    run_main_env(h, differ, template, &[])
+}
+
+fn run_main_env(
+    h: &Harness,
+    differ: bool,
+    template: Option<&Path>,
+    extra_env: &[(&str, &str)],
+) -> anyhow::Result<Output> {
     let mut cmd = Command::new("bash");
     cmd.arg("-c")
         .arg(format!(
@@ -115,7 +125,8 @@ fn run_main(h: &Harness, differ: bool, template: Option<&Path>) -> anyhow::Resul
             h.fixture.display(),
             h.fake.display()
         ))
-        .env("FAKE_STATE", &h.state);
+        .env("FAKE_STATE", &h.state)
+        .envs(extra_env.iter().copied());
     if differ {
         cmd.env("FAKE_DIFFER", "1");
     }
@@ -333,6 +344,14 @@ fn test_main_runs_a_cold_then_a_warm_check_in_the_scratch_repo() -> anyhow::Resu
         fixture_before,
         "the fixture must be unchanged"
     );
+    let scratch = call_lines[0]
+        .split_once("pwd=")
+        .and_then(|(_, rest)| rest.split(" args=").next())
+        .ok_or_else(|| anyhow::anyhow!("no pwd= in call line: {}", call_lines[0]))?;
+    assert!(
+        !Path::new(scratch).exists(),
+        "the scratch repo must be removed on exit"
+    );
 
     let measurements = std::fs::read_to_string(&h.measurements)?;
     let new_rows: Vec<&str> = measurements
@@ -360,5 +379,49 @@ fn test_main_runs_a_cold_then_a_warm_check_in_the_scratch_repo() -> anyhow::Resu
         cells[10]
     );
     assert_eq!(cells[11], "0", "the check's exit status column");
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_time_cells_reads_wall_seconds_and_rss_bytes() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let log = dir.path().join("check.time");
+    std::fs::write(
+        &log,
+        "        3.37 real         2.50 user         0.40 sys\n  978321408  maximum resident set size\n",
+    )?;
+    let output = run_sourced(&format!("time_cells '{}'", log.display()))?;
+    assert!(
+        output.status.success(),
+        "time_cells failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "3.37 933.00");
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_row_records_a_nonzero_check_exit_status() -> anyhow::Result<()> {
+    let h = harness()?;
+    let output = run_main_env(&h, false, None, &[("FAKE_EXIT", "2")])?;
+    assert!(
+        output.status.success(),
+        "a failing check is still a measured run, main failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let measurements = std::fs::read_to_string(&h.measurements)?;
+    let new_rows: Vec<&str> = measurements
+        .lines()
+        .filter(|l| l.starts_with('|') && !MEASUREMENTS.lines().any(|m| m == *l))
+        .collect();
+    assert_eq!(
+        new_rows.len(),
+        1,
+        "expected exactly one new row, got: {new_rows:?}"
+    );
+    let cells: Vec<&str> = new_rows[0].split('|').map(str::trim).collect();
+    assert_eq!(cells[11], "2", "the check's exit status column");
     Ok(())
 }
