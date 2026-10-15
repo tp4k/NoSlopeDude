@@ -131,8 +131,10 @@ pub fn discover(root: &Path, settings: &ScanSettings) -> anyhow::Result<Discover
     )?;
     let nested_checkouts: HashSet<PathBuf> = nested_checkouts
         .lock()
-        .map(|found| found.iter().cloned().collect())
-        .unwrap_or_default();
+        .expect("nested checkout list lock poisoned")
+        .iter()
+        .cloned()
+        .collect();
     let raw = walk_known_extensions(
         root,
         {
@@ -389,7 +391,9 @@ fn nested_checkout_of(
     if relative.as_os_str().is_empty() {
         return None;
     }
-    let mut known = ineligible.lock().ok()?;
+    let mut known = ineligible
+        .lock()
+        .expect("ineligible checkout set lock poisoned");
     if relative
         .ancestors()
         .any(|ancestor| known.contains(ancestor))
