@@ -10,7 +10,7 @@ Scans a local folder or a public GitHub repository (a shallow, single-branch
 clone of the default branch) and reports on `.java`, `.js`, `.jsx`, `.mjs`,
 `.cjs`, `.ts`, and `.tsx` source files.
 
-Terminal output text, including errors, is escaped the same way as in `check`.
+The terminal summary and runtime error messages are escaped the same way as in `check`. Argument-parsing errors printed by the command-line parser are not yet escaped (see `docs/deferred-work.md`).
 
 ### Arguments
 
