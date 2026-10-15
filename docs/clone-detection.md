@@ -20,7 +20,7 @@ maximal length. A single repeated statement is never a candidate, however
 long: it takes two statements at minimum to be considered duplication.
 
 A candidate only qualifies if its D11 source-line count (below) is at least
-`--min-clone-lines` (default 10, `DEFAULT_MIN_CLONE_LINES`).
+`--min-clone-lines` (default: `measurement.min_clone_lines` of the scanned root's `nsd.yml`, else 10, `DEFAULT_MIN_CLONE_LINES`).
 
 ## Source lines within a candidate (D11, reused)
 
