@@ -249,3 +249,18 @@ fn test_nsd_yml_exclude_does_not_narrow_the_scan() {
         vec![DUPLICATED_BLOCK_LINES]
     );
 }
+
+#[test]
+fn test_differently_cased_nsd_yml_is_ignored() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_tree(dir.path());
+    fs::write(dir.path().join("NSD.yml"), config_with(FILE_THRESHOLD)).expect("write NSD.yml");
+    let (output, output_dir) = scan(dir.path(), &[]);
+    assert!(output.status.success(), "{:?}", output);
+    let report = report(&output_dir);
+    assert_eq!(
+        measurement_of(&report),
+        measurement_fingerprint(DEFAULT_THRESHOLD)
+    );
+    assert!(redundant_lines(&report).is_empty());
+}
