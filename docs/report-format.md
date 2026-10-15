@@ -323,6 +323,13 @@ bytes), nothing records time, and no field except a pass-through `message`
 `scan`'s `report.json` uses the same canonical writer and the same
 `snapshots`, `fingerprints` and `skipped` keys; see "The canonical keys".
 
+The canonical writer (check and scan alike) writes every control character
+serde_json would leave raw as a lowercase four-digit `\uXXXX` escape, in keys
+and values: DEL (U+007F), the C1 range (U+0080-U+009F) and the bidi controls
+U+061C, U+200E, U+200F, U+202A-U+202E and U+2066-U+2069. C0 characters are
+escaped by serde_json itself. A parser reads the original text back; the set
+is the one the terminal listing escapes as `\u{..}`.
+
 ### The canonical check document (M6-2)
 
 A check that ran to a verdict adds these top-level keys (still sorted, still

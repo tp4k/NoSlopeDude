@@ -14,7 +14,7 @@ use tempfile::TempDir;
 use nsd::analysis::UnanalyzableReason;
 use nsd::check::CheckDiagnostic;
 use nsd::config::{CODE_CONFIG_CHANGED, CODE_INVALID_CONFIG};
-use nsd::format::{render_check_json, render_json};
+use nsd::format::{canonical_document_pretty, render_check_json, render_json};
 use nsd::git::path::RepoPath;
 use nsd::git::snapshot::{CommitSnapshot, IndexSnapshot};
 use nsd::git::snapshot_id::SnapshotId;
@@ -1541,4 +1541,87 @@ fn test_failure_messages_keep_text_when_the_hidden_path_is_one_character() {
     let two = Path::new("ab");
     let text = render_check_json(&failure, 2, None, &[two], &[]);
     assert!(!text.contains(" ab"), "{text}");
+}
+
+const ESCAPED_CONTROLS: [char; 15] = [
+    '\u{61c}', '\u{200e}', '\u{200f}', '\u{202a}', '\u{202b}', '\u{202c}', '\u{202d}', '\u{202e}',
+    '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}', '\u{7f}', '\u{80}', '\u{9f}',
+];
+const KEPT_RAW: [char; 6] = [
+    '\u{200d}', '\u{e9}', '\u{2065}', '\u{202f}', '\u{ad}', '\u{feff}',
+];
+
+#[test]
+fn test_check_format_json_escapes_bidi_and_c1_controls() {
+    for (characters, escaped) in [(&ESCAPED_CONTROLS[..], true), (&KEPT_RAW[..], false)] {
+        for &character in characters {
+            let hostile_path = format!("src/a{character}b/Foo.java");
+            let message = format!("cannot read a{character}b");
+            let diagnostics = [
+                CheckDiagnostic::Complexity(Box::new(PolicyDiagnostic {
+                    code: CODE_COMPLEXITY_ABOVE_THRESHOLD,
+                    candidate_path: path(&hostile_path),
+                    candidate_name: "run".to_string(),
+                    candidate_start_line: 1,
+                    candidate_end_line: 2,
+                    base: None,
+                })),
+                CheckDiagnostic::Failure {
+                    code: "NSD-G101",
+                    message: message.clone(),
+                },
+            ];
+
+            let rendered = render_check_json(&diagnostics, RENDERED_STATUS, None, &[], &[]);
+
+            let spelling = format!("\\u{:04x}", u32::from(character));
+            assert_eq!(
+                rendered.contains(character),
+                !escaped,
+                "U+{:04X}: {rendered}",
+                u32::from(character)
+            );
+            assert_eq!(rendered.contains(&spelling), escaped, "{rendered}");
+            let parsed: Value = serde_json::from_str(&rendered).expect("valid JSON");
+            assert_eq!(parsed["diagnostics"][0]["path"], json!(hostile_path));
+            assert_eq!(parsed["diagnostics"][1]["message"], json!(message));
+        }
+    }
+}
+
+#[test]
+fn test_scan_canonical_writer_escapes_bidi_controls() {
+    let document = json!({ "k\u{202e}ey": ["a\u{202e}b", "c\u{85}d"] });
+
+    let rendered = canonical_document_pretty(document.clone());
+
+    assert!(!rendered.contains('\u{202e}'), "{rendered}");
+    assert!(!rendered.contains('\u{85}'), "{rendered}");
+    assert!(rendered.contains("a\\u202eb"), "{rendered}");
+    assert!(rendered.contains("k\\u202eey"), "{rendered}");
+    let parsed: Value = serde_json::from_str(&rendered).expect("valid JSON");
+    assert_eq!(parsed, document);
+}
+
+#[cfg(unix)]
+#[test]
+fn test_failure_messages_hide_the_resolved_form_of_an_existing_hidden_path() {
+    let scratch = TempDir::new().expect("create a scratch directory");
+    let real = scratch.path().join("real");
+    std::fs::create_dir(&real).expect("create the real directory");
+    let link = scratch.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).expect("link the real directory");
+    let resolved = real.canonicalize().expect("canonicalize");
+    let failure = [CheckDiagnostic::Failure {
+        code: "NSD-G101",
+        message: format!("cannot open {}", resolved.display()),
+    }];
+
+    let text = render_check_json(&failure, 2, None, &[link.as_path()], &[]);
+
+    assert!(text.contains("<repository>"), "{text}");
+    assert!(
+        !text.contains(resolved.to_str().expect("UTF-8 path")),
+        "{text}"
+    );
 }
