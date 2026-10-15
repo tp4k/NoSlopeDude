@@ -160,6 +160,26 @@ build_plain_tree() {
   done
 }
 
+# insert_table_row <file> <heading> <row>
+# Adds <row> to <file>. Scaffold: still appends at EOF, ignoring <heading>.
+insert_table_row() {
+  local file="$1" row="$3"
+  echo "$row" >>"$file"
+}
+
+# make_temp_paths
+# Creates the scan's three temp paths in the globals `output_dir`,
+# `time_log` and `plain_dir` and installs the EXIT trap that removes them.
+# Not `local`: the trap fires after main() returns, outside main's dynamic
+# scope, where a `local` binding is already gone (`set -u` reports it as
+# "unbound variable").
+make_temp_paths() {
+  output_dir="$(mktemp -d)"
+  time_log="$(mktemp)"
+  plain_dir="$(mktemp -d "${TMPDIR:-/tmp}/nsd-perf-plain.XXXXXX")"
+  trap 'rm -rf "$output_dir" "$time_log" "$plain_dir"' EXIT
+}
+
 main() {
   local fixture_root="${1:-${TMPDIR:-/tmp}/nsd-perf-fixture}"
   local spring_dir="$fixture_root/spring-framework"
@@ -177,14 +197,7 @@ main() {
   (cd "$REPO_ROOT" && cargo build --release)
   local bin="$REPO_ROOT/target/release/nsd"
 
-  # Not `local`: the EXIT trap below fires after main() returns, once the
-  # script reaches its own end, outside main's dynamic scope -- a `local`
-  # binding here would already be gone by then (`set -u` catches exactly
-  # that as "unbound variable").
-  output_dir="$(mktemp -d)"
-  time_log="$(mktemp)"
-  plain_dir="$(mktemp -d "${TMPDIR:-/tmp}/nsd-perf-plain.XXXXXX")"
-  trap 'rm -rf "$output_dir" "$time_log" "$plain_dir"' EXIT
+  make_temp_paths
 
   build_plain_tree "$fixture_root" "$plain_dir"
 
@@ -211,7 +224,7 @@ main() {
   local row
   row="| $date_cell_value | $(uname -srm) | spring-framework@$spring_sha | angular@$angular_sha | $scanned_lines | ${wall_seconds}s | ${peak_rss_mb} MB | $incomplete | $skipped_count |"
 
-  echo "$row" >>"$MEASUREMENTS_FILE"
+  insert_table_row "$MEASUREMENTS_FILE" "## Rows" "$row"
   echo "$row"
 }
 
