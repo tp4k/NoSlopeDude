@@ -66,3 +66,85 @@ fn test_binary_name_is_nsd() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+const ESC_BIDI_NAME: &str = "dir\u{1b}[31m\u{202e}name";
+
+#[test]
+fn test_scan_summary_escapes_control_and_bidi_characters_in_the_target() -> anyhow::Result<()> {
+    let root = tempfile::tempdir()?;
+    let target = root.path().join(ESC_BIDI_NAME);
+    std::fs::create_dir(&target)?;
+    let output_dir = tempfile::tempdir()?;
+    let output = Command::new(env!("CARGO_BIN_EXE_nsd"))
+        .arg("scan")
+        .arg(&target)
+        .arg("--output")
+        .arg(output_dir.path())
+        .output()?;
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout)?;
+    assert!(!stdout.contains('\u{1b}'), "raw ESC in: {stdout:?}");
+    assert!(!stdout.contains('\u{202e}'), "raw U+202E in: {stdout:?}");
+    let target_line = stdout
+        .lines()
+        .find(|line| line.starts_with("  target: "))
+        .ok_or_else(|| anyhow::anyhow!("no target line in: {stdout:?}"))?;
+    assert!(target_line.contains("\\u{1b}"), "got: {target_line:?}");
+    assert!(target_line.contains("\\u{202e}"), "got: {target_line:?}");
+    assert!(stdout.ends_with('\n'));
+    assert!(stdout.starts_with("Scan settings:\n  target: "));
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_scan_summary_escapes_a_newline_in_the_target() -> anyhow::Result<()> {
+    let root = tempfile::tempdir()?;
+    let target = root.path().join("dir\nNSD-FAKE");
+    std::fs::create_dir(&target)?;
+    let output_dir = tempfile::tempdir()?;
+    let output = Command::new(env!("CARGO_BIN_EXE_nsd"))
+        .arg("scan")
+        .arg(&target)
+        .arg("--output")
+        .arg(output_dir.path())
+        .output()?;
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout)?;
+    let target_line = stdout
+        .lines()
+        .find(|line| line.starts_with("  target: "))
+        .ok_or_else(|| anyhow::anyhow!("no target line in: {stdout:?}"))?;
+    assert!(
+        target_line.contains("\\u{a}NSD-FAKE"),
+        "got: {target_line:?}"
+    );
+    assert!(
+        stdout.lines().all(|line| !line.starts_with("NSD-FAKE")),
+        "injected line in: {stdout:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn test_scan_error_escapes_control_and_bidi_characters() -> anyhow::Result<()> {
+    let root = tempfile::tempdir()?;
+    let target = root.path().join("src-dir");
+    std::fs::create_dir(&target)?;
+    let blocker = root.path().join("blocker");
+    std::fs::write(&blocker, "not a directory")?;
+    let output = Command::new(env!("CARGO_BIN_EXE_nsd"))
+        .arg("scan")
+        .arg(&target)
+        .arg("--output")
+        .arg(blocker.join("out\u{1b}[31m\u{202e}"))
+        .output()?;
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr)?;
+    assert!(stderr.starts_with("error: "), "got: {stderr:?}");
+    assert!(stderr.contains("\\u{1b}"), "got: {stderr:?}");
+    assert!(stderr.contains("\\u{202e}"), "got: {stderr:?}");
+    assert!(!stderr.contains('\u{1b}'), "raw ESC in: {stderr:?}");
+    assert!(!stderr.contains('\u{202e}'), "raw U+202E in: {stderr:?}");
+    Ok(())
+}
