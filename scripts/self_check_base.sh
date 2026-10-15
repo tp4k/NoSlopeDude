@@ -2,10 +2,8 @@
 # Prints the `nsd check --base` argument for .github/workflows/self-check.yml.
 #   self_check_base.sh <event> <before> <base_ref>
 # pull_request -> origin/<base_ref>; push -> <before>, or HEAD^ when <before>
-# is all zeros or not a commit here; HEAD without a parent prints nothing.
+# is not a commit here (the all-zero SHA of a new branch never is); HEAD without a parent prints nothing.
 set -euo pipefail
-
-ZERO_SHA="0000000000000000000000000000000000000000"
 
 main() {
   if [[ $# -ne 3 ]]; then
@@ -22,7 +20,7 @@ main() {
       echo "origin/$base_ref"
       ;;
     push)
-      if [[ "$before" != "$ZERO_SHA" ]] && git cat-file -e "${before}^{commit}" 2>/dev/null; then
+      if git cat-file -e "${before}^{commit}" 2>/dev/null; then
         echo "$before"
       elif git rev-parse --verify --quiet "HEAD^" >/dev/null; then
         echo "HEAD^"
