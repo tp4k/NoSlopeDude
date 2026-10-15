@@ -3,7 +3,7 @@
 # cache) under `/usr/bin/time -l` on a scratch git repository built from a
 # plain copy of the D25 perf fixture plus one small new Java file, and
 # inserts a row (fixture shas, cold and warm wall seconds and peak RSS, the
-# cache size after the warm run, the check's exit status, date+HEAD sha,
+# cache size after the warm run, the cold run's check exit status, date+HEAD sha,
 # machine) under `## Check rows` in docs/measurements.md. Refuses to run
 # without the fixture (see scripts/fetch_perf_fixture.sh) and refuses the
 # row when the cold and warm outputs differ. The check runs in the scratch
@@ -141,15 +141,11 @@ main() {
 
   local cold_json="$output_dir/cold.json" warm_json="$output_dir/warm.json"
   local cold_log="$output_dir/cold.time" warm_log="$output_dir/warm.time"
-  local cold_status warm_status
+  local cold_status
   cold_status="$(run_timed_check "$bin" "$plain_dir" "$cold_json" "$cold_log")"
-  warm_status="$(run_timed_check "$bin" "$plain_dir" "$warm_json" "$warm_log")"
+  run_timed_check "$bin" "$plain_dir" "$warm_json" "$warm_log" >/dev/null
 
   require_matching_outputs "$cold_json" "$warm_json"
-  if [ "$cold_status" != "$warm_status" ]; then
-    echo "error: cold and warm check exit statuses differ ($cold_status vs $warm_status); not recording a row" >&2
-    exit 1
-  fi
 
   local cold_cells warm_cells cache_mb
   cold_cells="$(time_cells "$cold_log")"

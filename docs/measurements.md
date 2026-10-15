@@ -930,8 +930,7 @@ commits it as the base, commits one small new Java file as the candidate, and
 runs `nsd check --base HEAD~1 --format json` from that repo root twice under
 `/usr/bin/time -l`: cold (no `<git dir>/nsd` cache), then warm. The check never
 runs inside the fixture clones. The script refuses to write a row when the
-fixture is missing or when the cold and warm JSON outputs (or exit statuses)
-differ.
+fixture is missing or when the cold and warm JSON outputs differ.
 
 Each row: date (UTC) with `(nsd@<full HEAD sha>)`, suffixed `+dirty` when
 `git status --porcelain -- src Cargo.toml Cargo.lock` is non-empty · machine ·
@@ -940,8 +939,8 @@ file, so the check analyses one added file against the whole base) · cold wall
 seconds and cold peak RSS in MB · warm wall seconds and warm peak RSS in MB
 (`/usr/bin/time -l`'s `real` and `maximum resident set size`) · cache size in
 MB after the warm run (`du -sk` of `<git dir>/nsd/cache`, so kilobyte blocks
-divided by 1024, not apparent bytes) · the check's exit status (the same for
-both runs). Exit status 2 on the 2026-10-15 row is the check's own result,
+divided by 1024, not apparent bytes) · the cold run's check exit status (the
+warm run's `exit_status` is part of the compared JSON). Exit status 2 on the 2026-10-15 row is the check's own result,
 not a script failure: its one diagnostic is `NSD-A102` (`too_large`) for
 `angular/.github/actions/deploy-docs-site/main.js`, a file the base already
 carries; the candidate file raises nothing.
