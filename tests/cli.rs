@@ -67,8 +67,10 @@ fn test_binary_name_is_nsd() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 const ESC_BIDI_NAME: &str = "dir\u{1b}[31m\u{202e}name";
 
+#[cfg(unix)]
 #[test]
 fn test_scan_summary_escapes_control_and_bidi_characters_in_the_target() -> anyhow::Result<()> {
     let root = tempfile::tempdir()?;
