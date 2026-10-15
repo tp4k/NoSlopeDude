@@ -10,7 +10,7 @@ Scans a local folder or a public GitHub repository (a shallow, single-branch
 clone of the default branch) and reports on `.java`, `.js`, `.jsx`, `.mjs`,
 `.cjs`, `.ts`, and `.tsx` source files.
 
-The terminal summary and runtime error messages are escaped the same way as in `check`. Argument-parsing errors printed by the command-line parser are not yet escaped (see `docs/deferred-work.md`).
+The terminal summary and runtime error messages are escaped the same way as in `check`. Argument-parsing errors printed by the command-line parser are escaped the same way, including a newline inside an argument value, which prints as `\u{a}` instead of starting a new line.
 
 ### Arguments
 
@@ -68,7 +68,7 @@ Each line starts with the code. What follows depends on the code (`<span>` is `<
 | `NSD-C101` | `nsd.yml` |
 | `NSD-C102`, `NSD-G101` | a free-text message, with no path in a fixed position |
 
-Non-UTF-8 path bytes print as `%XX`, and control characters and Unicode bidi controls (U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069) in any text print as `\u{..}`.
+Non-UTF-8 path bytes print as `%XX`, and control characters and Unicode bidi controls (U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069) in any text print as `\u{..}`. Argument-parsing errors from the command-line parser are escaped the same way, a newline inside an argument value included, and still exit `2`.
 
 ### Output caps
 

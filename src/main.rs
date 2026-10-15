@@ -4,6 +4,8 @@ use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::Context;
+use clap::builder::StyledStr;
+use clap::error::{ContextValue, Error as ClapError};
 use clap::Parser;
 use git2::Repository;
 
@@ -27,7 +29,15 @@ struct Trusted {
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error) if !error.use_stderr() => error.exit(),
+        Err(error) => {
+            let code = error.exit_code();
+            let _ = std::io::stderr().write_all(escaped_argument_error(error).as_bytes());
+            std::process::exit(code);
+        }
+    };
     match cli.command {
         Command::Scan(args) => match run_scan(args) {
             Ok(()) => ExitCode::SUCCESS,
@@ -38,6 +48,69 @@ fn main() -> ExitCode {
         },
         Command::Check(args) => ExitCode::from(run_check_command(&args)),
     }
+}
+
+/// Clap's message for an argument error, uncoloured, with every value it
+/// quotes passed through `escape_terminal` before rendering (a newline inside
+/// a value included, so it cannot start a line of its own), then every line
+/// escaped again. Values with nothing to escape leave the message as clap
+/// renders it.
+fn escaped_argument_error(mut error: ClapError) -> String {
+    let mut raw_values: Vec<(String, String)> = Vec::new();
+    let mut escape_value = |value: &str| -> String {
+        let escaped = escape_terminal(value);
+        if escaped != value {
+            raw_values.push((value.to_string(), escaped.clone()));
+        }
+        escaped
+    };
+    let mut replaced = Vec::new();
+    for (kind, value) in error.context() {
+        match value {
+            ContextValue::String(text) => {
+                replaced.push((kind, ContextValue::String(escape_value(text))));
+            }
+            ContextValue::Strings(texts) => {
+                let escaped = texts.iter().map(|text| escape_value(text)).collect();
+                replaced.push((kind, ContextValue::Strings(escaped)));
+            }
+            _ => {}
+        }
+    }
+    // Longest first, so a value that contains another is replaced whole.
+    raw_values.sort_by_key(|(raw, _)| std::cmp::Reverse(raw.len()));
+    let reescape = |styled: &StyledStr| -> StyledStr {
+        let mut text = styled.ansi().to_string();
+        for (raw, escaped) in &raw_values {
+            text = text.replace(raw.as_str(), escaped);
+        }
+        StyledStr::from(text)
+    };
+    if !raw_values.is_empty() {
+        for (kind, value) in error.context() {
+            match value {
+                ContextValue::StyledStr(styled) => {
+                    replaced.push((kind, ContextValue::StyledStr(reescape(styled))));
+                }
+                ContextValue::StyledStrs(styled) => {
+                    let escaped = styled.iter().map(reescape).collect();
+                    replaced.push((kind, ContextValue::StyledStrs(escaped)));
+                }
+                _ => {}
+            }
+        }
+    }
+    for (kind, value) in replaced {
+        error.insert(kind, value);
+    }
+    let rendered = error.render().to_string();
+    rendered
+        .split_inclusive('\n')
+        .map(|line| match line.strip_suffix('\n') {
+            Some(body) => format!("{}\n", escape_terminal(body)),
+            None => escape_terminal(line),
+        })
+        .collect()
 }
 
 fn run_scan(args: ScanArgs) -> anyhow::Result<()> {
