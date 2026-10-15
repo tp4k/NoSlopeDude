@@ -722,3 +722,28 @@ fn test_insert_refuses_a_heading_whose_section_has_no_table() -> anyhow::Result<
     assert_eq!(std::fs::read_to_string(&file)?, before);
     Ok(())
 }
+
+#[cfg(unix)]
+#[test]
+fn test_row_is_inserted_after_a_table_that_ends_the_file() -> anyhow::Result<()> {
+    // `## Check rows` is the last section of docs/measurements.md: its table
+    // ends at EOF, with no later non-table line to trigger the insertion.
+    let dir = tempfile::tempdir()?;
+    let file = dir.path().join("measurements.md");
+    std::fs::write(&file, "## Rows\n\n| a |\n| --- |\n| 1 |\n")?;
+
+    let output = run_sourced(&format!(
+        "insert_table_row '{}' '## Rows' '| 2 |'",
+        file.display()
+    ))?;
+    assert!(
+        output.status.success(),
+        "insert_table_row failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file)?,
+        "## Rows\n\n| a |\n| --- |\n| 1 |\n| 2 |\n"
+    );
+    Ok(())
+}
