@@ -54,13 +54,19 @@ fn is_bidi_control(character: char) -> bool {
     )
 }
 
+/// Whether a character must not reach an output raw: every control character
+/// (C0, DEL and C1) and every bidi control.
+pub(crate) fn needs_escape(character: char) -> bool {
+    character.is_control() || is_bidi_control(character)
+}
+
 /// Replaces every control character (C0, DEL and C1) and every bidi control
 /// with `\u{..}`, so text from a PR can neither move the cursor, start an
 /// escape sequence, end its own line nor reorder the line around it.
 pub fn escape_terminal(text: &str) -> String {
     let mut escaped = String::with_capacity(text.len());
     for character in text.chars() {
-        if character.is_control() || is_bidi_control(character) {
+        if needs_escape(character) {
             escaped.push_str(&format!("\\u{{{:x}}}", u32::from(character)));
         } else {
             escaped.push(character);

@@ -11,7 +11,7 @@ use crate::policy::diagnostics::BaseCallable;
 
 use crate::report::published_name;
 
-use super::CANDIDATE_CONFIG_FILE;
+use super::{needs_escape, CANDIDATE_CONFIG_FILE};
 
 /// The `schema_version` of both scopes' canonical documents.
 pub const SCHEMA_VERSION: u64 = 1;
@@ -23,6 +23,8 @@ pub const SCAN_RESULT_SCOPE: &str = "scan";
 const HIDDEN_REPOSITORY: &str = "<repository>";
 /// The placeholder a hidden config path is replaced with in a message.
 const HIDDEN_CONFIG: &str = "<config>";
+/// DEL: the first character `escape_controls` considers; C0 is serde_json's.
+const DEL: char = '\u{7f}';
 
 /// One compact JSON document and a newline: the four base keys only.
 pub fn render_json(diagnostics: &[CheckDiagnostic], exit_status: u8) -> String {
@@ -71,10 +73,12 @@ fn base_document(diagnostics: &[CheckDiagnostic], exit_status: u8) -> Value {
 /// Keys come out sorted (`serde_json` is built without `preserve_order`),
 /// integers print as integers, and a float prints in its shortest
 /// round-trip form with `-0.0` written as `0.0` (D6). A non-finite float
-/// has no JSON spelling and is never built: `float` refuses it.
+/// has no JSON spelling and is never built: `float` refuses it. Control
+/// characters serde_json leaves raw (DEL, C1) and bidi controls are written
+/// as lowercase `\uXXXX`, in keys and values alike.
 pub fn canonical_document(mut document: Value) -> String {
     normalize_floats(&mut document);
-    format!("{document}\n")
+    escape_controls(&format!("{document}\n"))
 }
 
 /// The scan scope's canonical writer: the same normalized tree as
@@ -82,7 +86,22 @@ pub fn canonical_document(mut document: Value) -> String {
 /// ended by a newline.
 pub fn canonical_document_pretty(mut document: Value) -> String {
     normalize_floats(&mut document);
-    format!("{document:#}\n")
+    escape_controls(&format!("{document:#}\n"))
+}
+
+/// Rewrites the non-ASCII-C0 characters `needs_escape` names as `\uXXXX`.
+/// Outside a string a rendered document holds only ASCII structure, and serde_json
+/// already escapes C0 inside strings, so only DEL, C1 and bidi controls change.
+fn escape_controls(rendered: &str) -> String {
+    let mut escaped = String::with_capacity(rendered.len());
+    for character in rendered.chars() {
+        if character >= DEL && needs_escape(character) {
+            escaped.push_str(&format!("\\u{:04x}", u32::from(character)));
+        } else {
+            escaped.push(character);
+        }
+    }
+    escaped
 }
 
 /// A float for a canonical document. Callers hold finite values only.
