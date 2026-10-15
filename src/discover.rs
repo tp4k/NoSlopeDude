@@ -530,4 +530,29 @@ mod tests {
         assert_eq!(ELIGIBLE_FILE_CALLS.with(std::cell::Cell::get), 1);
         Ok(())
     }
+
+    #[test]
+    #[should_panic(expected = "ineligible checkout set lock poisoned")]
+    fn test_poisoned_ineligible_lock_panics() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("c")).expect("create dir");
+        std::fs::write(dir.path().join("c/.git"), "gitdir: elsewhere\n").expect("write marker");
+        let checkout = WalkBuilder::new(dir.path())
+            .hidden(false)
+            .build()
+            .filter_map(Result::ok)
+            .find(|entry| entry.path() == dir.path().join("c"))
+            .expect("checkout entry");
+        let ineligible: Mutex<HashSet<PathBuf>> = Mutex::default();
+        let _ = std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    let _held = ineligible.lock();
+                    panic!("poison the ineligible lock");
+                })
+                .join()
+        });
+
+        nested_checkout_of(&checkout, dir.path(), &Override::empty(), &ineligible);
+    }
 }
