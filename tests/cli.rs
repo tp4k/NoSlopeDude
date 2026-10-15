@@ -348,7 +348,7 @@ fn test_argument_error_without_hostile_characters_prints_clap_rendering_unchange
 }
 
 #[test]
-fn test_help_and_version_print_as_clap_does() -> anyhow::Result<()> {
+fn test_help_prints_as_clap_does() -> anyhow::Result<()> {
     for args in [&["--help"][..], &["check", "--help"][..]] {
         let (code, stdout, stderr) = run_nsd(args)?;
         assert_eq!(code, Some(0), "{args:?}: {stderr:?}");
