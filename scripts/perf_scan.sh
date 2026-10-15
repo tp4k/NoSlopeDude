@@ -161,23 +161,46 @@ build_plain_tree() {
 }
 
 # insert_table_row <file> <heading> <row>
-# Adds <row> to <file>. Scaffold: still appends at EOF, ignoring <heading>.
+# Inserts <row> right after the last row of the first table under the line
+# that is exactly <heading>. Several script-written tables share one file,
+# so appending at EOF would put the row under whichever table is last. It
+# fails closed (`error:` on stderr, exit 1, <file> untouched) when the
+# heading is absent or its section holds no table before the next `## `
+# heading, instead of falling back to EOF.
 insert_table_row() {
-  local file="$1" row="$3"
-  echo "$row" >>"$file"
+  local file="$1" heading="$2" row="$3" tmp="$1.tmp.$$"
+  if ! ROW="$row" awk -v heading="$heading" '
+    function emit() { print ENVIRON["ROW"]; state = 3 }
+    state == 0 && $0 == heading { state = 1; print; next }
+    state == 1 && /^## / { state = -1 }
+    state == 1 && /^\|/ { state = 2 }
+    state == 2 && !/^\|/ { emit() }
+    { print }
+    END { if (state == 2) emit(); exit (state == 3 ? 0 : 1) }
+  ' "$file" >"$tmp"; then
+    rm -f "$tmp"
+    echo "error: no table under the heading \"$heading\" in $file; not inserting" >&2
+    return 1
+  fi
+  cat "$tmp" >"$file" && rm -f "$tmp"
 }
 
 # make_temp_paths
 # Creates the scan's three temp paths in the globals `output_dir`,
 # `time_log` and `plain_dir` and installs the EXIT trap that removes them.
+# The trap is installed before the first mktemp, so a later failing mktemp
+# does not leak the earlier paths.
 # Not `local`: the trap fires after main() returns, outside main's dynamic
 # scope, where a `local` binding is already gone (`set -u` reports it as
 # "unbound variable").
 make_temp_paths() {
+  output_dir=""
+  time_log=""
+  plain_dir=""
+  trap 'rm -rf "$output_dir" "$time_log" "$plain_dir"' EXIT
   output_dir="$(mktemp -d)"
   time_log="$(mktemp)"
   plain_dir="$(mktemp -d "${TMPDIR:-/tmp}/nsd-perf-plain.XXXXXX")"
-  trap 'rm -rf "$output_dir" "$time_log" "$plain_dir"' EXIT
 }
 
 main() {
