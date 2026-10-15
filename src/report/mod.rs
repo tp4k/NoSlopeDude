@@ -20,7 +20,9 @@ use anyhow::Context;
 use serde::Serialize;
 
 use crate::discover::DiscoverResult;
-use crate::format::{canonical_document_pretty, SCAN_RESULT_SCOPE, SCHEMA_VERSION};
+use crate::format::{
+    canonical_document_pretty, escape_terminal, SCAN_RESULT_SCOPE, SCHEMA_VERSION,
+};
 use crate::metrics;
 use crate::model::{
     Callable, CloneGroup, ClonesResult, FileScanSummary, LanguageFamily, MetricsResult,
@@ -735,19 +737,16 @@ pub fn terminal_summary(report: &Report) -> String {
     let mut out = String::new();
 
     let _ = writeln!(out, "Scan settings:");
-    let _ = writeln!(out, "  target: {}", report.scan.target);
-    let _ = write!(
-        out,
-        "  revision: {}",
-        report.scan.revision.sha.as_deref().unwrap_or(
-            report
-                .scan
-                .revision
-                .unavailable_reason
-                .as_deref()
-                .unwrap_or("unknown")
-        )
+    let _ = writeln!(out, "  target: {}", escape_terminal(&report.scan.target));
+    let revision = report.scan.revision.sha.as_deref().unwrap_or(
+        report
+            .scan
+            .revision
+            .unavailable_reason
+            .as_deref()
+            .unwrap_or("unknown"),
     );
+    let _ = write!(out, "  revision: {}", escape_terminal(revision));
     // B9: mirrors the ` (dirty: {dirty})` suffix html.rs:70-72 already
     // appends to the same line in report.html; `report.json` has always
     // carried the flag as its own field. `None` (no git repository) prints
@@ -757,7 +756,11 @@ pub fn terminal_summary(report: &Report) -> String {
     }
     let _ = writeln!(out);
     let _ = writeln!(out, "  include_tests: {}", report.scan.include_tests);
-    let _ = writeln!(out, "  exclude: {:?}", report.scan.exclude);
+    let _ = writeln!(
+        out,
+        "  exclude: {}",
+        escape_terminal(&format!("{:?}", report.scan.exclude))
+    );
     let _ = writeln!(out, "  min_clone_lines: {}", report.scan.min_clone_lines);
     let _ = writeln!(out);
 

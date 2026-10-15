@@ -32,7 +32,7 @@ fn main() -> ExitCode {
         Command::Scan(args) => match run_scan(args) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
-                eprintln!("error: {error:#}");
+                eprintln!("error: {}", escape_terminal(&format!("{error:#}")));
                 ExitCode::FAILURE
             }
         },
