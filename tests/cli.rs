@@ -148,3 +148,33 @@ fn test_scan_error_escapes_control_and_bidi_characters() -> anyhow::Result<()> {
     assert!(!stderr.contains('\u{202e}'), "raw U+202E in: {stderr:?}");
     Ok(())
 }
+
+#[test]
+fn test_scan_error_escapes_control_and_bidi_characters_in_the_cause_chain() -> anyhow::Result<()> {
+    let root = tempfile::tempdir()?;
+    let target = root.path().join("src-dir");
+    std::fs::create_dir(&target)?;
+    let output_dir = tempfile::tempdir()?;
+    let output = Command::new(env!("CARGO_BIN_EXE_nsd"))
+        .arg("scan")
+        .arg(&target)
+        .arg("--output")
+        .arg(output_dir.path())
+        .arg("--exclude")
+        .arg("a[\u{1b}[31m\u{202e}")
+        .output()?;
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr)?;
+    assert!(
+        stderr.starts_with("error: invalid exclusion glob"),
+        "got: {stderr:?}"
+    );
+    let (_, cause) = stderr
+        .split_once(": error parsing glob")
+        .ok_or_else(|| anyhow::anyhow!("no cause line in: {stderr:?}"))?;
+    assert!(cause.contains("\\u{1b}"), "got: {cause:?}");
+    assert!(cause.contains("\\u{202e}"), "got: {cause:?}");
+    assert!(!stderr.contains('\u{1b}'), "raw ESC in: {stderr:?}");
+    assert!(!stderr.contains('\u{202e}'), "raw U+202E in: {stderr:?}");
+    Ok(())
+}
