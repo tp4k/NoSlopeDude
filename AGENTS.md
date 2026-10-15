@@ -54,8 +54,16 @@ for the per-step detail and evidence:
 - **M6–M7: done.** Check-scope JSON, the scan-scope canonical report,
   renderers, HTML caps, nested-checkout exclusion for `scan`, the M7-2 delivery
   sweep, and the M7-1a golden recapture (closed at `a7a7119`).
-- Everything is merged to `main` (last: PR #12); there is no unmerged branch.
-  If this list disagrees with the status file, the status file wins.
+- The DoD-sweep gaps of run 2026-10-15-1107-plan-dod-gaps are closed on branch
+  `feat/plan-dod-gaps` (status rows M7-3 to M7-6): `scan` reads the root
+  `nsd.yml` threshold, check-side total parse loss has a test, warm and cold
+  `check` time and cache size are measured, and the repository ships a CI
+  self-check workflow (no hosted run observed). It is a smoke run: it gates no
+  first-party source, because the repository has no Java/JS/TS outside fixtures
+  and a Rust lowering is post-v1.
+- `main` carries everything through PR #12; the run branch above is not merged
+  into it until its PR lands. If this list disagrees with the status file, the
+  status file wins.
 
 The import constraints still bind anything that touches imported material or
 reaches back into the archive:
