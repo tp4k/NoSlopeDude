@@ -78,7 +78,7 @@ fn base_document(diagnostics: &[CheckDiagnostic], exit_status: u8) -> Value {
 /// as lowercase `\uXXXX`, in keys and values alike.
 pub fn canonical_document(mut document: Value) -> String {
     normalize_floats(&mut document);
-    escape_controls(&format!("{document}\n"))
+    escape_controls(format!("{document}\n"))
 }
 
 /// The scan scope's canonical writer: the same normalized tree as
@@ -86,16 +86,21 @@ pub fn canonical_document(mut document: Value) -> String {
 /// ended by a newline.
 pub fn canonical_document_pretty(mut document: Value) -> String {
     normalize_floats(&mut document);
-    escape_controls(&format!("{document:#}\n"))
+    escape_controls(format!("{document:#}\n"))
 }
 
 /// Rewrites the non-ASCII-C0 characters `needs_escape` names as `\uXXXX`.
 /// Outside a string a rendered document holds only ASCII structure, and serde_json
 /// already escapes C0 inside strings, so only DEL, C1 and bidi controls change.
-fn escape_controls(rendered: &str) -> String {
+/// A document with none of them is returned as it came, without a copy.
+fn escape_controls(rendered: String) -> String {
+    let escapes = |character: char| character >= DEL && needs_escape(character);
+    if !rendered.chars().any(escapes) {
+        return rendered;
+    }
     let mut escaped = String::with_capacity(rendered.len());
     for character in rendered.chars() {
-        if character >= DEL && needs_escape(character) {
+        if escapes(character) {
             escaped.push_str(&format!("\\u{:04x}", u32::from(character)));
         } else {
             escaped.push(character);
@@ -333,4 +338,18 @@ fn base_callable(base: &BaseCallable) -> Value {
         "cc": base.cc,
         "sloc": base.sloc,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::escape_controls;
+
+    #[test]
+    fn test_escape_controls_returns_a_clean_document_without_copying() {
+        let clean = "{\"name\":\"caf\u{e9} \\u0007\"}\n".to_string();
+        let address = clean.as_ptr();
+        let returned = escape_controls(clean);
+        assert_eq!(returned, "{\"name\":\"caf\u{e9} \\u0007\"}\n");
+        assert_eq!(returned.as_ptr(), address, "a clean document was copied");
+    }
 }
