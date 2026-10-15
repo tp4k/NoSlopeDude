@@ -700,3 +700,25 @@ fn test_failed_plain_dir_mktemp_leaks_no_temp_files() -> anyhow::Result<()> {
     assert!(left.is_empty(), "the EXIT trap left {left:?} behind");
     Ok(())
 }
+
+#[cfg(unix)]
+#[test]
+fn test_insert_refuses_a_heading_whose_section_has_no_table() -> anyhow::Result<()> {
+    // `## Rows` holds no table; the next section's table must not receive
+    // the row just because it is the first table after the heading.
+    let dir = tempfile::tempdir()?;
+    let file = dir.path().join("measurements.md");
+    let before = "## Rows\n\nprose only\n\n## Check rows\n\n| c |\n| --- |\n| 9 |\n";
+    std::fs::write(&file, before)?;
+
+    let output = run_sourced(&format!(
+        "insert_table_row '{}' '## Rows' '| 5 |'",
+        file.display()
+    ))?;
+    assert!(
+        !output.status.success(),
+        "expected a nonzero exit for a section without a table"
+    );
+    assert_eq!(std::fs::read_to_string(&file)?, before);
+    Ok(())
+}
