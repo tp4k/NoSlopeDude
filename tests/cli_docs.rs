@@ -108,6 +108,19 @@ fn step_text(step: &Value) -> String {
     serde_yaml_ng::to_string(step).expect("serialise a step")
 }
 
+fn without_expressions(text: &str) -> String {
+    let mut kept = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("${{") {
+        kept.push_str(&rest[..start]);
+        rest = rest[start..]
+            .split_once("}}")
+            .map_or("", |(_, after)| after);
+    }
+    kept.push_str(rest);
+    kept
+}
+
 fn step_index(steps: &[Value], needle: &str) -> usize {
     steps
         .iter()
@@ -132,6 +145,16 @@ fn test_self_check_workflow_runs_a_base_check_with_full_history() {
     let tests = step_index(&steps, TEST_COMMAND);
     let check = step_index(&steps, NSD_CHECK);
     assert!(tests < check, "cargo test must run before nsd check");
+    let build = step_index(&steps, "cargo build --locked --release");
+    assert!(build < tests, "the release build must precede cargo test");
+    assert!(workflow["on"].get("pull_request").is_some());
+    let push_branches: Vec<&str> = workflow["on"]["push"]["branches"]
+        .as_sequence()
+        .expect("push branches")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(push_branches, ["main"]);
     let line = run_text(&steps[check])
         .lines()
         .find(|line| line.contains(NSD_CHECK))
@@ -166,7 +189,36 @@ fn test_self_check_workflow_takes_its_base_from_the_event() {
             "a literal origin/main in {}",
             run_text(step)
         );
+        assert!(
+            !without_expressions(&step_text(step)).contains("origin/main"),
+            "a literal origin/main in {}",
+            step_text(step)
+        );
     }
+}
+
+#[test]
+fn test_self_check_workflow_checks_the_resolved_base() {
+    let workflow = workflow();
+    let steps = steps(&workflow);
+
+    let resolve = &steps[step_index(&steps, BASE_SCRIPT)];
+    let id = resolve["id"].as_str().expect("the resolve step has an id");
+    let run = run_text(resolve);
+    assert!(
+        run.contains("base=") && run.contains(">> \"$GITHUB_OUTPUT\""),
+        "the resolved base is not written to GITHUB_OUTPUT: {run}"
+    );
+    let output = format!("steps.{id}.outputs.base");
+    let check = &steps[step_index(&steps, NSD_CHECK)];
+    assert_eq!(
+        check["env"]["BASE"].as_str(),
+        Some(format!("${{{{ {output} }}}}").as_str())
+    );
+    assert_eq!(
+        check["if"].as_str(),
+        Some(format!("{output} != ''").as_str())
+    );
 }
 
 #[test]
