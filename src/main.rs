@@ -343,3 +343,19 @@ fn canonical_even_if_missing(path: &Path) -> anyhow::Result<PathBuf> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use clap::error::ErrorKind;
+
+    use super::*;
+
+    #[test]
+    fn test_escaped_argument_error_escapes_controls_outside_quoted_values() {
+        let error = ClapError::raw(ErrorKind::InvalidValue, "x\u{202e}y\u{2066}\nnext line\n");
+        assert_eq!(
+            escaped_argument_error(error),
+            "error: x\\u{202e}y\\u{2066}\nnext line\n"
+        );
+    }
+}
