@@ -4,9 +4,9 @@ use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::Context;
-use clap::builder::StyledStr;
+use clap::builder::{StyledStr, Styles};
 use clap::error::{ContextValue, Error as ClapError};
-use clap::Parser;
+use clap::{CommandFactory, FromArgMatches, Parser};
 use git2::Repository;
 
 use nsd::check::{run_check, CheckDetails, CheckDiagnostic, CheckMode, CheckRequest};
@@ -34,6 +34,7 @@ fn main() -> ExitCode {
         Err(error) if !error.use_stderr() => error.exit(),
         Err(error) => {
             let code = error.exit_code();
+            let error = plain_argument_error().unwrap_or(error);
             let _ = std::io::stderr().write_all(escaped_argument_error(error).as_bytes());
             std::process::exit(code);
         }
@@ -48,6 +49,17 @@ fn main() -> ExitCode {
         },
         Command::Check(args) => ExitCode::from(run_check_command(&args)),
     }
+}
+
+/// The same argument error parsed again without styles, so that no text clap
+/// adds carries a style code a quoted value could be mistaken for.
+fn plain_argument_error() -> Option<ClapError> {
+    let mut command = Cli::command().styles(Styles::plain());
+    match command.try_get_matches_from_mut(std::env::args_os()) {
+        Ok(matches) => Cli::from_arg_matches(&matches).err(),
+        Err(error) => Some(error),
+    }
+    .map(|error| error.format(&mut command))
 }
 
 /// Clap's message for an argument error, uncoloured, with every value it
@@ -79,6 +91,8 @@ fn escaped_argument_error(mut error: ClapError) -> String {
     }
     // Longest first, so a value that contains another is replaced whole.
     raw_values.sort_by_key(|(raw, _)| std::cmp::Reverse(raw.len()));
+    // The raw text: stripping styles would strip escape sequences from the
+    // values too, so they would no longer match.
     let reescape = |styled: &StyledStr| -> StyledStr {
         let mut text = styled.ansi().to_string();
         for (raw, escaped) in &raw_values {
