@@ -822,6 +822,41 @@ fn test_deleting_an_invalid_encoding_file_raises_nothing() {
 }
 
 #[test]
+fn test_changed_file_with_invalid_encoding_only_in_the_base_raises_a102_while_v102_is_off() {
+    let fx = fixture();
+    let class = java_class("Old", LOW_CC_IFS, 0);
+    fx.commit(&[("Old.java", &with_invalid_utf8(&class))]);
+    fx.stage("Old.java", class.as_bytes());
+    let (_dir, off) = write_trusted_config(V102_OFF);
+
+    let outcome = fx.check_with(CheckMode::Staged, Some(&off), false);
+
+    assert_eq!(
+        coverage_reasons(&outcome),
+        vec![("Old.java".to_string(), "invalid_encoding")]
+    );
+    assert_eq!(outcome.exit_status, EXIT_ERROR);
+}
+
+#[test]
+fn test_renaming_an_invalid_encoding_file_out_of_scope_raises_nothing() {
+    let fx = fixture();
+    let bytes = with_invalid_utf8(&java_class("Old", LOW_CC_IFS, 0));
+    fx.commit(&[
+        ("nsd.yml", b"version: 1\nexclude:\n  - legacy/**\n"),
+        ("Foo.java", java_class("Foo", LOW_CC_IFS, 0).as_bytes()),
+        ("Old.java", &bytes),
+    ]);
+    fx.unstage("Old.java");
+    fx.stage("legacy/Old.java", &bytes);
+
+    let outcome = fx.staged();
+
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    assert_eq!(outcome.exit_status, EXIT_PASS);
+}
+
+#[test]
 fn test_invalid_encoding_on_both_sides_raises_one_a102() {
     let fx = fixture();
     fx.commit(&[("util.ts", INVALID_UTF8_TS)]);
