@@ -161,23 +161,37 @@ fn is_bare_wildcard_arm(arm: Node) -> bool {
             .is_some_and(|only| only.kind() == WILDCARD_TOKEN)
 }
 
+/// `&&` and `||` inside a `binary_expression`; any other operator is no
+/// decision.
+fn operator_decision(node: Node) -> Option<DecisionKind> {
+    match operator_text(node) {
+        Some("&&") => Some(DecisionKind::And),
+        Some("||") => Some(DecisionKind::Or),
+        _ => None,
+    }
+}
+
+/// The `match` constructs: a non-wildcard arm is a `Case`, and a guard (the
+/// `condition` of an arm's `match_pattern`) is a `Branch`.
+fn match_decision(node: Node, kind: &str) -> Option<DecisionKind> {
+    match kind {
+        "match_arm" if !is_bare_wildcard_arm(node) => Some(DecisionKind::Case),
+        "match_pattern" if node.child_by_field_name("condition").is_some() => {
+            Some(DecisionKind::Branch)
+        }
+        _ => None,
+    }
+}
+
 fn decision_kind(node: Node, kind: &str) -> Option<DecisionKind> {
     match kind {
         "if_expression" => Some(DecisionKind::Branch),
         "let_declaration" if node.child_by_field_name("alternative").is_some() => {
             Some(DecisionKind::Branch)
         }
-        "match_pattern" if node.child_by_field_name("condition").is_some() => {
-            Some(DecisionKind::Branch)
-        }
         "while_expression" | "for_expression" => Some(DecisionKind::Loop),
-        "match_arm" if !is_bare_wildcard_arm(node) => Some(DecisionKind::Case),
-        "binary_expression" => match operator_text(node) {
-            Some("&&") => Some(DecisionKind::And),
-            Some("||") => Some(DecisionKind::Or),
-            _ => None,
-        },
-        _ => None,
+        "binary_expression" => operator_decision(node),
+        _ => match_decision(node, kind),
     }
 }
 
