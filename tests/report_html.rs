@@ -623,7 +623,11 @@ fn long_else_source() -> String {
 /// The escaping `src/report/html.rs::escape_html` applies, mirrored for
 /// expected text (`&` first, so the other entities are not double-escaped).
 fn escape_expected(text: &str) -> String {
-    text.replace('>', "&gt;")
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
 #[test]
