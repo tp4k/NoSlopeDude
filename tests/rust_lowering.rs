@@ -215,6 +215,11 @@ fn scan(root: &Path) -> (tempfile::TempDir, pipeline::PipelineOutput) {
     (output_dir, output)
 }
 
+fn report_json(output: &Path) -> serde_json::Value {
+    let text = fs::read_to_string(output.join("report.json")).expect("report.json");
+    serde_json::from_str(&text).expect("valid JSON")
+}
+
 #[test]
 fn test_rust_copy_pasted_blocks_share_clone_tokens() {
     let dir = tempfile::tempdir().expect("fixture tempdir");
@@ -238,7 +243,7 @@ fn test_rust_copy_pasted_blocks_share_clone_tokens() {
     )
     .expect("write c.rs");
 
-    let (_output_dir, output) = scan(dir.path());
+    let (output_dir, output) = scan(dir.path());
 
     assert_eq!(output.clones.groups.len(), 1, "{:?}", output.clones.groups);
     let group = &output.clones.groups[0];
@@ -250,6 +255,15 @@ fn test_rust_copy_pasted_blocks_share_clone_tokens() {
         .collect();
     files.sort();
     assert_eq!(files, ["src/a.rs", "src/b.rs"]);
+
+    let value = report_json(output_dir.path());
+    let flagged = |family: &str| value["scores"][family]["verbosity"]["flagged_lines"].as_u64();
+    assert!(
+        flagged("rust") > Some(0),
+        "redundant clone lines are the Rust family's flagged lines: {:?}",
+        flagged("rust")
+    );
+    assert_eq!(flagged("js_ts"), Some(0), "no JS/TS in this repo");
 }
 
 #[test]
@@ -303,4 +317,69 @@ fn probe(x: i32) -> i32 {\n\
         assert!(!lines.contains(&line), "doc comment line {line}: {lines:?}");
     }
     assert!(lines.contains(&6), "statement line 6: {lines:?}");
+}
+
+#[test]
+fn test_rust_bare_control_flow_lines_are_executable() {
+    let source = "fn probe(v: Vec<i32>) {\n\
+    loop {\n\
+        break;\n\
+    }\n\
+    for i in v {\n\
+        if i > 1 {\n\
+            continue;\n\
+        }\n\
+    }\n\
+    return;\n\
+}\n";
+    let analysis = analyze(source);
+    let lines = &analysis.executable_lines;
+    for (line, label) in [(3, "break"), (7, "continue"), (10, "return")] {
+        assert!(
+            lines.contains(&line),
+            "a line holding only `{label};` is executable: {lines:?}"
+        );
+    }
+}
+
+#[test]
+fn test_rust_scores_reach_terminal_and_html() {
+    let dir = tempfile::tempdir().expect("fixture tempdir");
+    let src = dir.path().join("src");
+    fs::create_dir_all(&src).expect("create src");
+    let mut body = String::from("pub fn busy(a: i32) -> i32 {\n    let mut r = 0;\n");
+    for index in 0..12 {
+        body.push_str(&format!("    if a == {index} {{ r += {index}; }}\n"));
+    }
+    body.push_str("    r\n}\n");
+    fs::write(src.join("lib.rs"), body).expect("write lib.rs");
+
+    let (output_dir, output) = scan(dir.path());
+
+    let value = report_json(output_dir.path());
+    let erosion = value["scores"]["rust"]["erosion"]
+        .as_f64()
+        .expect("erosion");
+    let ratio = value["scores"]["rust"]["verbosity"]["ratio"]
+        .as_f64()
+        .expect("ratio");
+    assert!(erosion > 0.0, "the Rust callable erodes: {erosion}");
+    let summary = nsd::report::terminal_summary(&output.report);
+    let line = format!("  rust:     {erosion:.4} / {ratio:.4}");
+    assert!(
+        summary.lines().any(|row| row == line),
+        "terminal summary lacks `{line}`:\n{summary}"
+    );
+
+    let html = fs::read_to_string(output_dir.path().join("report.html")).expect("report.html");
+    for (id, expected) in [("erosion-rust", erosion), ("verbosity-rust", ratio)] {
+        let marker = format!("id=\"{id}\" class=\"metric\">");
+        let start = html.find(&marker).expect("the HTML carries the Rust cell") + marker.len();
+        let cell = &html[start..start + html[start..].find('<').expect("cell closes")];
+        let shown: f64 = cell.parse().expect("a plain float");
+        assert!(
+            (shown - expected).abs() < 1e-4,
+            "{id}: {shown} vs {expected}"
+        );
+    }
 }

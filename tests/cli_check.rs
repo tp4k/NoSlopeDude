@@ -211,6 +211,22 @@ fn test_check_flags_a_rust_complexity_regression() {
 }
 
 #[test]
+fn test_check_json_reports_a_rust_family_summary() {
+    let fx = fixture();
+    fx.commit(&[("lib.rs", rust_fn("run", LOW_CC_IFS).as_bytes())]);
+    fx.stage("lib.rs", rust_fn("run", HIGH_CC_IFS).as_bytes());
+
+    let output = fx.nsd(&["check", "--staged", "--format", "json"]);
+
+    let document: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("the check prints one JSON document");
+    let scanned =
+        |family: &str| document["summaries"][family]["verbosity"]["scanned_lines"].as_u64();
+    assert!(scanned("rust") > Some(0), "{document}");
+    assert_eq!(scanned("js_ts"), Some(0), "{document}");
+}
+
+#[test]
 fn test_check_staged_clean_change_exits_0() {
     let fx = fixture();
     let base = java_class("Foo", LOW_CC_IFS);

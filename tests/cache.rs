@@ -310,6 +310,13 @@ fn test_rust_payload_round_trips() {
         )),
         "the Rust grammar keys its own entry"
     );
+    for other in [Grammar::JavaScript, Grammar::TypeScript, Grammar::Tsx] {
+        assert_ne!(
+            cache.entry_path(&key),
+            cache.entry_path(&CacheKey::new(blob_oid(RUST_SOURCE), other, MIN_LINES)),
+            "the Rust grammar keys its own entry, apart from {other:?}"
+        );
+    }
 }
 
 #[test]
