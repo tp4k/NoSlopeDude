@@ -6,7 +6,7 @@ use std::path::Path;
 
 use clap::Parser;
 
-use nsd::cli::{Cli, Command};
+use nsd::cli::{CheckArgs, Cli, Command};
 use nsd::config::Config;
 use serde_yaml_ng::Value;
 
@@ -37,6 +37,19 @@ fn documented_commands(section: &str) -> Vec<&str> {
     commands
 }
 
+fn parse_check(line: &str, substitutions: &[(&str, &str)]) -> CheckArgs {
+    let mut text = line.to_string();
+    for (from, to) in substitutions {
+        text = text.replace(from, to);
+    }
+    let cli = Cli::try_parse_from(text.split_whitespace())
+        .unwrap_or_else(|error| panic!("`{line}` does not parse: {error}"));
+    let Command::Check(args) = cli.command else {
+        panic!("`{line}` is not a check command");
+    };
+    args
+}
+
 #[test]
 fn test_documented_pre_commit_and_ci_commands_parse() {
     let doc = fs::read_to_string(CLI_DOC).expect("read docs/cli.md");
@@ -49,11 +62,7 @@ fn test_documented_pre_commit_and_ci_commands_parse() {
     let mut base = false;
     let mut allowed = false;
     for command in &commands {
-        let cli = Cli::try_parse_from(command.split_whitespace())
-            .unwrap_or_else(|error| panic!("`{command}` does not parse: {error}"));
-        let Command::Check(args) = cli.command else {
-            panic!("`{command}` is not a check command");
-        };
+        let args = parse_check(command, &[]);
         staged |= args.staged;
         base |= args.base.is_some();
         allowed |= args.allow_new_suppressions;
@@ -160,16 +169,13 @@ fn test_self_check_workflow_runs_a_base_check_with_full_history() {
         .lines()
         .find(|line| line.contains(NSD_CHECK))
         .expect("the nsd check line");
-    let arguments: Vec<String> = line
-        .replace("./target/release/nsd", "nsd")
-        .replace("\"$BASE\"", "origin/main")
-        .split_whitespace()
-        .map(str::to_string)
-        .collect();
-    let cli = Cli::try_parse_from(&arguments).unwrap_or_else(|error| panic!("`{line}`: {error}"));
-    let Command::Check(args) = cli.command else {
-        panic!("`{line}` is not a check command");
-    };
+    let args = parse_check(
+        line,
+        &[
+            ("./target/release/nsd", "nsd"),
+            ("\"$BASE\"", "origin/main"),
+        ],
+    );
     assert!(args.base.is_some(), "`{line}` has no --base");
     assert!(!args.staged, "`{line}` checks the (empty) index");
 }
@@ -199,6 +205,20 @@ fn test_self_check_workflow_takes_its_base_from_the_event() {
 }
 
 #[test]
+fn test_self_check_workflow_resolves_the_base_before_checking() {
+    let workflow = workflow();
+    let steps = steps(&workflow);
+
+    let resolve = step_index(&steps, BASE_SCRIPT);
+    let check = step_index(&steps, NSD_CHECK);
+
+    assert!(
+        resolve < check,
+        "`Resolve base` (step {resolve}) must precede `nsd check` (step {check})"
+    );
+}
+
+#[test]
 fn test_self_check_workflow_checks_the_resolved_base() {
     let workflow = workflow();
     let steps = steps(&workflow);
@@ -211,17 +231,14 @@ fn test_self_check_workflow_checks_the_resolved_base() {
         "the resolved base is not written to GITHUB_OUTPUT: {run}"
     );
     let output = format!("steps.{id}.outputs.base");
+    let expression = format!("${{{{ {output} }}}}");
     let check = &steps[step_index(&steps, NSD_CHECK)];
-    assert_eq!(
-        check["env"]["BASE"].as_str(),
-        Some(format!("${{{{ {output} }}}}").as_str())
-    );
+    assert_eq!(check["env"]["BASE"].as_str(), Some(expression.as_str()));
     assert_eq!(
         check["if"].as_str(),
         Some(format!("{output} != ''").as_str())
     );
 
-    let expression = format!("${{{{ {output} }}}}");
     let carriers: Vec<&str> = check["env"]
         .as_mapping()
         .expect("the nsd check step has an env mapping")
@@ -240,16 +257,13 @@ fn test_self_check_workflow_checks_the_resolved_base() {
         line.trim(),
         "the nsd check step runs only the check command"
     );
-    let arguments: Vec<String> = line
-        .replace("./target/release/nsd", "nsd")
-        .replace(&variable, RESOLVED_BASE_SENTINEL)
-        .split_whitespace()
-        .map(str::to_string)
-        .collect();
-    let cli = Cli::try_parse_from(&arguments).unwrap_or_else(|error| panic!("`{line}`: {error}"));
-    let Command::Check(args) = cli.command else {
-        panic!("`{line}` is not a check command");
-    };
+    let args = parse_check(
+        line,
+        &[
+            ("./target/release/nsd", "nsd"),
+            (variable.as_str(), RESOLVED_BASE_SENTINEL),
+        ],
+    );
     assert_eq!(
         args.base.as_deref(),
         Some(RESOLVED_BASE_SENTINEL),
