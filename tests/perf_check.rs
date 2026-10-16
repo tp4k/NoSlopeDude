@@ -439,7 +439,7 @@ fn test_row_records_a_nonzero_check_exit_status() -> anyhow::Result<()> {
 
 /// Runs `main` with the given fake-`nsd` env and asserts the row is refused:
 /// nonzero exit, an `error:` line, and the measurements file untouched.
-fn assert_row_refused(env: &[(&str, &str)]) -> anyhow::Result<()> {
+fn assert_row_refused(env: &[(&str, &str)]) -> anyhow::Result<String> {
     let h = harness()?;
     let output = run_main_env(&h, false, None, env)?;
     assert!(
@@ -457,13 +457,14 @@ fn assert_row_refused(env: &[(&str, &str)]) -> anyhow::Result<()> {
         MEASUREMENTS,
         "a refused run must not append a row for {env:?}"
     );
-    Ok(())
+    Ok(stderr.into_owned())
 }
 
 #[cfg(unix)]
 #[test]
 fn test_crashed_check_with_empty_output_refuses_the_row() -> anyhow::Result<()> {
-    assert_row_refused(&[("FAKE_EXIT", "101"), ("FAKE_BODY", "")])
+    assert_row_refused(&[("FAKE_EXIT", "101"), ("FAKE_BODY", "")])?;
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -471,7 +472,8 @@ fn test_crashed_check_with_empty_output_refuses_the_row() -> anyhow::Result<()> 
 fn test_status_outside_zero_to_three_refuses_the_row() -> anyhow::Result<()> {
     // The document agrees with the process, so only the range can refuse.
     assert_row_refused(&[("FAKE_EXIT", "125")])?;
-    assert_row_refused(&[("FAKE_EXIT", "4")])
+    assert_row_refused(&[("FAKE_EXIT", "4")])?;
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -481,19 +483,27 @@ fn test_output_that_is_not_a_check_document_refuses_the_row() -> anyhow::Result<
     assert_row_refused(&[(
         "FAKE_BODY",
         "{\"diagnostics\":[],\"exit_status\":0,\"result_scope\":\"scan\",\"schema_version\":1}\n",
-    )])
+    )])?;
+    Ok(())
 }
 
 #[cfg(unix)]
 #[test]
 fn test_json_exit_status_disagreeing_with_the_process_refuses_the_row() -> anyhow::Result<()> {
-    assert_row_refused(&[("FAKE_EXIT", "2"), ("FAKE_DOC_STATUS", "0")])
+    assert_row_refused(&[("FAKE_EXIT", "2"), ("FAKE_DOC_STATUS", "0")])?;
+    assert_row_refused(&[("FAKE_EXIT", "1"), ("FAKE_DOC_STATUS", "3")])?;
+    Ok(())
 }
 
 #[cfg(unix)]
 #[test]
 fn test_warm_run_status_disagreeing_with_its_output_refuses_the_row() -> anyhow::Result<()> {
-    assert_row_refused(&[("FAKE_WARM_EXIT", "101")])
+    let stderr = assert_row_refused(&[("FAKE_WARM_EXIT", "101")])?;
+    assert!(
+        stderr.contains("error: warm check exited 101"),
+        "the error must name the warm run and its status, got: {stderr}"
+    );
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -524,7 +534,12 @@ fn test_exit_status_3_is_recorded() -> anyhow::Result<()> {
 #[cfg(unix)]
 #[test]
 fn test_cold_run_status_disagreeing_with_its_output_refuses_the_row() -> anyhow::Result<()> {
-    assert_row_refused(&[("FAKE_COLD_EXIT", "101")])
+    let stderr = assert_row_refused(&[("FAKE_COLD_EXIT", "101")])?;
+    assert!(
+        stderr.contains("error: cold check exited 101"),
+        "the error must name the cold run and its status, got: {stderr}"
+    );
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -535,5 +550,6 @@ fn test_empty_or_unsupported_documents_refuse_the_row_at_a_legal_status() -> any
     assert_row_refused(&[("FAKE_BODY", "")])?;
     assert_row_refused(&[("FAKE_EXIT", "2"), ("FAKE_BODY", "")])?;
     assert_row_refused(&[("FAKE_BODY", &format!("{doc}2}}\n"))])?;
-    assert_row_refused(&[("FAKE_BODY", &format!("{doc}1}}\n{doc}1}}\n"))])
+    assert_row_refused(&[("FAKE_BODY", &format!("{doc}1}}\n{doc}1}}\n"))])?;
+    Ok(())
 }
