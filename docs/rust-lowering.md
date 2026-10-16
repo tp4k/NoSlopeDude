@@ -41,6 +41,7 @@ additive (see `docs/measurement-profile.md`).
 - A `macro_invocation` token tree is an opaque run of leaves. Its tokens feed
   clone fingerprints and its lines count as executable, but a decision inside
   a macro argument (`println!("{}", if x { 1 } else { 2 })`) is not counted.
+- A let chain (`if let Some(a) = x && let Some(b) = y`) parses as a `let_chain` node, not a `binary_expression`, so the `&&` joining its conditions adds no And; the `if` still adds its Branch.
 - The six built-in rules do not run on Rust: the family reports CC, SLOC,
   mass, erosion and clone groups, and a verbosity score whose flagged lines come only from redundant clone
   occurrences, because no rule finding contributes.

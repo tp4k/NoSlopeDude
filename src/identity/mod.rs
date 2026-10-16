@@ -73,9 +73,9 @@ const BODY_FINGERPRINT_JAVA_DEGRADED_FAMILY_PREFIX: &str = "callable-body-degrad
 const BODY_FINGERPRINT_JSTS_DEGRADED_FAMILY_PREFIX: &str = "callable-body-degraded-js_ts";
 const BODY_FINGERPRINT_RUST_DEGRADED_FAMILY_PREFIX: &str = "callable-body-degraded-rust";
 
-/// A5's own hash domain for `OwnerDigest` -- distinct from both
-/// body-fingerprint family prefixes above (and from `clones::mod.rs`'s and
-/// `src/golden.rs`'s domains), so an owner-chain digest can never collide
+/// A5's own hash domain for `OwnerDigest` -- distinct from every
+/// body-fingerprint family prefix above (found and degraded) (and from
+/// `clones::mod.rs`'s and `src/golden.rs`'s domains), so an owner-chain digest can never collide
 /// with a body-fingerprint or clone-run hash even on identical input bytes.
 const OWNER_DIGEST_FAMILY_PREFIX: &str = "callable-owner-chain";
 

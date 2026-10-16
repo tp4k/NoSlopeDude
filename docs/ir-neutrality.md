@@ -659,7 +659,7 @@ exactly two places, and nothing else:
    (it was `blake3:43340e59d6e269babeb275808dda9960`): the two new hashed
    inputs, `rust_lowering_version` and `rust_grammar_version`
    (`docs/measurement-profile.md`).
-2. `summaries.rust`, a zeroed family row (`erosion` 0.0; verbosity
+2. `scores.rust`, a zeroed family row (`erosion` 0.0; verbosity
    `complete: true`, every count 0), because neither corpus holds a `.rs`
    file.
 
