@@ -665,21 +665,27 @@ fn test_degraded_bodies_differing_only_in_whitespace_get_distinct_fingerprints()
     assert_ne!(degraded_wide, fingerprint(ts_wide, false, true));
 }
 
-/// Domain separation on identical bytes: a one-token body hashes the same
-/// text whether found or degraded, so only the degraded family prefix keeps
-/// the two values apart (a degraded value reusing the normal prefix would
-/// equal the found one here, which the differing-bytes test above cannot see).
+/// Domain separation on identical hash input: a degraded body whose raw bytes
+/// are exactly a found body's normalized token stream (one separator byte,
+/// then the leaf text) hashes the same bytes, so only the degraded family
+/// prefix keeps the two values apart. A degraded value reusing the normal
+/// prefix would equal the found one here, which the differing-bytes test above
+/// cannot see.
 #[test]
 fn test_degraded_fingerprint_never_equals_the_found_one_for_the_same_bytes() {
-    let source = "const f = () => x;";
-    let parsed = parse_inline(source, Grammar::TypeScript, JS_TS);
+    let token_stream = "\u{1}x";
+    let source = format!("const f = () => x; const s = \"a{token_stream}b\";");
+    let parsed = parse_inline(&source, Grammar::TypeScript, JS_TS);
     let ir = lower::lower_file(&parsed);
-    let callable = ir.callables.first().expect("arrow callable");
-    let found = identity::body_fingerprint(&ir, callable, &parsed.source);
+    let found_callable = ir.callables.first().expect("arrow callable");
+    let found = identity::body_fingerprint(&ir, found_callable, &parsed.source);
 
-    let mut pruned = lower::lower_file(&parsed);
-    pruned.root.children.clear();
-    let degraded = identity::body_fingerprint(&pruned, callable, &parsed.source);
+    let start = source.find(token_stream).expect("token stream in source");
+    let mut degraded_callable = found_callable.clone();
+    degraded_callable.body_span.start_byte = u32::try_from(start).expect("offset fits u32");
+    degraded_callable.body_span.end_byte =
+        u32::try_from(start + token_stream.len()).expect("offset fits u32");
+    let degraded = identity::body_fingerprint(&ir, &degraded_callable, &parsed.source);
     assert_ne!(found, degraded);
 }
 
