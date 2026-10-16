@@ -468,7 +468,8 @@ fn root_config_bytes(
 /// window where the path is swapped for a non-regular file between it and
 /// `File::open` below — the same residual race `WorktreeSnapshot::read`'s
 /// D25 re-check documents at `src/git/snapshot.rs:235-237`; closing it
-/// needs a no-follow, non-blocking open as `load_scan_root` does; a trusted
+/// needs an `O_NONBLOCK` open and an `fstat` of the handle (not
+/// `O_NOFOLLOW`: a trusted path may be a symlink); a trusted
 /// path is operator-chosen, so it keeps its plain open.
 pub fn load_trusted(path: &Path) -> Result<Config, ConfigError> {
     match fs::metadata(path) {
