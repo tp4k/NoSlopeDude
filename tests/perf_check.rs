@@ -86,6 +86,7 @@ elif [ -n "$FAKE_DIFFER" ]; then
 else
   echo "{$doc_head,\"schema_version\":1}"
 fi
+if [ -n "${FAKE_STDERR+x}" ]; then printf '%s\n' "$FAKE_STDERR" >&2; fi
 if [ "$n" = 2 ] && [ -n "${FAKE_WARM_EXIT+x}" ]; then status=$FAKE_WARM_EXIT; fi
 if [ "$n" = 1 ] && [ -n "${FAKE_COLD_EXIT+x}" ]; then status=$FAKE_COLD_EXIT; fi
 exit "$status"
@@ -584,5 +585,78 @@ fn test_legal_cold_status_disagreeing_with_its_output_refuses_the_row() -> anyho
         stderr.contains("error: cold check output") && stderr.contains("exit_status 2"),
         "the error must name the cold run and status 2, got: {stderr}"
     );
+    Ok(())
+}
+
+const TIME_LOOKALIKE_STDERR: &str = "9.99 real\n123 maximum resident set size";
+
+#[cfg(target_os = "macos")]
+#[test]
+fn test_nsd_stderr_cannot_alter_wall_and_rss_cells() -> anyhow::Result<()> {
+    let h = harness()?;
+    let output = run_main_env(&h, false, None, &[("FAKE_STDERR", TIME_LOOKALIKE_STDERR)])?;
+    assert!(
+        output.status.success(),
+        "main failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let measurements = std::fs::read_to_string(&h.measurements)?;
+    let new_rows: Vec<&str> = measurements
+        .lines()
+        .filter(|l| l.starts_with('|') && !MEASUREMENTS.lines().any(|m| m == *l))
+        .collect();
+    assert_eq!(new_rows.len(), 1, "expected one intact row: {new_rows:?}");
+    let cells: Vec<&str> = new_rows[0].split('|').map(str::trim).collect();
+    for (wall, rss) in [(cells[6], cells[7]), (cells[8], cells[9])] {
+        assert_ne!(
+            wall, "9.99s",
+            "wall cell taken from nsd stderr: {new_rows:?}"
+        );
+        assert!(wall.ends_with('s'), "wall cell: {wall}");
+        assert_ne!(
+            rss, "0.00 MB",
+            "RSS cell taken from nsd stderr: {new_rows:?}"
+        );
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn test_run_timed_check_keeps_nsd_stderr_in_its_own_file() -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir()?;
+    let fake = dir.path().join("fake-nsd");
+    std::fs::write(
+        &fake,
+        "#!/bin/sh\necho '{}'\nprintf '9.99 real\\n123 maximum resident set size\\n' >&2\n",
+    )?;
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755))?;
+    let (json, time_log, nsd_err) = (
+        dir.path().join("out.json"),
+        dir.path().join("out.time"),
+        dir.path().join("out.nsd-stderr"),
+    );
+    let output = run_sourced(&format!(
+        "run_timed_check '{}' '{}' '{}' '{}' '{}'",
+        fake.display(),
+        dir.path().display(),
+        json.display(),
+        time_log.display(),
+        nsd_err.display()
+    ))?;
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "0");
+    assert!(nsd_err.exists(), "no separate nsd stderr file was written");
+    let kept = std::fs::read_to_string(&nsd_err)?;
+    assert!(
+        kept.contains("9.99 real") && kept.contains("123 maximum resident set size"),
+        "nsd stderr must be kept for diagnosis, got: {kept:?}"
+    );
+    let timing = std::fs::read_to_string(&time_log)?;
+    assert!(
+        !timing.contains("9.99 real") && !timing.contains("123 maximum"),
+        "time output must not hold nsd stderr, got: {timing:?}"
+    );
+    assert!(timing.contains(" real"), "time output missing: {timing:?}");
     Ok(())
 }
