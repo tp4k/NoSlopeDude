@@ -72,8 +72,18 @@ echo "$n" >"$FAKE_STATE/count"
 } >>"$FAKE_STATE/calls"
 mkdir -p "$git_dir/nsd/cache/v1"
 head -c 1048576 /dev/zero >"$git_dir/nsd/cache/v1/blob"
-if [ -n "$FAKE_DIFFER" ]; then echo "{\"run\":$n}"; else echo '{"summaries":[]}'; fi
-exit ${FAKE_EXIT:-0}
+status=${FAKE_EXIT:-0}
+doc_status=${FAKE_DOC_STATUS:-$status}
+doc_head="\"diagnostics\":[],\"exit_status\":$doc_status,\"result_scope\":\"check\""
+if [ -n "${FAKE_BODY+x}" ]; then
+  printf '%s' "$FAKE_BODY"
+elif [ -n "$FAKE_DIFFER" ]; then
+  echo "{$doc_head,\"run\":$n,\"schema_version\":1}"
+else
+  echo "{$doc_head,\"schema_version\":1}"
+fi
+if [ "$n" = 2 ] && [ -n "${FAKE_WARM_EXIT+x}" ]; then status=$FAKE_WARM_EXIT; fi
+exit "$status"
 "#;
 
 struct Harness {
@@ -423,5 +433,89 @@ fn test_row_records_a_nonzero_check_exit_status() -> anyhow::Result<()> {
     );
     let cells: Vec<&str> = new_rows[0].split('|').map(str::trim).collect();
     assert_eq!(cells[11], "2", "the check's exit status column");
+    Ok(())
+}
+
+/// Runs `main` with the given fake-`nsd` env and asserts the row is refused:
+/// nonzero exit, an `error:` line, and the measurements file untouched.
+fn assert_row_refused(env: &[(&str, &str)]) -> anyhow::Result<()> {
+    let h = harness()?;
+    let output = run_main_env(&h, false, None, env)?;
+    assert!(
+        !output.status.success(),
+        "expected a nonzero exit for {env:?}, stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("error:"),
+        "expected an `error:` line for {env:?}, got: {stderr}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&h.measurements)?,
+        MEASUREMENTS,
+        "a refused run must not append a row for {env:?}"
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_crashed_check_with_empty_output_refuses_the_row() -> anyhow::Result<()> {
+    assert_row_refused(&[("FAKE_EXIT", "101"), ("FAKE_BODY", "")])
+}
+
+#[cfg(unix)]
+#[test]
+fn test_status_outside_zero_to_three_refuses_the_row() -> anyhow::Result<()> {
+    // The document agrees with the process, so only the range can refuse.
+    assert_row_refused(&[("FAKE_EXIT", "125")])?;
+    assert_row_refused(&[("FAKE_EXIT", "4")])
+}
+
+#[cfg(unix)]
+#[test]
+fn test_output_that_is_not_a_check_document_refuses_the_row() -> anyhow::Result<()> {
+    assert_row_refused(&[("FAKE_BODY", "{\"summaries\":[]}\n")])?;
+    assert_row_refused(&[(
+        "FAKE_BODY",
+        "{\"diagnostics\":[],\"exit_status\":0,\"result_scope\":\"scan\",\"schema_version\":1}\n",
+    )])
+}
+
+#[cfg(unix)]
+#[test]
+fn test_json_exit_status_disagreeing_with_the_process_refuses_the_row() -> anyhow::Result<()> {
+    assert_row_refused(&[("FAKE_EXIT", "2"), ("FAKE_DOC_STATUS", "0")])
+}
+
+#[cfg(unix)]
+#[test]
+fn test_warm_run_status_disagreeing_with_its_output_refuses_the_row() -> anyhow::Result<()> {
+    assert_row_refused(&[("FAKE_WARM_EXIT", "101")])
+}
+
+#[cfg(unix)]
+#[test]
+fn test_exit_status_3_is_recorded() -> anyhow::Result<()> {
+    let h = harness()?;
+    let output = run_main_env(&h, false, None, &[("FAKE_EXIT", "3")])?;
+    assert!(
+        output.status.success(),
+        "status 3 is a legal check status, main failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let measurements = std::fs::read_to_string(&h.measurements)?;
+    let new_rows: Vec<&str> = measurements
+        .lines()
+        .filter(|l| l.starts_with('|') && !MEASUREMENTS.lines().any(|m| m == *l))
+        .collect();
+    assert_eq!(
+        new_rows.len(),
+        1,
+        "expected exactly one new row, got: {new_rows:?}"
+    );
+    let cells: Vec<&str> = new_rows[0].split('|').map(str::trim).collect();
+    assert_eq!(cells[11], "3", "the check's exit status column");
     Ok(())
 }
