@@ -930,7 +930,9 @@ commits it as the base, commits one small new Java file as the candidate, and
 runs `nsd check --base HEAD~1 --format json` from that repo root twice under
 `/usr/bin/time -l`: cold (no `<git dir>/nsd` cache), then warm. The check never
 runs inside the fixture clones. The script refuses to write a row when the
-fixture is missing or when the cold and warm JSON outputs differ.
+fixture is missing, when either run is not a completed check (process status
+outside `0`-`3`, or stdout not one check JSON document whose `exit_status`
+equals that status), or when the cold and warm JSON outputs differ.
 
 Each row: date (UTC) with `(nsd@<full HEAD sha>)`, suffixed `+dirty` when
 `git status --porcelain -- src Cargo.toml Cargo.lock` is non-empty · machine ·
