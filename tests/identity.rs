@@ -615,6 +615,56 @@ fn test_body_fingerprint_separates_languages() {
     assert_ne!(java_fingerprint, js_fingerprint);
 }
 
+/// `callable` with its `body_span` shrunk by one byte on each side: no
+/// `IrNode` carries that span, so `body_fingerprint` takes its degraded
+/// (span-miss) path while the source bytes it covers stay the real body.
+fn degraded_copy(callable: &IrCallable) -> IrCallable {
+    let mut degraded = callable.clone();
+    degraded.body_span.start_byte += 1;
+    degraded.body_span.end_byte -= 1;
+    degraded
+}
+
+/// Ledger row 84: two callables whose body span matches no IR node must not
+/// collide when their bodies differ only in a whitespace run inside a string
+/// literal (the normalized token stream collapses it). The degraded value
+/// still has no position salt, never equals the found-subtree value, and
+/// stays separated by language.
+#[test]
+fn test_degraded_bodies_differing_only_in_whitespace_get_distinct_fingerprints() {
+    let wide = "class A { String m() { return \"a  b\"; } }";
+    let narrow = "class A { String m() { return \"a b\"; } }";
+    let moved = "class Pad { void pad() {}\n\n  String m() { return \"a  b\"; } }";
+    let ts_wide = "function m() { return \"a  b\"; }";
+
+    let fingerprint = |source: &str, java: bool, degrade: bool| {
+        let parsed = if java {
+            parse_inline(source, Grammar::Java, JAVA)
+        } else {
+            parse_inline(source, Grammar::TypeScript, JS_TS)
+        };
+        let ir = lower::lower_file(&parsed);
+        let callable = ir
+            .callables
+            .iter()
+            .find(|candidate| candidate.name == "m")
+            .expect("callable m");
+        let callable = if degrade {
+            degraded_copy(callable)
+        } else {
+            callable.clone()
+        };
+        identity::body_fingerprint(&ir, &callable, &parsed.source)
+    };
+
+    let degraded_wide = fingerprint(wide, true, true);
+    assert!(is_well_formed_blake3(&degraded_wide), "{degraded_wide}");
+    assert_ne!(degraded_wide, fingerprint(narrow, true, true));
+    assert_eq!(degraded_wide, fingerprint(moved, true, true));
+    assert_ne!(degraded_wide, fingerprint(wide, true, false));
+    assert_ne!(degraded_wide, fingerprint(ts_wide, false, true));
+}
+
 /// `identity::identities` is a pure function of an already-lowered
 /// `&IrFile`: two independent lowerings of the same source produce identical
 /// identity vectors.
