@@ -15,7 +15,9 @@ pub(crate) fn is_comment_kind(kind: &str, language: LanguageFamily) -> bool {
     match language {
         LanguageFamily::Java => matches!(kind, "line_comment" | "block_comment"),
         LanguageFamily::JsTs => kind == "comment",
-        LanguageFamily::Rust => false,
+        // `doc_comment` is the named leaf inside a doc comment's own
+        // `line_comment`/`block_comment` node, so it is dropped with them.
+        LanguageFamily::Rust => matches!(kind, "line_comment" | "block_comment" | "doc_comment"),
     }
 }
 
@@ -24,8 +26,14 @@ pub(crate) fn is_comment_kind(kind: &str, language: LanguageFamily) -> bool {
 /// check misses them entirely — undercounting a line holding only `break;`,
 /// `continue;` or `return;`. A `return expr;` still isn't matched here since
 /// its own line is already covered by `expr`'s leaf tokens.
-const BARE_CONTROL_FLOW_KINDS: &[&str] =
-    &["break_statement", "continue_statement", "return_statement"];
+const BARE_CONTROL_FLOW_KINDS: &[&str] = &[
+    "break_statement",
+    "continue_statement",
+    "return_statement",
+    "break_expression",
+    "continue_expression",
+    "return_expression",
+];
 
 fn is_bare_control_flow(node: Node) -> bool {
     BARE_CONTROL_FLOW_KINDS.contains(&node.kind()) && node.named_child_count() == 0

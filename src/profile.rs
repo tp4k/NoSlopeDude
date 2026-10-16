@@ -103,10 +103,12 @@ pub fn fingerprint(inputs: &MeasurementProfileInputs) -> String {
     digest.push(&inputs.ir_version.to_le_bytes());
     digest.push(&inputs.java_lowering_version.to_le_bytes());
     digest.push(&inputs.jsts_lowering_version.to_le_bytes());
+    digest.push(&inputs.rust_lowering_version.to_le_bytes());
     digest.push(inputs.tree_sitter_runtime_version.as_bytes());
     digest.push(inputs.java_grammar_version.as_bytes());
     digest.push(inputs.javascript_grammar_version.as_bytes());
     digest.push(inputs.typescript_grammar_version.as_bytes());
+    digest.push(inputs.rust_grammar_version.as_bytes());
     for rule_id in inputs.rule_catalog {
         digest.push(rule_id.as_bytes());
     }

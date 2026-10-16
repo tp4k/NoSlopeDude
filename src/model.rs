@@ -59,6 +59,7 @@ impl LanguageFamily {
         match extension {
             "java" => Some(LanguageFamily::Java),
             "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" => Some(LanguageFamily::JsTs),
+            "rs" => Some(LanguageFamily::Rust),
             _ => None,
         }
     }
@@ -165,6 +166,7 @@ impl Grammar {
             "ts" => Some(Grammar::TypeScript),
             "tsx" => Some(Grammar::Tsx),
             "js" | "jsx" | "mjs" | "cjs" => Some(Grammar::JavaScript),
+            "rs" => Some(Grammar::Rust),
             _ => None,
         }
     }
