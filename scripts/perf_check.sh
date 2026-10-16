@@ -122,17 +122,19 @@ require_completed_check() {
   fi
 }
 
-# run_timed_check <nsd binary> <repo dir> <json out> <time log>
+# run_timed_check <nsd binary> <repo dir> <json out> <time log> <nsd stderr log>
 # Prints the check's exit status; the caller validates it with
 # require_completed_check (a failing check, exit 1-3, is still a measured run).
+# `time -o` writes its report to <time log>, so nsd's own stderr (kept in
+# <nsd stderr log> for diagnosis) cannot alter time_cells' wall and RSS cells.
 run_timed_check() {
-  local bin="$1" repo="$2" json="$3" log="$4" status=0
-  (cd "$repo" && /usr/bin/time -l "$bin" check --base HEAD~1 --format json >"$json" 2>"$log") || status=$?
+  local bin="$1" repo="$2" json="$3" log="$4" nsd_err="$5" status=0
+  (cd "$repo" && /usr/bin/time -l -o "$log" "$bin" check --base HEAD~1 --format json >"$json" 2>"$nsd_err") || status=$?
   printf '%s' "$status"
 }
 
 # time_cells <time log>
-# Prints `<wall seconds> <peak RSS in MB>` from `/usr/bin/time -l` output.
+# Prints `<wall seconds> <peak RSS in MB>` from `/usr/bin/time -l -o` output.
 time_cells() {
   local wall rss_bytes
   wall="$(grep ' real' "$1" | awk '{print $1}')"
@@ -170,9 +172,10 @@ main() {
 
   local cold_json="$output_dir/cold.json" warm_json="$output_dir/warm.json"
   local cold_log="$output_dir/cold.time" warm_log="$output_dir/warm.time"
+  local cold_err="$output_dir/cold.nsd-stderr" warm_err="$output_dir/warm.nsd-stderr"
   local cold_status warm_status
-  cold_status="$(run_timed_check "$bin" "$plain_dir" "$cold_json" "$cold_log")"
-  warm_status="$(run_timed_check "$bin" "$plain_dir" "$warm_json" "$warm_log")"
+  cold_status="$(run_timed_check "$bin" "$plain_dir" "$cold_json" "$cold_log" "$cold_err")"
+  warm_status="$(run_timed_check "$bin" "$plain_dir" "$warm_json" "$warm_log" "$warm_err")"
 
   require_completed_check cold "$cold_status" "$cold_json"
   require_completed_check warm "$warm_status" "$warm_json"
