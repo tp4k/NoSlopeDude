@@ -267,6 +267,51 @@ fn test_nested_callable_identity_round_trips() {
     assert_eq!(read_ids, analyzed);
 }
 
+const RUST_SOURCE: &str = "struct T;
+impl T {
+    fn run(&self, x: i32) -> i32 {
+        let f = |y: i32| y + 1;
+        if x > 0 { f(x) } else { 0 }
+    }
+}
+";
+
+#[test]
+fn test_rust_payload_round_trips() {
+    let (_dir, _repo, cache) = open_cache();
+    let analysis = analyze("a.rs", RUST_SOURCE);
+    let key = CacheKey::new(blob_oid(RUST_SOURCE), Grammar::Rust, MIN_LINES);
+    let payload = CachedAnalysis::from_analysis(&analysis, RUST_SOURCE, MIN_LINES);
+    cache.put(&key, &payload).expect("put a Rust entry");
+    let read = cache.get(&key).expect("read").expect("hit after put");
+    let hydrated = read
+        .hydrate(Path::new("a.rs"), LanguageFamily::Rust)
+        .expect("hydrates");
+
+    assert_eq!(read, payload);
+    let kinds: Vec<_> = hydrated.callables.iter().map(|c| c.identity.kind).collect();
+    assert!(
+        kinds.contains(&nsd::ir::CallableKind::RustFunction),
+        "{kinds:?}"
+    );
+    assert!(
+        kinds.contains(&nsd::ir::CallableKind::RustClosure),
+        "{kinds:?}"
+    );
+    let analyzed: Vec<_> = analysis.callables.iter().map(|c| &c.identity).collect();
+    let read_ids: Vec<_> = hydrated.callables.iter().map(|c| &c.identity).collect();
+    assert_eq!(read_ids, analyzed);
+    assert_ne!(
+        cache.entry_path(&key),
+        cache.entry_path(&CacheKey::new(
+            blob_oid(RUST_SOURCE),
+            Grammar::Java,
+            MIN_LINES
+        )),
+        "the Rust grammar keys its own entry"
+    );
+}
+
 #[test]
 fn test_concurrent_writers_never_expose_a_partial_entry() {
     let (_dir, _repo, cache) = open_cache();

@@ -121,6 +121,15 @@ fn nsd_in(dir: &Path, args: &[&str]) -> Output {
         .expect("run the nsd binary")
 }
 
+fn rust_fn(name: &str, ifs: usize) -> String {
+    let mut text = format!("pub fn {name}(a: i32) -> i32 {{\n    let mut r = 0;\n");
+    for index in 0..ifs {
+        text.push_str(&format!("    if a == {index} {{ r += {}; }}\n", index + 1));
+    }
+    text.push_str("    r\n}\n");
+    text
+}
+
 fn java_class(name: &str, ifs: usize) -> String {
     let mut text =
         format!("public class {name} {{\n    public int run(int a) {{\n        int r = 0;\n");
@@ -179,6 +188,24 @@ fn test_check_staged_regression_exits_1_and_names_the_code() {
         listing
             .lines()
             .any(|line| line.contains(E101) && line.contains("Foo.java")),
+        "{listing}"
+    );
+}
+
+#[test]
+fn test_check_flags_a_rust_complexity_regression() {
+    let fx = fixture();
+    fx.commit(&[("lib.rs", rust_fn("run", LOW_CC_IFS).as_bytes())]);
+    fx.stage("lib.rs", rust_fn("run", HIGH_CC_IFS).as_bytes());
+
+    let output = fx.nsd(&["check", "--staged"]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_REGRESSION));
+    let listing = stdout(&output);
+    assert!(
+        listing
+            .lines()
+            .any(|line| line.contains(E101) && line.contains("lib.rs")),
         "{listing}"
     );
 }

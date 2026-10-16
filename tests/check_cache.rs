@@ -226,6 +226,15 @@ fn java_class(name: &str, ifs: usize) -> String {
     text
 }
 
+fn rust_fn(name: &str, ifs: usize) -> String {
+    let mut text = format!("pub fn {name}(a: i32) -> i32 {{\n    let mut r = 0;\n");
+    for index in 0..ifs {
+        text.push_str(&format!("    if a == {index} {{ r += {}; }}\n", index + 1));
+    }
+    text.push_str("    r\n}\n");
+    text
+}
+
 fn clone_block(tag: &str, lines: usize) -> String {
     (0..lines)
         .map(|index| format!("        int {tag}{index} = {tag}Call{index}(x);\n"))
@@ -300,6 +309,28 @@ fn test_warm_check_equals_cold_check() {
     assert!(
         unchanged_entries.iter().all(Option::is_some),
         "the cold run caches the unchanged blobs"
+    );
+    assert_eq!(warm.diagnostics, cold.diagnostics);
+    assert_eq!(warm.exit_status, cold.exit_status);
+}
+
+#[test]
+fn test_warm_rust_check_equals_cold_check() {
+    let fx = fixture();
+    fx.commit(&[
+        ("kept.rs", rust_fn("kept", 2).as_bytes()),
+        ("lib.rs", rust_fn("run", 2).as_bytes()),
+    ]);
+    fx.stage("lib.rs", rust_fn("run", HIGH_CC_IFS).as_bytes());
+
+    let cold = fx.staged();
+    let unchanged = fx.entry(fx.blob("kept.rs"), Grammar::Rust, DEFAULT_MIN_CLONE_LINES);
+    let warm = fx.staged();
+
+    assert_eq!(codes(&cold), ["NSD-E101"], "{:?}", cold.diagnostics);
+    assert!(
+        unchanged.is_some(),
+        "the cold run caches the unchanged Rust blob"
     );
     assert_eq!(warm.diagnostics, cold.diagnostics);
     assert_eq!(warm.exit_status, cold.exit_status);
