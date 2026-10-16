@@ -16,6 +16,7 @@ use super::{CallableInfo, Classification};
 
 /// The anonymous token a bare wildcard pattern is made of.
 const WILDCARD_TOKEN: &str = "_";
+const GUARD_TOKEN: &str = "if";
 
 /// `return`, `break` and `continue` are expressions in Rust; `panic!` is a
 /// macro invocation, not a terminator, and there is no `throw`.
@@ -149,16 +150,21 @@ fn is_block_kind(kind: &str) -> Option<&'static str> {
     }
 }
 
-/// A `match_arm`'s pattern is a bare wildcard when its `match_pattern` holds
-/// the `_` token and nothing else -- a guarded `_ if cond` is not bare.
+/// A `match_arm` is the bare wildcard when its `match_pattern` starts with the
+/// `_` token and holds nothing else but a guard (`if` and its `condition`);
+/// tree-sitter-rust keeps the guard inside the pattern, and the guard's own
+/// Branch is counted separately.
 fn is_bare_wildcard_arm(arm: Node) -> bool {
     let Some(pattern) = arm.child_by_field_name("pattern") else {
         return false;
     };
-    pattern.child_count() == 1
-        && pattern
-            .child(0)
-            .is_some_and(|only| only.kind() == WILDCARD_TOKEN)
+    let condition = pattern.child_by_field_name("condition");
+    let mut children = (0..pattern.child_count()).filter_map(|index| pattern.child(index));
+    let starts_with_wildcard = children
+        .next()
+        .is_some_and(|first| first.kind() == WILDCARD_TOKEN);
+    starts_with_wildcard
+        && children.all(|rest| rest.kind() == GUARD_TOKEN || Some(rest) == condition)
 }
 
 /// `&&` and `||` inside a `binary_expression`; any other operator is no

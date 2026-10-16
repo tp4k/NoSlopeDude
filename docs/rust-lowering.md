@@ -23,7 +23,7 @@ additive (see `docs/measurement-profile.md`).
 | owner | `mod_item` is a `Namespace`; `impl_item` is a `NamedType` named `Trait for Type` or `Type` (whitespace-normalized); `struct_item`, `enum_item` and `trait_item` are `NamedType`; an enclosing function is a `Callable` | two `impl X for T` blocks with a `fn fmt` have distinct identities |
 | Branch | `if_expression` (including `if let`); a `let_declaration` with an `alternative` (let-else); a match-arm guard | +1 each |
 | Loop | `while_expression` (including `while let`), `for_expression` | `loop_expression` has no predicate and is **not** a decision |
-| Case | each `match_arm` whose pattern is not the bare wildcard `_` | mirrors Java's non-default `switch_label`; a guarded `_ if c` is not bare |
+| Case | each `match_arm` whose pattern is not the bare wildcard `_` | mirrors Java's non-default `switch_label`; a guarded `_ if c` arm is still the bare wildcard: it adds no Case, only its guard's +1 Branch |
 | And / Or | `binary_expression` with `&&` / `\|\|` | |
 | `?` | `try_expression` | not a decision |
 | Catch / Ternary | none | Rust has neither |
@@ -42,7 +42,8 @@ additive (see `docs/measurement-profile.md`).
   clone fingerprints and its lines count as executable, but a decision inside
   a macro argument (`println!("{}", if x { 1 } else { 2 })`) is not counted.
 - The six built-in rules do not run on Rust: the family reports CC, SLOC,
-  mass, erosion and clone groups, and a verbosity score with no flagged lines.
+  mass, erosion and clone groups, and a verbosity score whose flagged lines come only from redundant clone
+  occurrences, because no rule finding contributes.
 - `async` blocks, `unsafe` blocks and `const` blocks are plain expressions;
   only `function_item` and `closure_expression` are callables.
 
