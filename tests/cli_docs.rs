@@ -235,6 +235,11 @@ fn test_self_check_workflow_checks_the_resolved_base() {
         .lines()
         .find(|line| line.contains(NSD_CHECK))
         .expect("the nsd check line");
+    assert_eq!(
+        run_text(check).trim(),
+        line.trim(),
+        "the nsd check step runs only the check command"
+    );
     let arguments: Vec<String> = line
         .replace("./target/release/nsd", "nsd")
         .replace(&variable, RESOLVED_BASE_SENTINEL)
