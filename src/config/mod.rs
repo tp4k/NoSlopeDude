@@ -767,3 +767,107 @@ struct RawOutput {
     #[serde(default, deserialize_with = "deserialize_present_scalar")]
     max_agent_diagnostics: Option<u32>,
 }
+
+#[cfg(all(test, unix))]
+mod scan_root_open_tests {
+    use super::{read_scan_root_file, CODE_INVALID_CONFIG};
+    use std::fs;
+    use std::io::Read as _;
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    use std::path::Path;
+
+    const VALID_CONFIG: &[u8] = b"version: 1\nmeasurement:\n  min_clone_lines: 17\n";
+    const GUARD_SECONDS: u64 = 5;
+
+    fn make_fifo(path: &Path) {
+        let status = std::process::Command::new("/usr/bin/mkfifo")
+            .arg(path)
+            .status()
+            .expect("spawn mkfifo");
+        assert!(status.success(), "mkfifo must succeed");
+    }
+
+    /// Runs the open-and-read step on a detached thread and returns the code
+    /// of its refusal; a step that blocks fails the guard instead of hanging.
+    fn refusal_code_within_guard(path: &Path) -> &'static str {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let step_path = path.to_path_buf();
+        std::thread::spawn(move || {
+            let _ = tx.send(read_scan_root_file(&step_path).map_err(|err| err.code()));
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(GUARD_SECONDS))
+            .expect("the step must return within the guard, not block on a FIFO")
+            .expect_err("a FIFO must be refused")
+    }
+
+    /// The pre-check saw a regular file; the same inode is then moved out and
+    /// a symlink to it takes its name. A `(dev, ino)` compare or a plain open
+    /// reads it; only a no-follow open refuses.
+    #[test]
+    fn scan_root_open_refuses_a_symlink_renamed_in_after_the_check() {
+        let root = tempfile::tempdir().expect("root");
+        let outside = tempfile::tempdir().expect("outside");
+        let path = root.path().join("nsd.yml");
+        fs::write(&path, VALID_CONFIG).expect("write config");
+        assert!(fs::symlink_metadata(&path).expect("pre-check").is_file());
+        let moved = outside.path().join("ext.yml");
+        fs::rename(&path, &moved).expect("rename outside");
+        std::os::unix::fs::symlink(&moved, &path).expect("symlink back");
+
+        let err = read_scan_root_file(&path).expect_err("a swapped-in symlink must be refused");
+        assert_eq!(err.code(), CODE_INVALID_CONFIG);
+    }
+
+    /// A symlink present when the open runs, to a valid external config.
+    #[test]
+    fn scan_root_open_refuses_a_symlink_present_at_open() {
+        let root = tempfile::tempdir().expect("root");
+        let outside = tempfile::tempdir().expect("outside");
+        let target = outside.path().join("ext.yml");
+        fs::write(&target, VALID_CONFIG).expect("write target");
+        let path = root.path().join("nsd.yml");
+        std::os::unix::fs::symlink(&target, &path).expect("symlink");
+
+        let err = read_scan_root_file(&path).expect_err("a symlink must be refused");
+        assert_eq!(err.code(), CODE_INVALID_CONFIG);
+    }
+
+    /// A FIFO holding buffered bytes is refused before any byte is read.
+    #[test]
+    fn scan_root_open_verifies_the_handle_before_reading() {
+        let root = tempfile::tempdir().expect("root");
+        let path = root.path().join("nsd.yml");
+        make_fifo(&path);
+        let mut reader = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&path)
+            .expect("open fifo reader");
+        let mut writer = fs::OpenOptions::new()
+            .write(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&path)
+            .expect("open fifo writer");
+        writer.write_all(VALID_CONFIG).expect("buffer bytes");
+
+        let code = refusal_code_within_guard(&path);
+        assert_eq!(code, CODE_INVALID_CONFIG);
+        let mut remaining = Vec::new();
+        reader.read_to_end(&mut remaining).ok();
+        assert_eq!(
+            remaining, VALID_CONFIG,
+            "the refusal must not consume bytes"
+        );
+    }
+
+    /// A FIFO with no writer must not block the open.
+    #[test]
+    fn scan_root_open_does_not_block_on_a_fifo_without_a_writer() {
+        let root = tempfile::tempdir().expect("root");
+        let path = root.path().join("nsd.yml");
+        make_fifo(&path);
+        let code = refusal_code_within_guard(&path);
+        assert_eq!(code, CODE_INVALID_CONFIG);
+    }
+}
