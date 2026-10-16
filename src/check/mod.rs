@@ -602,7 +602,7 @@ fn read_task(
 
 /// A base-side file: read and fully analyzed, never cached. One that cannot
 /// be analyzed leaves its callables unmatched, so the candidate side is
-/// judged as new code.
+/// judged as new code; the caller reports the failure as A102.
 fn load_base(repo: &Repository, task: &LoadTask<'_>, read: ReadBlob<'_>) -> Load {
     let bytes = match read_task(repo, task, read) {
         Ok(bytes) => bytes,
@@ -1001,13 +1001,26 @@ impl Sides<'_> {
             });
         }
         let base_read = |repo: &Repository, entry: &Entry| self.base.read(repo, entry);
-        for load in load_in_parallel(self.repository, &base_tasks, |repo, task| {
+        let base_results = load_in_parallel(self.repository, &base_tasks, |repo, task| {
             load_base(repo, task, &base_read)
-        }) {
+        });
+        for (task, load) in base_tasks.iter().zip(base_results) {
             match load {
                 Load::Failure(failure) => loads.failures.push(failure),
                 Load::Changed(loaded) => loads.base.push(*loaded),
-                Load::Unchanged(..) | Load::Unanalyzable(_) => {}
+                Load::Unanalyzable(reason) => {
+                    let compared = counterparts
+                        .get(&task.included.path)
+                        .is_some_and(|to| candidate_included.contains(to));
+                    if compared {
+                        base_coverage.push(CoverageInput {
+                            entry: task.included.clone(),
+                            changed: true,
+                            failure: Some(reason),
+                        });
+                    }
+                }
+                Load::Unchanged(..) => {}
             }
         }
 
