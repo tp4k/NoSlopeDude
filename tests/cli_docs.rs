@@ -81,6 +81,7 @@ const ROOT_CONFIG: &str = "nsd.yml";
 const BASE_SCRIPT: &str = "self_check_base.sh";
 const TEST_COMMAND: &str = "cargo test --locked";
 const NSD_CHECK: &str = "nsd check";
+const RESOLVED_BASE_SENTINEL: &str = "resolved-base-sentinel";
 const FIXTURE_GLOBS: [&str; 2] = ["tests/fixtures/**", "tests/golden/**"];
 const EVENT_EXPRESSIONS: [&str; 3] = [
     "github.event_name",
@@ -218,6 +219,36 @@ fn test_self_check_workflow_checks_the_resolved_base() {
     assert_eq!(
         check["if"].as_str(),
         Some(format!("{output} != ''").as_str())
+    );
+
+    let expression = format!("${{{{ {output} }}}}");
+    let carriers: Vec<&str> = check["env"]
+        .as_mapping()
+        .expect("the nsd check step has an env mapping")
+        .iter()
+        .filter(|(_, value)| value.as_str() == Some(expression.as_str()))
+        .filter_map(|(key, _)| key.as_str())
+        .collect();
+    assert_eq!(carriers.len(), 1, "one env var carries {output}");
+    let variable = format!("\"${}\"", carriers[0]);
+    let line = run_text(check)
+        .lines()
+        .find(|line| line.contains(NSD_CHECK))
+        .expect("the nsd check line");
+    let arguments: Vec<String> = line
+        .replace("./target/release/nsd", "nsd")
+        .replace(&variable, RESOLVED_BASE_SENTINEL)
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+    let cli = Cli::try_parse_from(&arguments).unwrap_or_else(|error| panic!("`{line}`: {error}"));
+    let Command::Check(args) = cli.command else {
+        panic!("`{line}` is not a check command");
+    };
+    assert_eq!(
+        args.base.as_deref(),
+        Some(RESOLVED_BASE_SENTINEL),
+        "`{line}` does not pass {variable} as --base"
     );
 }
 
