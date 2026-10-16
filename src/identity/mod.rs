@@ -65,6 +65,12 @@ const ANONYMOUS_NAME: &str = "<anonymous>";
 const BODY_FINGERPRINT_JAVA_FAMILY_PREFIX: &str = "callable-body-java";
 const BODY_FINGERPRINT_JSTS_FAMILY_PREFIX: &str = "callable-body-js_ts";
 
+/// The degraded-path counterparts: a callable whose body span matches no IR
+/// node hashes its raw source bytes under these, so it can never equal a
+/// found-subtree fingerprint nor another language's degraded one.
+const BODY_FINGERPRINT_JAVA_DEGRADED_FAMILY_PREFIX: &str = "callable-body-degraded-java";
+const BODY_FINGERPRINT_JSTS_DEGRADED_FAMILY_PREFIX: &str = "callable-body-degraded-js_ts";
+
 /// A5's own hash domain for `OwnerDigest` -- distinct from both
 /// body-fingerprint family prefixes above (and from `clones::mod.rs`'s and
 /// `src/golden.rs`'s domains), so an owner-chain digest can never collide
@@ -258,28 +264,36 @@ pub fn owner_chain(ir_file: &IrFile, owner: Option<u32>) -> Vec<OwnerSegment> {
     chain
 }
 
-/// `callable`'s per-body fingerprint: `clones::ir_statement_tokens`'s own
+/// `callable`'s per-body fingerprint (a span miss degrades to the raw-bytes
+/// hash below): `clones::ir_statement_tokens`'s own
 /// normalized leaf-token stream (see this module's own doc comment) over the
 /// `IrNode` subtree at `callable.body_span`, hashed under this module's own
 /// language-specific family prefix. `source` must be the same source text
 /// `ir_file` was lowered from.
 pub fn body_fingerprint(ir_file: &IrFile, callable: &IrCallable, source: &str) -> String {
-    let fallback;
-    let subtree = match find_ir_subtree(&ir_file.root, callable.body_span) {
-        Some(subtree) => subtree,
+    let Some(subtree) = find_ir_subtree(&ir_file.root, callable.body_span) else {
         // D18 degrade-don't-panic: no `IrNode` in the (possibly
-        // salvage-redacted) tree matches this exact span. Mirrors
-        // `metrics::fallback_ir_body`'s own fallback for the same
-        // structural gap on the same kind of lookup.
-        None => {
-            fallback = IrNode::empty(callable.body_span);
-            &fallback
-        }
+        // salvage-redacted) tree matches this exact span. Hash the raw body
+        // bytes under the degraded prefix -- content-salted, no ordinal or
+        // position -- so two such callables collide only on identical bytes.
+        let body = source
+            .get(callable.body_span.start_byte as usize..callable.body_span.end_byte as usize)
+            .unwrap_or("");
+        let mut digest = Digest::new(degraded_family_prefix(ir_file.language));
+        digest.push(body.as_bytes());
+        return format!("blake3:{:032x}", digest.finish());
     };
     let tokens = clones::ir_statement_tokens(subtree, source);
     let mut digest = Digest::new(body_fingerprint_family_prefix(ir_file.language));
     digest.push(tokens.as_bytes());
     format!("blake3:{:032x}", digest.finish())
+}
+
+fn degraded_family_prefix(language: LanguageFamily) -> &'static str {
+    match language {
+        LanguageFamily::Java => BODY_FINGERPRINT_JAVA_DEGRADED_FAMILY_PREFIX,
+        LanguageFamily::JsTs => BODY_FINGERPRINT_JSTS_DEGRADED_FAMILY_PREFIX,
+    }
 }
 
 fn body_fingerprint_family_prefix(language: LanguageFamily) -> &'static str {
