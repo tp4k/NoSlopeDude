@@ -6,7 +6,9 @@
 # cache size after the warm run, the cold run's check exit status, date+HEAD sha,
 # machine) under `## Check rows` in docs/measurements.md. Refuses to run
 # without the fixture (see scripts/fetch_perf_fixture.sh) and refuses the
-# row when the cold and warm outputs differ. The check runs in the scratch
+# row when either run did not complete (process status outside 0-3, or stdout
+# not one check JSON document whose exit_status equals that status) or when
+# the cold and warm outputs differ. The check runs in the scratch
 # repository, never inside the fixture clones, so their `.git` stays
 # unchanged. Sources scripts/perf_scan.sh for build_plain_tree, date_cell,
 # make_temp_paths and insert_table_row; its `main` is guarded, so sourcing
@@ -93,9 +95,36 @@ require_matching_outputs() {
   fi
 }
 
+# require_completed_check <run name> <status> <json file>
+# Refuses (an `error:` line, return 1) unless the run is a completed check:
+# <status> is 0-3 (docs/cli.md exit codes) and <json file> holds exactly one
+# JSON document with result_scope "check", schema_version 1 and an
+# exit_status equal to <status>. An empty output or a crash (e.g. 101, 125)
+# is therefore never recorded.
+require_completed_check() {
+  local name="$1" status="$2" json="$3"
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "error: jq is required to validate the $name check output; not recording a row" >&2
+    return 1
+  fi
+  case "$status" in
+    0 | 1 | 2 | 3) ;;
+    *)
+      echo "error: $name check exited $status, not a check status 0-3; not recording a row" >&2
+      return 1
+      ;;
+  esac
+  if ! jq -e -s --argjson status "$status" \
+    'length == 1 and (.[0] | type == "object" and .result_scope == "check" and .schema_version == 1 and .exit_status == $status)' \
+    "$json" >/dev/null 2>&1; then
+    echo "error: $name check output ($json) is not one check JSON document with exit_status $status; not recording a row" >&2
+    return 1
+  fi
+}
+
 # run_timed_check <nsd binary> <repo dir> <json out> <time log>
-# Runs the check from the repo root and prints its exit status (a failing
-# check, exit 1 or 2, is still a measured run).
+# Prints the check's exit status; the caller validates it with
+# require_completed_check (a failing check, exit 1-3, is still a measured run).
 run_timed_check() {
   local bin="$1" repo="$2" json="$3" log="$4" status=0
   (cd "$repo" && /usr/bin/time -l "$bin" check --base HEAD~1 --format json >"$json" 2>"$log") || status=$?
@@ -141,10 +170,12 @@ main() {
 
   local cold_json="$output_dir/cold.json" warm_json="$output_dir/warm.json"
   local cold_log="$output_dir/cold.time" warm_log="$output_dir/warm.time"
-  local cold_status
+  local cold_status warm_status
   cold_status="$(run_timed_check "$bin" "$plain_dir" "$cold_json" "$cold_log")"
-  run_timed_check "$bin" "$plain_dir" "$warm_json" "$warm_log" >/dev/null
+  warm_status="$(run_timed_check "$bin" "$plain_dir" "$warm_json" "$warm_log")"
 
+  require_completed_check cold "$cold_status" "$cold_json"
+  require_completed_check warm "$warm_status" "$warm_json"
   require_matching_outputs "$cold_json" "$warm_json"
 
   local cold_cells warm_cells cache_mb
