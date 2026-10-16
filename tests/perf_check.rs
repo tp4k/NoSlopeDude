@@ -83,6 +83,7 @@ else
   echo "{$doc_head,\"schema_version\":1}"
 fi
 if [ "$n" = 2 ] && [ -n "${FAKE_WARM_EXIT+x}" ]; then status=$FAKE_WARM_EXIT; fi
+if [ "$n" = 1 ] && [ -n "${FAKE_COLD_EXIT+x}" ]; then status=$FAKE_COLD_EXIT; fi
 exit "$status"
 "#;
 
@@ -518,4 +519,21 @@ fn test_exit_status_3_is_recorded() -> anyhow::Result<()> {
     let cells: Vec<&str> = new_rows[0].split('|').map(str::trim).collect();
     assert_eq!(cells[11], "3", "the check's exit status column");
     Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_cold_run_status_disagreeing_with_its_output_refuses_the_row() -> anyhow::Result<()> {
+    assert_row_refused(&[("FAKE_COLD_EXIT", "101")])
+}
+
+#[cfg(unix)]
+#[test]
+fn test_empty_or_unsupported_documents_refuse_the_row_at_a_legal_status() -> anyhow::Result<()> {
+    let doc =
+        "{\"diagnostics\":[],\"exit_status\":0,\"result_scope\":\"check\",\"schema_version\":";
+    assert_row_refused(&[("FAKE_BODY", "")])?;
+    assert_row_refused(&[("FAKE_EXIT", "2"), ("FAKE_BODY", "")])?;
+    assert_row_refused(&[("FAKE_BODY", &format!("{doc}2}}\n"))])?;
+    assert_row_refused(&[("FAKE_BODY", &format!("{doc}1}}\n{doc}1}}\n"))])
 }
