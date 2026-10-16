@@ -224,6 +224,10 @@ fn test_check_json_reports_a_rust_family_summary() {
         |family: &str| document["summaries"][family]["verbosity"]["scanned_lines"].as_u64();
     assert!(scanned("rust") > Some(0), "{document}");
     assert_eq!(scanned("js_ts"), Some(0), "{document}");
+    assert!(
+        document["summaries"]["rust"]["erosion"].as_f64() > Some(0.0),
+        "the Rust family's erosion comes from its own callables: {document}"
+    );
 }
 
 #[test]
