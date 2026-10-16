@@ -47,7 +47,8 @@ the raw name.
   "scores": {
     "overall": { "erosion": 0.0, "verbosity": { "flagged_lines": 0, "scanned_lines": 0, "unanalyzed_lines": 0, "complete": true, "ratio": 0.0 } },
     "java":    { "erosion": 0.0, "verbosity": { "flagged_lines": 0, "scanned_lines": 0, "unanalyzed_lines": 0, "complete": true, "ratio": 0.0 } },
-    "js_ts":   { "erosion": 0.0, "verbosity": { "flagged_lines": 0, "scanned_lines": 0, "unanalyzed_lines": 0, "complete": true, "ratio": 0.0 } }
+    "js_ts":   { "erosion": 0.0, "verbosity": { "flagged_lines": 0, "scanned_lines": 0, "unanalyzed_lines": 0, "complete": true, "ratio": 0.0 } },
+    "rust":    { "erosion": 0.0, "verbosity": { "flagged_lines": 0, "scanned_lines": 0, "unanalyzed_lines": 0, "complete": true, "ratio": 0.0 } }
   },
   "findings": [
     {
@@ -93,11 +94,18 @@ the raw name.
 }
 ```
 
+### The `rust` family (PV-1)
+
+`scores.rust` (scan) and `summaries.rust` (check) are additive keys: the
+family covers `.rs` files (`docs/rust-lowering.md`). `schema_version` stays
+`1`. A repository with no Rust reports the zeroed row shown above, and a
+clone group of Rust files carries `"language": "rust"`.
+
 ### `scores` (D20)
 
-Every score is reported three times: `overall`, `java`, `js_ts`. `erosion`
+Every score is reported four times: `overall`, `java`, `js_ts`, `rust`. `erosion`
 is `metrics::erosion` (WS-2) applied to, respectively, every callable, only
-the Java callables, and only the JS/TS callables — the same published
+the Java callables, only the JS/TS callables, and only the Rust callables — the same published
 formula, not a second implementation, since `MetricsResult.erosion` itself
 is overall-only. An erosion or verbosity ratio that is exactly zero is
 always rendered `0.0`, never `-0.0` (an `Iterator::sum` over an empty `f64`
@@ -210,7 +218,7 @@ neither the numerator nor the denominator.
   failure occurred. A file that fails to parse at all contributes no lines, so
   it makes its family incomplete through this flag rather than through
   `unanalyzed_lines`. A discovery-time analysis failure makes `overall` and
-  **every** family (`java` and `js_ts`) incomplete, whatever the skipped
+  **every** family (`java`, `js_ts` and `rust`) incomplete, whatever the skipped
   path's suffix: discovery records the path before it knows whether it is a
   file or a directory, so a directory named `locked.ts` may hold Java. A policy
   exclusion (`--exclude`, `.gitignore`, test, generated or dependency paths)
@@ -275,7 +283,7 @@ Sections, in document order, each its own `<section id="...">`:
 1. **`#scan-settings`** — target, revision (sha/dirty/unavailable reason),
    `include_tests`, every `exclude` glob, `min_clone_lines`, and the
    `incomplete` marker (`#incomplete`).
-2. **`#scores`** — one table row per family (`overall`/`java`/`js_ts`);
+2. **`#scores`** — one table row per family (`overall`/`java`/`js_ts`/`rust`);
    each numeric cell carries a stable `id` (`#erosion-<family>`,
    `#verbosity-<family>`) so a reader — or a test — can cross-check a
    number against `report.json` without parsing prose.
@@ -347,7 +355,7 @@ compact):
 - `entities`: every changed callable (`path`, `name`, `start_line`,
   `end_line`, `cc`, `sloc`, and `base` (`{path, start_line, end_line, cc,
   sloc}`) or `null`), sorted by path, start line, name.
-- `summaries`: `scope`, `files`, and `overall`, `java`, `js_ts`, each
+- `summaries`: `scope`, `files`, and `overall`, `java`, `js_ts`, `rust`, each
   `{erosion, verbosity: {ratio, flagged_lines, scanned_lines,
   unanalyzed_lines, complete}}`. `flagged_lines` is the union of
   the rule-finding lines and the redundant clone-occurrence lines (every
@@ -389,7 +397,7 @@ parent fails `NSD-G101` (ledger row 59; the check-then-read race remains).
 ## Terminal summary
 
 Printed to stdout by `nsd::report::terminal_summary`: the scan
-settings, the three families' erosion and verbosity ratio, the count of
+settings, the four score rows' (overall, Java, JS/TS, Rust) erosion and verbosity ratio, the count of
 findings/duplicate groups/top-25 rows/skipped files, the `incomplete`
 marker, and the adaptation note — the same numbers as the two files, in
 prose form.

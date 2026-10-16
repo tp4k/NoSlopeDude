@@ -650,6 +650,26 @@ divergence, unrelated to and unmoved by this workstream: a fresh
 (`test_malformed_corpus_report_matches_its_baseline_with_declared_deltas_only`
 tolerates exactly this, already-declared, delta).
 
+## PV-1: baselines moved by the Rust lowering
+
+Adding `tree-sitter-rust` and the third lowering moved both baselines in
+exactly two places, and nothing else:
+
+1. `fingerprints.measurement` became `blake3:ee1b3117a8eca80df2994125c61fe745`
+   (it was `blake3:43340e59d6e269babeb275808dda9960`): the two new hashed
+   inputs, `rust_lowering_version` and `rust_grammar_version`
+   (`docs/measurement-profile.md`).
+2. `summaries.rust`, a zeroed family row (`erosion` 0.0; verbosity
+   `complete: true`, every count 0), because neither corpus holds a `.rs`
+   file.
+
+No `.rs` file was added under `tests/fixtures/`, so no callable, clone group,
+finding or line count moved. Both baselines were recaptured with
+`scripts/neutrality_gate.sh --capture`; `git diff` of
+`tests/golden/neutrality/` shows only the two changes above in each file, and
+`tests/golden/*.digest.json` is unchanged. `cargo test --locked --test
+neutrality --test golden_digest` passes without the capture variables.
+
 ## The `java-fixture-01` strict leg (retired at M0c-10)
 
 Spec item 8 named a byte-identity comparison against `java-fixture-01`,
