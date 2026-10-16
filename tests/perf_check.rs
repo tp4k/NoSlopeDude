@@ -660,3 +660,41 @@ fn test_run_timed_check_keeps_nsd_stderr_in_its_own_file() -> anyhow::Result<()>
     assert!(timing.contains(" real"), "time output missing: {timing:?}");
     Ok(())
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn test_long_nsd_stderr_cannot_alter_wall_and_rss_cells() -> anyhow::Result<()> {
+    const PADDING_LINES: usize = 200;
+    let padding = "x".repeat(40);
+    let long_stderr = format!(
+        "{}\n{TIME_LOOKALIKE_STDERR}",
+        vec![padding; PADDING_LINES].join("\n")
+    );
+    assert!(long_stderr.len() >= 4096, "padding must exceed 4 KB");
+    let h = harness()?;
+    let output = run_main_env(&h, false, None, &[("FAKE_STDERR", &long_stderr)])?;
+    assert!(
+        output.status.success(),
+        "main failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let measurements = std::fs::read_to_string(&h.measurements)?;
+    let new_rows: Vec<&str> = measurements
+        .lines()
+        .filter(|l| l.starts_with('|') && !MEASUREMENTS.lines().any(|m| m == *l))
+        .collect();
+    assert_eq!(new_rows.len(), 1, "expected one intact row: {new_rows:?}");
+    let cells: Vec<&str> = new_rows[0].split('|').map(str::trim).collect();
+    for (wall, rss) in [(cells[6], cells[7]), (cells[8], cells[9])] {
+        assert_ne!(
+            wall, "9.99s",
+            "wall cell taken from nsd stderr: {new_rows:?}"
+        );
+        assert!(wall.ends_with('s'), "wall cell: {wall}");
+        assert_ne!(
+            rss, "0.00 MB",
+            "RSS cell taken from nsd stderr: {new_rows:?}"
+        );
+    }
+    Ok(())
+}
