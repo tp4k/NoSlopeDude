@@ -1,6 +1,7 @@
 //! The stage sequence: target resolution, discovery, then the five scan
 //! stages in order.
 
+use crate::config;
 use crate::discover::{self, DiscoverResult};
 use crate::lower::{self, IrFile};
 use crate::model::{ClonesResult, MetricsResult, ParseFailure, RulesResult, ScanSettings};
@@ -26,10 +27,43 @@ pub struct PipelineOutput {
     pub ir: Vec<IrFile>,
 }
 
-/// Resolves `target_input`, walks it, and runs the five scan stages.
+/// Resolves `target_input`, walks it, and runs the five scan stages with
+/// `settings` exactly as given.
 pub fn run(target_input: &str, settings: ScanSettings) -> anyhow::Result<PipelineOutput> {
+    run_with_threshold(target_input, settings, ThresholdSource::Settings)
+}
+
+/// Where a run's clone threshold comes from.
+enum ThresholdSource {
+    /// `ScanSettings::min_clone_lines`, as the caller set it.
+    Settings,
+    /// `measurement.min_clone_lines` of the resolved root's `nsd.yml`
+    /// (amendment A2), else `ScanSettings::min_clone_lines`.
+    RootConfig,
+}
+
+/// Like `run`, but `settings.min_clone_lines` is only the fallback: the
+/// scanned root's `nsd.yml` decides it when it sets
+/// `measurement.min_clone_lines`. An invalid `nsd.yml` is an error.
+pub fn run_with_root_config(
+    target_input: &str,
+    settings: ScanSettings,
+) -> anyhow::Result<PipelineOutput> {
+    run_with_threshold(target_input, settings, ThresholdSource::RootConfig)
+}
+
+fn run_with_threshold(
+    target_input: &str,
+    mut settings: ScanSettings,
+    source: ThresholdSource,
+) -> anyhow::Result<PipelineOutput> {
     let target = target::classify(target_input);
     let resolved_target = target::resolve(&target)?;
+    if let ThresholdSource::RootConfig = source {
+        if let Some(config) = config::load_scan_root(&resolved_target.root)? {
+            settings.min_clone_lines = config.measurement.min_clone_lines;
+        }
+    }
     let discover = discover::discover(&resolved_target.root, &settings)?;
 
     let (parsed_files, parse_failures) =

@@ -979,3 +979,52 @@ fn test_base_mode_judges_a_file_changed_after_the_merge_base() {
     assert_eq!(codes(&outcome), vec![E101]);
     assert_eq!(outcome.exit_status, EXIT_REGRESSION);
 }
+
+const GARBAGE_JAVA: &str = ")))\n}}}\n;;; @@@ ###\n(((\n]]]\n";
+
+fn assert_total_parse_loss(outcome: &CheckOutcome, path: &str) {
+    assert!(codes(outcome).contains(&A101), "{:?}", outcome.diagnostics);
+    assert_eq!(outcome.exit_status, EXIT_ERROR, "{:?}", outcome.diagnostics);
+    let details = outcome.details.as_ref().expect("a run with both sides");
+    assert!(
+        details.entities.iter().all(|entity| entity.path != path),
+        "the garbage file yielded a callable: {:?}",
+        details.entities
+    );
+    let coverage = details
+        .coverage
+        .iter()
+        .find(|file| file.path == path)
+        .expect("coverage for the garbage file");
+    assert_eq!(coverage.analyzed_lines, 0, "{coverage:?}");
+    assert!(!coverage.complete, "{coverage:?}");
+    assert!(!coverage.gaps.is_empty(), "{coverage:?}");
+}
+
+#[test]
+fn test_total_parse_loss_of_a_changed_file_raises_a101_and_exits_2() {
+    let fx = fixture();
+    fx.commit(&[("Foo.java", java_class("Foo", HIGH_CC_IFS, 0).as_bytes())]);
+    fx.stage("Foo.java", GARBAGE_JAVA.as_bytes());
+
+    let outcome = fx.staged();
+
+    assert_total_parse_loss(&outcome, "Foo.java");
+    let found = codes(&outcome);
+    assert!(
+        found.iter().all(|code| *code == A101),
+        "the vanished callables raised {found:?}"
+    );
+    assert!(![E101, E102, V101].iter().any(|code| found.contains(code)));
+}
+
+#[test]
+fn test_added_file_with_total_parse_loss_raises_a101() {
+    let fx = fixture();
+    fx.commit(&[("Foo.java", java_class("Foo", LOW_CC_IFS, 0).as_bytes())]);
+    fx.stage("Junk.java", GARBAGE_JAVA.as_bytes());
+
+    let outcome = fx.staged();
+
+    assert_total_parse_loss(&outcome, "Junk.java");
+}

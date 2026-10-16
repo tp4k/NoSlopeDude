@@ -10,7 +10,7 @@ Scans a local folder or a public GitHub repository (a shallow, single-branch
 clone of the default branch) and reports on `.java`, `.js`, `.jsx`, `.mjs`,
 `.cjs`, `.ts`, and `.tsx` source files.
 
-The terminal summary and runtime error messages are escaped the same way as in `check`. Argument-parsing errors printed by the command-line parser are escaped the same way, including a newline inside an argument value, which prints as `\u{a}` instead of starting a new line. Argument-parsing errors print without colour.
+The terminal summary and `scan`'s runtime error messages have control and bidirectional-formatting characters escaped as `check`'s diagnostics do; a path that is not valid UTF-8 prints with U+FFFD in place of each invalid byte sequence in `scan`, not with the `%XX` form `check` uses. Argument-parsing errors printed by the command-line parser are escaped the same way, including a newline inside an argument value, which prints as `\u{a}` instead of starting a new line. Argument-parsing errors print without colour.
 
 ### Arguments
 
@@ -21,7 +21,7 @@ The terminal summary and runtime error messages are escaped the same way as in `
 - `--output <directory>` (**required**) — where `report.json` and `report.html` are written. Created if it does not already exist.
 - `--include-tests` — include test files in the scan. Off by default.
 - `--exclude <glob>` — an additional glob to exclude from the scan; may be repeated.
-- `--min-clone-lines <n>` — the minimum number of duplicated source lines to report as a clone. Default: `10`.
+- `--min-clone-lines <n>` — the minimum number of duplicated source lines to report as a clone. Default: `measurement.min_clone_lines` from the `nsd.yml` in the scanned root (the folder, or the root of the clone) when that file exists, else `10`. Only the root file is read, never one in a subdirectory or a parent. Only this key applies to `scan`: `include`, `exclude` and the rest of the file do not narrow it, though the whole file is parsed strictly. An invalid, over-1-MiB, non-regular or symlinked `nsd.yml` fails the scan with `NSD-C102` and writes no report. The flag takes precedence over the file and the file is then not read.
 
 ### Default exclusions
 
@@ -126,3 +126,5 @@ nsd check --base origin/main --format json
 ```
 
 Exit `0` passes the job, `1` and `3` fail it for a denied regression, and `2` and `3` fail it for an analysis or configuration error (see *Exit codes*).
+
+The repository itself runs `.github/workflows/self-check.yml`, a smoke run that builds `nsd`, runs its tests and runs `nsd check --base`; it gates no first-party source, because the repository has no Java/JS/TS outside its test fixtures.

@@ -468,7 +468,9 @@ fn root_config_bytes(
 /// window where the path is swapped for a non-regular file between it and
 /// `File::open` below — the same residual race `WorktreeSnapshot::read`'s
 /// D25 re-check documents at `src/git/snapshot.rs:235-237`; closing it
-/// needs `O_NONBLOCK`, a `libc` dependency the anti-scope forbids.
+/// needs an `O_NONBLOCK` open and an `fstat` of the handle (not
+/// `O_NOFOLLOW`: a trusted path may be a symlink); a trusted
+/// path is operator-chosen, so it keeps its plain open.
 pub fn load_trusted(path: &Path) -> Result<Config, ConfigError> {
     match fs::metadata(path) {
         Ok(metadata) if metadata.is_file() => {}
@@ -485,28 +487,106 @@ pub fn load_trusted(path: &Path) -> Result<Config, ConfigError> {
             )))
         }
     }
-    let file = fs::File::open(path).map_err(|err| {
+    let bytes = read_capped(path, "trusted config")?;
+    Config::parse(&bytes)
+}
+
+/// Loads the `nsd.yml` of a scanned root for `nsd scan` (A2): `Ok(None)`
+/// when the root has no entry named exactly `nsd.yml`, `NSD-C102` when it
+/// is a symlink or not a regular file (never followed: a scanned folder or
+/// a cloned repository is untrusted content), exceeds
+/// `SOURCE_CEILING_BYTES`, or has an invalid shape. The name is matched
+/// against the directory listing, not opened, so a case-insensitive
+/// filesystem cannot serve `NSD.yml` for it. Only the root is looked at.
+///
+/// The `symlink_metadata` check below only words the error; the guarantee is
+/// `read_scan_root_file`'s no-follow non-blocking open, `fstat` of the
+/// handle, then read, so a symlink or non-regular file swapped in at any
+/// point before the open is refused without being read. That guarantee is
+/// unix-only; other platforms are unguarded against the swap.
+pub fn load_scan_root(root: &Path) -> Result<Option<Config>, ConfigError> {
+    let unreadable = |err: std::io::Error| {
         ConfigError::new(format!(
-            "cannot read trusted config {}: {err}",
-            path.display()
+            "cannot read {CONFIG_FILE_NAME} in the scanned root: {err}"
         ))
-    })?;
-    let mut bytes = Vec::new();
-    file.take(SOURCE_CEILING_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|err| {
-            ConfigError::new(format!(
-                "cannot read trusted config {}: {err}",
-                path.display()
-            ))
-        })?;
-    if bytes.len() as u64 > SOURCE_CEILING_BYTES {
+    };
+    let mut found = false;
+    for entry in fs::read_dir(root).map_err(unreadable)? {
+        found |= entry.map_err(unreadable)?.file_name() == CONFIG_FILE_NAME;
+    }
+    if !found {
+        return Ok(None);
+    }
+    let path = root.join(CONFIG_FILE_NAME);
+    let metadata = fs::symlink_metadata(&path).map_err(unreadable)?;
+    if !metadata.is_file() {
         return Err(ConfigError::new(format!(
-            "trusted config {} exceeds the {SOURCE_CEILING_BYTES}-byte read ceiling",
+            "{CONFIG_FILE_NAME} in the scanned root is not a regular file (a symlink is not followed)"
+        )));
+    }
+    let bytes = read_scan_root_file(&path)?;
+    Config::parse(&bytes).map(Some)
+}
+
+/// Opens and reads the scan root's `nsd.yml` after the pre-check. On unix
+/// the open is `O_NOFOLLOW | O_NONBLOCK`: a symlink at the final component
+/// fails the open (`ELOOP`) so its target is never opened, and a FIFO,
+/// socket or device opens without blocking. The handle is then `fstat`ed
+/// and must be a regular file before its first byte is read, all under the
+/// `SOURCE_CEILING_BYTES` cap; the file read is the file verified. Anything
+/// swapped in before the open is refused unread, so the pre-check carries
+/// no guarantee. Other platforms get the handle's `is_file` check only,
+/// which does not stop a symlink swapped in before the open (unguarded,
+/// untested).
+fn read_scan_root_file(path: &Path) -> Result<Vec<u8>, ConfigError> {
+    let label = format!("{CONFIG_FILE_NAME} in the scanned root");
+    let unreadable = |err: std::io::Error| {
+        ConfigError::new(format!("cannot read {label} {}: {err}", path.display()))
+    };
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = options.open(path).map_err(unreadable)?;
+    if !file.metadata().map_err(unreadable)?.is_file() {
+        return Err(ConfigError::new(format!(
+            "{label} {} is not a regular file (a symlink is not followed)",
             path.display()
         )));
     }
-    Config::parse(&bytes)
+    read_capped_file(file, path, &label)
+}
+
+/// Reads at most `SOURCE_CEILING_BYTES` of `path`; one byte more is
+/// `NSD-C102`. `label` names the file in the error text.
+fn read_capped(path: &Path, label: &str) -> Result<Vec<u8>, ConfigError> {
+    let unreadable = |err: std::io::Error| {
+        ConfigError::new(format!("cannot read {label} {}: {err}", path.display()))
+    };
+    let file = fs::File::open(path).map_err(unreadable)?;
+    read_capped_file(file, path, label)
+}
+
+/// Reads at most `SOURCE_CEILING_BYTES` from the already-open `file`, which
+/// was opened from `path`; one byte more is `NSD-C102`.
+fn read_capped_file(file: fs::File, path: &Path, label: &str) -> Result<Vec<u8>, ConfigError> {
+    let unreadable = |err: std::io::Error| {
+        ConfigError::new(format!("cannot read {label} {}: {err}", path.display()))
+    };
+    let mut bytes = Vec::new();
+    file.take(SOURCE_CEILING_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(unreadable)?;
+    if bytes.len() as u64 > SOURCE_CEILING_BYTES {
+        return Err(ConfigError::new(format!(
+            "{label} {} exceeds the {SOURCE_CEILING_BYTES}-byte read ceiling",
+            path.display()
+        )));
+    }
+    Ok(bytes)
 }
 
 /// Rejects an empty scalar carrying an explicit tag (`exclude: !!seq`,
@@ -730,4 +810,108 @@ struct RawOutput {
     max_terminal_diagnostics: Option<u32>,
     #[serde(default, deserialize_with = "deserialize_present_scalar")]
     max_agent_diagnostics: Option<u32>,
+}
+
+#[cfg(all(test, unix))]
+mod scan_root_open_tests {
+    use super::{read_scan_root_file, CODE_INVALID_CONFIG};
+    use std::fs;
+    use std::io::Read as _;
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    use std::path::Path;
+
+    const VALID_CONFIG: &[u8] = b"version: 1\nmeasurement:\n  min_clone_lines: 17\n";
+    const GUARD_SECONDS: u64 = 5;
+
+    fn make_fifo(path: &Path) {
+        let status = std::process::Command::new("/usr/bin/mkfifo")
+            .arg(path)
+            .status()
+            .expect("spawn mkfifo");
+        assert!(status.success(), "mkfifo must succeed");
+    }
+
+    /// Runs the open-and-read step on a detached thread and returns the code
+    /// of its refusal; a step that blocks fails the guard instead of hanging.
+    fn refusal_code_within_guard(path: &Path) -> &'static str {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let step_path = path.to_path_buf();
+        std::thread::spawn(move || {
+            let _ = tx.send(read_scan_root_file(&step_path).map_err(|err| err.code()));
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(GUARD_SECONDS))
+            .expect("the step must return within the guard, not block on a FIFO")
+            .expect_err("a FIFO must be refused")
+    }
+
+    /// The pre-check saw a regular file; the same inode is then moved out and
+    /// a symlink to it takes its name. A `(dev, ino)` compare or a plain open
+    /// reads it; only a no-follow open refuses.
+    #[test]
+    fn scan_root_open_refuses_a_symlink_renamed_in_after_the_check() {
+        let root = tempfile::tempdir().expect("root");
+        let outside = tempfile::tempdir().expect("outside");
+        let path = root.path().join("nsd.yml");
+        fs::write(&path, VALID_CONFIG).expect("write config");
+        assert!(fs::symlink_metadata(&path).expect("pre-check").is_file());
+        let moved = outside.path().join("ext.yml");
+        fs::rename(&path, &moved).expect("rename outside");
+        std::os::unix::fs::symlink(&moved, &path).expect("symlink back");
+
+        let err = read_scan_root_file(&path).expect_err("a swapped-in symlink must be refused");
+        assert_eq!(err.code(), CODE_INVALID_CONFIG);
+    }
+
+    /// A symlink present when the open runs, to a valid external config.
+    #[test]
+    fn scan_root_open_refuses_a_symlink_present_at_open() {
+        let root = tempfile::tempdir().expect("root");
+        let outside = tempfile::tempdir().expect("outside");
+        let target = outside.path().join("ext.yml");
+        fs::write(&target, VALID_CONFIG).expect("write target");
+        let path = root.path().join("nsd.yml");
+        std::os::unix::fs::symlink(&target, &path).expect("symlink");
+
+        let err = read_scan_root_file(&path).expect_err("a symlink must be refused");
+        assert_eq!(err.code(), CODE_INVALID_CONFIG);
+    }
+
+    /// A FIFO holding buffered bytes is refused before any byte is read.
+    #[test]
+    fn scan_root_open_verifies_the_handle_before_reading() {
+        let root = tempfile::tempdir().expect("root");
+        let path = root.path().join("nsd.yml");
+        make_fifo(&path);
+        let mut reader = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&path)
+            .expect("open fifo reader");
+        let mut writer = fs::OpenOptions::new()
+            .write(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&path)
+            .expect("open fifo writer");
+        writer.write_all(VALID_CONFIG).expect("buffer bytes");
+
+        let code = refusal_code_within_guard(&path);
+        assert_eq!(code, CODE_INVALID_CONFIG);
+        let mut remaining = Vec::new();
+        reader.read_to_end(&mut remaining).ok();
+        assert_eq!(
+            remaining, VALID_CONFIG,
+            "the refusal must not consume bytes"
+        );
+    }
+
+    /// A FIFO with no writer must not block the open.
+    #[test]
+    fn scan_root_open_does_not_block_on_a_fifo_without_a_writer() {
+        let root = tempfile::tempdir().expect("root");
+        let path = root.path().join("nsd.yml");
+        make_fifo(&path);
+        let code = refusal_code_within_guard(&path);
+        assert_eq!(code, CODE_INVALID_CONFIG);
+    }
 }

@@ -479,3 +479,76 @@ fn test_load_trusted_follows_a_symlink_to_a_regular_file() {
         .expect("a symlink to a regular trusted config file must still load");
     assert_eq!(config.measurement.min_clone_lines, 42);
 }
+
+const RACE_BUDGET_SECONDS: u64 = 3;
+const RACE_REGULAR_THRESHOLD: u32 = 5;
+const RACE_EXTERNAL_THRESHOLD: u32 = 17;
+
+fn threshold_config(min_clone_lines: u32) -> String {
+    format!("version: 1\nmeasurement:\n  min_clone_lines: {min_clone_lines}\n")
+}
+
+/// A thread alternates atomic renames of a regular `nsd.yml` and a symlink
+/// to an external config over the scan root's entry while the loader runs;
+/// the loader must never hand back the external config.
+#[test]
+#[cfg(unix)]
+fn test_load_scan_root_never_reads_a_symlink_swapped_in_during_the_load() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    let root = tempfile::TempDir::new().expect("root");
+    let outside = tempfile::TempDir::new().expect("outside");
+    let external = outside.path().join("ext.yml");
+    std::fs::write(&external, threshold_config(RACE_EXTERNAL_THRESHOLD)).expect("external");
+    let live = root.path().join("nsd.yml");
+    std::fs::write(&live, threshold_config(RACE_REGULAR_THRESHOLD)).expect("regular");
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let swaps = Arc::new(AtomicUsize::new(0));
+    let swapper = {
+        let (stop, swaps) = (Arc::clone(&stop), Arc::clone(&swaps));
+        let (stage, live, external) = (
+            outside.path().join("stage.yml"),
+            live.clone(),
+            external.clone(),
+        );
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                std::fs::write(&stage, threshold_config(RACE_REGULAR_THRESHOLD)).expect("stage");
+                std::fs::rename(&stage, &live).expect("rename regular over nsd.yml");
+                std::os::unix::fs::symlink(&external, &stage).expect("stage link");
+                std::fs::rename(&stage, &live).expect("rename symlink over nsd.yml");
+                swaps.fetch_add(1, Ordering::Relaxed);
+            }
+        })
+    };
+
+    let deadline = Instant::now() + Duration::from_secs(RACE_BUDGET_SECONDS);
+    let mut iterations = 0_u64;
+    let mut leaked_at = None;
+    while Instant::now() < deadline && leaked_at.is_none() {
+        iterations += 1;
+        match nsd::config::load_scan_root(root.path()) {
+            Ok(Some(config)) if config.measurement.min_clone_lines == RACE_REGULAR_THRESHOLD => {}
+            Ok(Some(config)) => leaked_at = Some(config.measurement.min_clone_lines),
+            Ok(None) => panic!("nsd.yml is always present in the scanned root"),
+            Err(err) => assert_eq!(err.code(), CODE_INVALID_CONFIG),
+        }
+    }
+    stop.store(true, Ordering::Relaxed);
+    swapper.join().expect("swapper thread");
+    assert!(
+        swaps.load(Ordering::Relaxed) > 0,
+        "the swap must run concurrently, or the test is vacuous"
+    );
+    eprintln!(
+        "race loop: {iterations} iterations, {} swaps",
+        swaps.load(Ordering::Relaxed)
+    );
+    assert_eq!(
+        leaked_at, None,
+        "load_scan_root returned the external config after {iterations} iterations"
+    );
+}

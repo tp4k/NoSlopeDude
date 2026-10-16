@@ -160,6 +160,49 @@ build_plain_tree() {
   done
 }
 
+# insert_table_row <file> <heading> <row>
+# Inserts <row> right after the last row of the first table under the line
+# that is exactly <heading>. Several script-written tables share one file,
+# so appending at EOF would put the row under whichever table is last. It
+# fails closed (`error:` on stderr, exit 1, <file> untouched) when the
+# heading is absent or its section holds no table before the next `## `
+# heading, instead of falling back to EOF.
+insert_table_row() {
+  local file="$1" heading="$2" row="$3" tmp="$1.tmp.$$"
+  if ! ROW="$row" awk -v heading="$heading" '
+    function emit() { print ENVIRON["ROW"]; state = 3 }
+    state == 0 && $0 == heading { state = 1; print; next }
+    state == 1 && /^## / { state = -1 }
+    state == 1 && /^\|/ { state = 2 }
+    state == 2 && !/^\|/ { emit() }
+    { print }
+    END { if (state == 2) emit(); exit (state == 3 ? 0 : 1) }
+  ' "$file" >"$tmp"; then
+    rm -f "$tmp"
+    echo "error: no table under the heading \"$heading\" in $file; not inserting" >&2
+    return 1
+  fi
+  mv -f "$tmp" "$file"
+}
+
+# make_temp_paths
+# Creates the scan's three temp paths in the globals `output_dir`,
+# `time_log` and `plain_dir` and installs the EXIT trap that removes them.
+# The trap is installed before the first mktemp, so a later failing mktemp
+# does not leak the earlier paths.
+# Not `local`: the trap fires after main() returns, outside main's dynamic
+# scope, where a `local` binding is already gone (`set -u` reports it as
+# "unbound variable").
+make_temp_paths() {
+  output_dir=""
+  time_log=""
+  plain_dir=""
+  trap 'rm -rf "$output_dir" "$time_log" "$plain_dir"' EXIT
+  output_dir="$(mktemp -d)"
+  time_log="$(mktemp)"
+  plain_dir="$(mktemp -d "${TMPDIR:-/tmp}/nsd-perf-plain.XXXXXX")"
+}
+
 main() {
   local fixture_root="${1:-${TMPDIR:-/tmp}/nsd-perf-fixture}"
   local spring_dir="$fixture_root/spring-framework"
@@ -177,14 +220,7 @@ main() {
   (cd "$REPO_ROOT" && cargo build --release)
   local bin="$REPO_ROOT/target/release/nsd"
 
-  # Not `local`: the EXIT trap below fires after main() returns, once the
-  # script reaches its own end, outside main's dynamic scope -- a `local`
-  # binding here would already be gone by then (`set -u` catches exactly
-  # that as "unbound variable").
-  output_dir="$(mktemp -d)"
-  time_log="$(mktemp)"
-  plain_dir="$(mktemp -d "${TMPDIR:-/tmp}/nsd-perf-plain.XXXXXX")"
-  trap 'rm -rf "$output_dir" "$time_log" "$plain_dir"' EXIT
+  make_temp_paths
 
   build_plain_tree "$fixture_root" "$plain_dir"
 
@@ -211,7 +247,7 @@ main() {
   local row
   row="| $date_cell_value | $(uname -srm) | spring-framework@$spring_sha | angular@$angular_sha | $scanned_lines | ${wall_seconds}s | ${peak_rss_mb} MB | $incomplete | $skipped_count |"
 
-  echo "$row" >>"$MEASUREMENTS_FILE"
+  insert_table_row "$MEASUREMENTS_FILE" "## Rows" "$row"
   echo "$row"
 }
 

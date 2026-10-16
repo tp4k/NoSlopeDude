@@ -144,8 +144,9 @@ repository-configured filter driver would execute. For a remote
   covers the whole checkout, not the scanned subtree) or
   `worktree_snapshot_failed`.
 - `fingerprints.measurement` is the measurement-profile digest for the run's
-  `--min-clone-lines`; `fingerprints.configuration` digests `--include-tests`,
-  the `--exclude` globs in order and `--min-clone-lines` (family
+  effective clone threshold (`--min-clone-lines`, else the scanned
+  root's `measurement.min_clone_lines`, else `10`); `fingerprints.configuration`
+  digests `--include-tests`, the `--exclude` globs in order and that threshold (family
   `nsd-scan-config-v1`). Neither holds a path.
 - `skipped` counts `skipped_files` by reason, every one of the eleven possible
   reasons present, zeros included. `skipped_files` stays the per-file list.

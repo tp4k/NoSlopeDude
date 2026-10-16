@@ -393,6 +393,7 @@ dependencies = [
  "clap",
  "git2",
  "ignore",
+ "libc",
  "rayon",
  "serde",
  "serde_json",

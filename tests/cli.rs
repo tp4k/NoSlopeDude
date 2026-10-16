@@ -13,7 +13,7 @@ fn test_min_clone_lines_defaults_to_10() -> anyhow::Result<()> {
     let CliCommand::Scan(args) = cli.command else {
         anyhow::bail!("expected the scan subcommand");
     };
-    assert_eq!(args.min_clone_lines, 10);
+    assert_eq!(args.min_clone_lines, None);
     Ok(())
 }
 

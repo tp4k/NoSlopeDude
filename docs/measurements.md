@@ -20,7 +20,9 @@ The fixture is two cloned public repositories, not a generated tree
 (default `${TMPDIR:-/tmp}/nsd-perf-fixture`, overridable by its
 first argument), pinned by sha with a same-URL default-branch fallback if
 a pin is ever unreachable. `scripts/perf_scan.sh` then runs exactly one
-scan of that root under `/usr/bin/time -l` and appends a row below.
+scan of that root under `/usr/bin/time -l` and inserts a row at the end of the `## Rows` table below.
+`scripts/perf_check.sh` does the same for `nsd check` (cold and warm time,
+cache size) into the `## Check rows` table at the end of this file.
 
 The fixture root lives **outside this repo's tree** (not a gitignored
 in-repo directory): the scanner's own walk honours a parent `.gitignore`
@@ -917,3 +919,34 @@ C6 were each individually reverted for failing it, so this cumulative
 number is consistent with — but does not re-derive — those per-item
 verdicts. Both scratch worktrees (`ws14-A`, `ws14-B`) were removed via
 `git worktree remove --force` after the last pair.
+
+## Check rows
+
+`scripts/perf_check.sh` (WS-3, `nsd-plan-final.md` *Fixtures and end-to-end*:
+"record cold/warm time, peak RSS, cache size") inserts one row at the end of
+the table below. It builds a plain copy of both fixture clones (the same
+`build_plain_tree` as `perf_scan.sh`) in a scratch directory, `git init`s it,
+commits it as the base, commits one small new Java file as the candidate, and
+runs `nsd check --base HEAD~1 --format json` from that repo root twice under
+`/usr/bin/time -l`: cold (no `<git dir>/nsd` cache), then warm. The check never
+runs inside the fixture clones. The script refuses to write a row when the
+fixture is missing, when either run is not a completed check (process status
+outside `0`-`3`, or stdout not one check JSON document whose `exit_status`
+equals that status), or when the cold and warm JSON outputs differ.
+
+Each row: date (UTC) with `(nsd@<full HEAD sha>)`, suffixed `+dirty` when
+`git status --porcelain -- src Cargo.toml Cargo.lock` is non-empty · machine ·
+the two fixture repos and their scanned shas · the candidate (one new `.java`
+file, so the check analyses one added file against the whole base) · cold wall
+seconds and cold peak RSS in MB · warm wall seconds and warm peak RSS in MB
+(`/usr/bin/time -l`'s `real` and `maximum resident set size`) · cache size in
+MB after the warm run (`du -sk` of `<git dir>/nsd/cache`, so kilobyte blocks
+divided by 1024, not apparent bytes) · the cold run's check exit status (the
+warm run's `exit_status` is part of the compared JSON). Exit status 2 on the 2026-10-15 row is the check's own result,
+not a script failure: its one diagnostic is `NSD-A102` (`too_large`) for
+`angular/.github/actions/deploy-docs-site/main.js`, a file the base already
+carries; the candidate file raises nothing.
+
+| date | machine | spring-framework | angular | candidate | cold wall clock | cold peak RSS | warm wall clock | warm peak RSS | cache size | exit status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-10-15 (nsd@4a0cd37d69595466692aee1354bcdf77f8992dc2) | Darwin 27.0.0 arm64 | spring-framework@e8eb2b6751ca6efa2a6b8a8eb930ed3469ebafb9 | angular@a783c4e7b753929ababa610e305112b82aaa0eb0 | 1 new .java file | 3.37s | 930.08 MB | 1.68s | 867.88 MB | 187.99 MB | 2 |

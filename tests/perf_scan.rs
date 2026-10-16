@@ -582,3 +582,168 @@ fn test_build_plain_tree_drops_each_clones_git_entry_and_keeps_everything_else(
     }
     Ok(())
 }
+
+#[cfg(unix)]
+#[test]
+fn test_row_is_inserted_at_the_end_of_the_scan_table() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let file = dir.path().join("measurements.md");
+    // A prose section and a second table follow the scan table, so EOF is
+    // not where the new row belongs.
+    let before = "# Title\n\n## Rows\n\nlegend\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |\n\n## Check rows\n\n| c |\n| --- |\n| 9 |\n\nclosing prose\n";
+    std::fs::write(&file, before)?;
+
+    let output = run_sourced(&format!(
+        "insert_table_row '{}' '## Rows' '| 5 | 6 |'",
+        file.display()
+    ))?;
+    assert!(
+        output.status.success(),
+        "insert_table_row failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected = before.replace("| 3 | 4 |\n", "| 3 | 4 |\n| 5 | 6 |\n");
+    assert_eq!(std::fs::read_to_string(&file)?, expected);
+
+    // A missing heading must fail closed, not fall back to appending at EOF.
+    let missing = dir.path().join("missing.md");
+    std::fs::write(&missing, "# Title\n\n| a |\n| --- |\n| 1 |\n")?;
+    let output = run_sourced(&format!(
+        "insert_table_row '{}' '## Rows' '| 5 |'",
+        missing.display()
+    ))?;
+    assert!(
+        !output.status.success(),
+        "expected a nonzero exit when the heading is absent"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("error:"),
+        "expected an `error:` line, got: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&missing)?,
+        "# Title\n\n| a |\n| --- |\n| 1 |\n",
+        "a refused insert must leave the file unchanged"
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_failed_plain_dir_mktemp_leaks_no_temp_files() -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir()?;
+    let shim = dir.path().join("shim");
+    let log = dir.path().join("created");
+    std::fs::create_dir_all(&shim)?;
+    // Fails only the third mktemp (the plain tree's, named by its template);
+    // the other two run the real tool and record what they created.
+    let mktemp = shim.join("mktemp");
+    std::fs::write(
+        &mktemp,
+        "#!/bin/sh\nif [ -n \"$FAIL_PLAIN\" ]; then case \"$*\" in *nsd-perf-plain*) exit 1;; esac; fi\np=$(/usr/bin/mktemp \"$@\") || exit 1\necho \"$p\" >>\"$MKTEMP_LOG\"\necho \"$p\"\n",
+    )?;
+    std::fs::set_permissions(&mktemp, std::fs::Permissions::from_mode(0o755))?;
+    let run = |fail: &str| -> anyhow::Result<Output> {
+        std::fs::write(&log, "")?;
+        Ok(Command::new("bash")
+            .arg("-c")
+            .arg(format!(
+                "source \"{}\" && PATH='{}':\"$PATH\"; make_temp_paths",
+                script_path(),
+                shim.display()
+            ))
+            .env("MKTEMP_LOG", &log)
+            .env("FAIL_PLAIN", fail)
+            .output()?)
+    };
+    let created = || -> anyhow::Result<Vec<String>> {
+        Ok(std::fs::read_to_string(&log)?
+            .lines()
+            .map(str::to_owned)
+            .collect())
+    };
+
+    let output = run("1")?;
+    assert!(
+        !output.status.success(),
+        "expected make_temp_paths to fail when the plain_dir mktemp fails"
+    );
+    let leaked: Vec<String> = created()?
+        .into_iter()
+        .filter(|p| std::path::Path::new(p).exists())
+        .collect();
+    assert_eq!(
+        leaked,
+        Vec::<String>::new(),
+        "a failed third mktemp leaked output_dir/time_log"
+    );
+
+    // Success path: the EXIT trap must remove all three, plain_dir included.
+    let output = run("")?;
+    assert!(
+        output.status.success(),
+        "make_temp_paths failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let created = created()?;
+    assert_eq!(
+        created.len(),
+        3,
+        "expected three temp paths, got {created:?}"
+    );
+    let left: Vec<&String> = created
+        .iter()
+        .filter(|p| std::path::Path::new(p).exists())
+        .collect();
+    assert!(left.is_empty(), "the EXIT trap left {left:?} behind");
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_insert_refuses_a_heading_whose_section_has_no_table() -> anyhow::Result<()> {
+    // `## Rows` holds no table; the next section's table must not receive
+    // the row just because it is the first table after the heading.
+    let dir = tempfile::tempdir()?;
+    let file = dir.path().join("measurements.md");
+    let before = "## Rows\n\nprose only\n\n## Check rows\n\n| c |\n| --- |\n| 9 |\n";
+    std::fs::write(&file, before)?;
+
+    let output = run_sourced(&format!(
+        "insert_table_row '{}' '## Rows' '| 5 |'",
+        file.display()
+    ))?;
+    assert!(
+        !output.status.success(),
+        "expected a nonzero exit for a section without a table"
+    );
+    assert_eq!(std::fs::read_to_string(&file)?, before);
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_row_is_inserted_after_a_table_that_ends_the_file() -> anyhow::Result<()> {
+    // `## Check rows` is the last section of docs/measurements.md: its table
+    // ends at EOF, with no later non-table line to trigger the insertion.
+    let dir = tempfile::tempdir()?;
+    let file = dir.path().join("measurements.md");
+    std::fs::write(&file, "## Rows\n\n| a |\n| --- |\n| 1 |\n")?;
+
+    let output = run_sourced(&format!(
+        "insert_table_row '{}' '## Rows' '| 2 |'",
+        file.display()
+    ))?;
+    assert!(
+        output.status.success(),
+        "insert_table_row failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file)?,
+        "## Rows\n\n| a |\n| --- |\n| 1 |\n| 2 |\n"
+    );
+    Ok(())
+}

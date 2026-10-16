@@ -13,7 +13,7 @@ use nsd::check::{run_check, CheckDetails, CheckDiagnostic, CheckMode, CheckReque
 use nsd::cli::{CheckArgs, Cli, Command, Format, ScanArgs};
 use nsd::config::{Config, OutputConfig, PolicyConfig, CODE_INVALID_CONFIG};
 use nsd::format::{escape_terminal, render_agent, render_check_json, render_terminal};
-use nsd::model::ScanSettings;
+use nsd::model::{ScanSettings, DEFAULT_MIN_CLONE_LINES};
 use nsd::pipeline;
 use nsd::policy::exit::exit_status;
 use nsd::report;
@@ -134,9 +134,12 @@ fn run_scan(args: ScanArgs) -> anyhow::Result<()> {
         output: args.output,
         include_tests: args.include_tests,
         exclude: args.exclude,
-        min_clone_lines: args.min_clone_lines,
+        min_clone_lines: args.min_clone_lines.unwrap_or(DEFAULT_MIN_CLONE_LINES),
     };
-    let output = pipeline::run(&args.target, settings)?;
+    let output = match args.min_clone_lines {
+        Some(_) => pipeline::run(&args.target, settings)?,
+        None => pipeline::run_with_root_config(&args.target, settings)?,
+    };
     print!("{}", report::terminal_summary(&output.report));
     Ok(())
 }
