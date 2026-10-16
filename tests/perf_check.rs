@@ -60,6 +60,10 @@ fn snapshot(root: &Path) -> anyhow::Result<String> {
 
 const MEASUREMENTS: &str = "# M\n\n## Rows\n\n| a |\n| --- |\n| 1 |\n\n## Check rows\n\nlegend\n\n| date | machine |\n| --- | --- |\n| old | old |\n\ntrailing prose\n";
 
+// The end-to-end tests drive `main`, which times each run with macOS
+// `/usr/bin/time -l` (GNU time has no `-l`), so they and this harness are
+// macOS-only; the function-level tests run on any unix.
+#[cfg(target_os = "macos")]
 const FAKE_NSD: &str = r#"#!/bin/sh
 git_dir="$(git rev-parse --absolute-git-dir)"
 n=$(cat "$FAKE_STATE/count" 2>/dev/null || echo 0)
@@ -87,6 +91,7 @@ if [ "$n" = 1 ] && [ -n "${FAKE_COLD_EXIT+x}" ]; then status=$FAKE_COLD_EXIT; fi
 exit "$status"
 "#;
 
+#[cfg(target_os = "macos")]
 struct Harness {
     _dir: tempfile::TempDir,
     fixture: std::path::PathBuf,
@@ -95,6 +100,7 @@ struct Harness {
     fake: std::path::PathBuf,
 }
 
+#[cfg(target_os = "macos")]
 fn harness() -> anyhow::Result<Harness> {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir()?;
@@ -117,10 +123,12 @@ fn harness() -> anyhow::Result<Harness> {
     })
 }
 
+#[cfg(target_os = "macos")]
 fn run_main(h: &Harness, differ: bool, template: Option<&Path>) -> anyhow::Result<Output> {
     run_main_env(h, differ, template, &[])
 }
 
+#[cfg(target_os = "macos")]
 fn run_main_env(
     h: &Harness,
     differ: bool,
@@ -195,7 +203,7 @@ fn test_missing_fixture_exits_1_and_changes_nothing() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 #[test]
 fn test_differing_cold_and_warm_output_refuses_the_row() -> anyhow::Result<()> {
     let h = harness()?;
@@ -302,7 +310,7 @@ fn test_cache_size_is_read_from_the_git_dir_cache() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 #[test]
 fn test_main_runs_a_cold_then_a_warm_check_in_the_scratch_repo() -> anyhow::Result<()> {
     let h = harness()?;
@@ -412,7 +420,7 @@ fn test_time_cells_reads_wall_seconds_and_rss_bytes() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 #[test]
 fn test_row_records_a_nonzero_check_exit_status() -> anyhow::Result<()> {
     let h = harness()?;
@@ -439,6 +447,7 @@ fn test_row_records_a_nonzero_check_exit_status() -> anyhow::Result<()> {
 
 /// Runs `main` with the given fake-`nsd` env and asserts the row is refused:
 /// nonzero exit, an `error:` line, and the measurements file untouched.
+#[cfg(target_os = "macos")]
 fn assert_row_refused(env: &[(&str, &str)]) -> anyhow::Result<String> {
     let h = harness()?;
     let output = run_main_env(&h, false, None, env)?;
@@ -460,14 +469,14 @@ fn assert_row_refused(env: &[(&str, &str)]) -> anyhow::Result<String> {
     Ok(stderr.into_owned())
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 #[test]
 fn test_crashed_check_with_empty_output_refuses_the_row() -> anyhow::Result<()> {
     assert_row_refused(&[("FAKE_EXIT", "101"), ("FAKE_BODY", "")])?;
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 #[test]
 fn test_status_outside_zero_to_three_refuses_the_row() -> anyhow::Result<()> {
     // The document agrees with the process, so only the range can refuse.
@@ -476,7 +485,7 @@ fn test_status_outside_zero_to_three_refuses_the_row() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 #[test]
 fn test_output_that_is_not_a_check_document_refuses_the_row() -> anyhow::Result<()> {
     assert_row_refused(&[("FAKE_BODY", "{\"summaries\":[]}\n")])?;
@@ -487,7 +496,7 @@ fn test_output_that_is_not_a_check_document_refuses_the_row() -> anyhow::Result<
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 #[test]
 fn test_json_exit_status_disagreeing_with_the_process_refuses_the_row() -> anyhow::Result<()> {
     assert_row_refused(&[("FAKE_EXIT", "2"), ("FAKE_DOC_STATUS", "0")])?;
@@ -495,7 +504,7 @@ fn test_json_exit_status_disagreeing_with_the_process_refuses_the_row() -> anyho
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 #[test]
 fn test_warm_run_status_disagreeing_with_its_output_refuses_the_row() -> anyhow::Result<()> {
     let stderr = assert_row_refused(&[("FAKE_WARM_EXIT", "101")])?;
@@ -506,7 +515,7 @@ fn test_warm_run_status_disagreeing_with_its_output_refuses_the_row() -> anyhow:
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 #[test]
 fn test_exit_status_3_is_recorded() -> anyhow::Result<()> {
     let h = harness()?;
@@ -531,7 +540,7 @@ fn test_exit_status_3_is_recorded() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 #[test]
 fn test_cold_run_status_disagreeing_with_its_output_refuses_the_row() -> anyhow::Result<()> {
     let stderr = assert_row_refused(&[("FAKE_COLD_EXIT", "101")])?;
@@ -542,7 +551,7 @@ fn test_cold_run_status_disagreeing_with_its_output_refuses_the_row() -> anyhow:
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 #[test]
 fn test_empty_or_unsupported_documents_refuse_the_row_at_a_legal_status() -> anyhow::Result<()> {
     let doc =
@@ -554,7 +563,7 @@ fn test_empty_or_unsupported_documents_refuse_the_row_at_a_legal_status() -> any
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 #[test]
 fn test_legal_warm_status_disagreeing_with_its_output_refuses_the_row() -> anyhow::Result<()> {
     // Status 2 is legal and both documents report 0, so only the warm
@@ -567,7 +576,7 @@ fn test_legal_warm_status_disagreeing_with_its_output_refuses_the_row() -> anyho
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 #[test]
 fn test_legal_cold_status_disagreeing_with_its_output_refuses_the_row() -> anyhow::Result<()> {
     let stderr = assert_row_refused(&[("FAKE_COLD_EXIT", "2")])?;
