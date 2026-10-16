@@ -553,3 +553,27 @@ fn test_empty_or_unsupported_documents_refuse_the_row_at_a_legal_status() -> any
     assert_row_refused(&[("FAKE_BODY", &format!("{doc}1}}\n{doc}1}}\n"))])?;
     Ok(())
 }
+
+#[cfg(unix)]
+#[test]
+fn test_legal_warm_status_disagreeing_with_its_output_refuses_the_row() -> anyhow::Result<()> {
+    // Status 2 is legal and both documents report 0, so only the warm
+    // exit_status comparison refuses; the outputs match each other.
+    let stderr = assert_row_refused(&[("FAKE_WARM_EXIT", "2")])?;
+    assert!(
+        stderr.contains("error: warm check output") && stderr.contains("exit_status 2"),
+        "the error must name the warm run and status 2, got: {stderr}"
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_legal_cold_status_disagreeing_with_its_output_refuses_the_row() -> anyhow::Result<()> {
+    let stderr = assert_row_refused(&[("FAKE_COLD_EXIT", "2")])?;
+    assert!(
+        stderr.contains("error: cold check output") && stderr.contains("exit_status 2"),
+        "the error must name the cold run and status 2, got: {stderr}"
+    );
+    Ok(())
+}
