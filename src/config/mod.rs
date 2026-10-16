@@ -468,7 +468,8 @@ fn root_config_bytes(
 /// window where the path is swapped for a non-regular file between it and
 /// `File::open` below — the same residual race `WorktreeSnapshot::read`'s
 /// D25 re-check documents at `src/git/snapshot.rs:235-237`; closing it
-/// needs `O_NONBLOCK`, a `libc` dependency the anti-scope forbids.
+/// needs a no-follow, non-blocking open as `load_scan_root` does; a trusted
+/// path is operator-chosen, so it keeps its plain open.
 pub fn load_trusted(path: &Path) -> Result<Config, ConfigError> {
     match fs::metadata(path) {
         Ok(metadata) if metadata.is_file() => {}
@@ -496,6 +497,12 @@ pub fn load_trusted(path: &Path) -> Result<Config, ConfigError> {
 /// `SOURCE_CEILING_BYTES`, or has an invalid shape. The name is matched
 /// against the directory listing, not opened, so a case-insensitive
 /// filesystem cannot serve `NSD.yml` for it. Only the root is looked at.
+///
+/// The `symlink_metadata` check below only words the error; the guarantee is
+/// `read_scan_root_file`'s no-follow non-blocking open, `fstat` of the
+/// handle, then read, so a symlink or non-regular file swapped in at any
+/// point before the open is refused without being read. That guarantee is
+/// unix-only; other platforms are unguarded against the swap.
 pub fn load_scan_root(root: &Path) -> Result<Option<Config>, ConfigError> {
     let unreadable = |err: std::io::Error| {
         ConfigError::new(format!(
@@ -520,9 +527,36 @@ pub fn load_scan_root(root: &Path) -> Result<Option<Config>, ConfigError> {
     Config::parse(&bytes).map(Some)
 }
 
-/// Opens and reads the scan root's `nsd.yml` once the pre-check has passed.
+/// Opens and reads the scan root's `nsd.yml` after the pre-check. On unix
+/// the open is `O_NOFOLLOW | O_NONBLOCK`: a symlink at the final component
+/// fails the open (`ELOOP`) so its target is never opened, and a FIFO,
+/// socket or device opens without blocking. The handle is then `fstat`ed
+/// and must be a regular file before its first byte is read, all under the
+/// `SOURCE_CEILING_BYTES` cap; the file read is the file verified. Anything
+/// swapped in before the open is refused unread, so the pre-check carries
+/// no guarantee. Other platforms get the handle's `is_file` check only,
+/// which does not stop a symlink swapped in before the open (unguarded,
+/// untested).
 fn read_scan_root_file(path: &Path) -> Result<Vec<u8>, ConfigError> {
-    read_capped(path, &format!("{CONFIG_FILE_NAME} in the scanned root"))
+    let label = format!("{CONFIG_FILE_NAME} in the scanned root");
+    let unreadable = |err: std::io::Error| {
+        ConfigError::new(format!("cannot read {label} {}: {err}", path.display()))
+    };
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = options.open(path).map_err(unreadable)?;
+    if !file.metadata().map_err(unreadable)?.is_file() {
+        return Err(ConfigError::new(format!(
+            "{label} {} is not a regular file (a symlink is not followed)",
+            path.display()
+        )));
+    }
+    read_capped_file(file, path, &label)
 }
 
 /// Reads at most `SOURCE_CEILING_BYTES` of `path`; one byte more is
@@ -532,6 +566,15 @@ fn read_capped(path: &Path, label: &str) -> Result<Vec<u8>, ConfigError> {
         ConfigError::new(format!("cannot read {label} {}: {err}", path.display()))
     };
     let file = fs::File::open(path).map_err(unreadable)?;
+    read_capped_file(file, path, label)
+}
+
+/// Reads at most `SOURCE_CEILING_BYTES` from the already-open `file`, which
+/// was opened from `path`; one byte more is `NSD-C102`.
+fn read_capped_file(file: fs::File, path: &Path, label: &str) -> Result<Vec<u8>, ConfigError> {
+    let unreadable = |err: std::io::Error| {
+        ConfigError::new(format!("cannot read {label} {}: {err}", path.display()))
+    };
     let mut bytes = Vec::new();
     file.take(SOURCE_CEILING_BYTES + 1)
         .read_to_end(&mut bytes)
