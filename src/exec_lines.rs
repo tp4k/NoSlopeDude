@@ -15,6 +15,7 @@ pub(crate) fn is_comment_kind(kind: &str, language: LanguageFamily) -> bool {
     match language {
         LanguageFamily::Java => matches!(kind, "line_comment" | "block_comment"),
         LanguageFamily::JsTs => kind == "comment",
+        LanguageFamily::Rust => false,
     }
 }
 

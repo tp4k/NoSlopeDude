@@ -42,17 +42,18 @@ pub struct Revision {
     pub unavailable_reason: Option<String>,
 }
 
-/// The two language families the scanner groups the seven scanned
+/// The three language families the scanner groups the eight scanned
 /// extensions into.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LanguageFamily {
     Java,
     JsTs,
+    Rust,
 }
 
 impl LanguageFamily {
     /// Maps a file extension (without the leading dot) to its language
-    /// family, or `None` if the extension is not one of the seven scanned
+    /// family, or `None` if the extension is not one of the eight scanned
     /// extensions.
     pub fn from_extension(extension: &str) -> Option<LanguageFamily> {
         match extension {
@@ -151,11 +152,12 @@ pub enum Grammar {
     JavaScript,
     TypeScript,
     Tsx,
+    Rust,
 }
 
 impl Grammar {
     /// Maps a file extension (without the leading dot) to the grammar that
-    /// parses it, or `None` if the extension is not one of the seven
+    /// parses it, or `None` if the extension is not one of the eight
     /// scanned extensions.
     pub fn for_extension(extension: &str) -> Option<Grammar> {
         match extension {
@@ -364,13 +366,14 @@ pub struct VerbosityScore {
     pub ratio: f64,
 }
 
-/// The three D23 verbosity scores a scan produces: overall, and each
+/// The four D23 verbosity scores a scan produces: overall, and each
 /// language family (D20) computed separately.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VerbosityScores {
     pub overall: VerbosityScore,
     pub java: VerbosityScore,
     pub js_ts: VerbosityScore,
+    pub rust: VerbosityScore,
 }
 
 /// Everything the rules stage (WS-4) computed: every rule finding (D22)

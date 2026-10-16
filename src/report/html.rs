@@ -101,6 +101,7 @@ fn render_scores_section(out: &mut String, report: &Report) {
     render_score_row(out, "overall", &report.scores.overall);
     render_score_row(out, "java", &report.scores.java);
     render_score_row(out, "js_ts", &report.scores.js_ts);
+    render_score_row(out, "rust", &report.scores.rust);
     let _ = write!(out, "</table></section>");
 }
 

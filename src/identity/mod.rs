@@ -64,12 +64,14 @@ const ANONYMOUS_NAME: &str = "<anonymous>";
 /// this module's own doc comment for why sharing either would be unsafe.
 const BODY_FINGERPRINT_JAVA_FAMILY_PREFIX: &str = "callable-body-java";
 const BODY_FINGERPRINT_JSTS_FAMILY_PREFIX: &str = "callable-body-js_ts";
+const BODY_FINGERPRINT_RUST_FAMILY_PREFIX: &str = "callable-body-rust";
 
 /// The degraded-path counterparts: a callable whose body span matches no IR
 /// node hashes its raw source bytes under these, so it can never equal a
 /// found-subtree fingerprint nor another language's degraded one.
 const BODY_FINGERPRINT_JAVA_DEGRADED_FAMILY_PREFIX: &str = "callable-body-degraded-java";
 const BODY_FINGERPRINT_JSTS_DEGRADED_FAMILY_PREFIX: &str = "callable-body-degraded-js_ts";
+const BODY_FINGERPRINT_RUST_DEGRADED_FAMILY_PREFIX: &str = "callable-body-degraded-rust";
 
 /// A5's own hash domain for `OwnerDigest` -- distinct from both
 /// body-fingerprint family prefixes above (and from `clones::mod.rs`'s and
@@ -293,6 +295,7 @@ fn degraded_family_prefix(language: LanguageFamily) -> &'static str {
     match language {
         LanguageFamily::Java => BODY_FINGERPRINT_JAVA_DEGRADED_FAMILY_PREFIX,
         LanguageFamily::JsTs => BODY_FINGERPRINT_JSTS_DEGRADED_FAMILY_PREFIX,
+        LanguageFamily::Rust => BODY_FINGERPRINT_RUST_DEGRADED_FAMILY_PREFIX,
     }
 }
 
@@ -300,6 +303,7 @@ fn body_fingerprint_family_prefix(language: LanguageFamily) -> &'static str {
     match language {
         LanguageFamily::Java => BODY_FINGERPRINT_JAVA_FAMILY_PREFIX,
         LanguageFamily::JsTs => BODY_FINGERPRINT_JSTS_FAMILY_PREFIX,
+        LanguageFamily::Rust => BODY_FINGERPRINT_RUST_FAMILY_PREFIX,
     }
 }
 

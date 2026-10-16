@@ -13,6 +13,7 @@
 
 mod java;
 mod jsts;
+mod rust;
 
 use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
@@ -39,6 +40,9 @@ pub const JAVA_LOWERING_VERSION: u32 = 3;
 
 /// The JS/TS counterpart of `JAVA_LOWERING_VERSION`.
 pub const JSTS_LOWERING_VERSION: u32 = 2;
+
+/// The Rust counterpart of `JAVA_LOWERING_VERSION`.
+pub const RUST_LOWERING_VERSION: u32 = 1;
 
 /// One D14 separator between adjacent leaf tokens in a statement's
 /// normalized stream -- the same control character
@@ -572,6 +576,9 @@ struct Classification {
     is_clone_statement: bool,
     /// JS/TS only; always `false` from the Java lowering.
     is_hoisted_or_type_only: bool,
+    /// Rust only: this node's whole subtree is non-executable (an attribute),
+    /// inherited by every descendant like `is_catch_body_root`.
+    silences_executable_subtree: bool,
     /// This exact node's own canonical block-kind literal (the self-is-block
     /// predicate for `SyntaxBlock` classification), `None` if it is not a
     /// block-kind node. `&'static str`, not `node.kind()` directly: tree-sitter
@@ -620,6 +627,7 @@ fn classify(
     match language {
         LanguageFamily::Java => java::classify(node, source, parent),
         LanguageFamily::JsTs => jsts::classify(node, source, parent, field_name),
+        LanguageFamily::Rust => rust::classify(node, source, parent),
     }
 }
 
@@ -653,6 +661,7 @@ fn is_clone_statement(node: Node, language: LanguageFamily) -> bool {
             });
             jsts::is_clone_statement(parent_kind, field_name, is_named, is_comment)
         }
+        LanguageFamily::Rust => rust::is_clone_statement(parent_kind, is_named, is_comment),
     }
 }
 
@@ -764,10 +773,11 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
     let open = |node: Node,
                 parent: Option<Node>,
                 parent_in_catch_body: bool,
+                parent_silenced: bool,
                 field_name: Option<&str>,
                 tables: &mut IrTables,
                 owner_stack: &mut Vec<u32>|
-     -> (IrNode, bool, bool, Option<EntitySlot>, bool) {
+     -> OpenedNode {
         let span = Span::from_node(node);
         let classification = classify(node, language, source, parent, field_name);
         let self_damage = classification.damage.is_some();
@@ -810,9 +820,10 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
             owner_stack.push((tables.owners.len() - 1) as u32);
         }
         let in_catch_body = classification.is_catch_body_root || parent_in_catch_body;
+        let silenced = classification.silences_executable_subtree || parent_silenced;
         let ir_node = IrNode {
             span,
-            executable: is_executable_leaf(node, language),
+            executable: !silenced && is_executable_leaf(node, language),
             decision: classification.decision,
             terminator: classification.terminator,
             in_block: classification.in_block,
@@ -823,19 +834,24 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
             is_hoisted_or_type_only: classification.is_hoisted_or_type_only,
             children: Vec::with_capacity(node.child_count() as usize),
         };
-        (
+        OpenedNode {
             ir_node,
             in_catch_body,
+            silenced,
             self_damage,
             entity_slot,
             owner_pushed,
-        )
+        }
     };
 
     let mut cursor = root.walk();
-    let (root_node, root_in_catch_body, root_self_damage, root_entity_slot, root_owner_pushed) =
-        open(root, None, false, None, tables, &mut owner_stack);
-    let mut stack: Vec<IrNode> = vec![root_node];
+    let root_opened = open(root, None, false, false, None, tables, &mut owner_stack);
+    let root_in_catch_body = root_opened.in_catch_body;
+    let root_self_damage = root_opened.self_damage;
+    let root_entity_slot = root_opened.entity_slot;
+    let root_owner_pushed = root_opened.owner_pushed;
+    let mut silenced_flags: Vec<bool> = vec![root_opened.silenced];
+    let mut stack: Vec<IrNode> = vec![root_opened.ir_node];
     // Mirrors `stack`'s depth exactly: `catch_flags[i]` is `stack[i]`'s own
     // `in_catch_body` flag, so a child node reads its parent's flag in O(1)
     // via `catch_flags.last()` instead of walking back up the tree.
@@ -860,15 +876,24 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
             let parent_in_catch_body = *catch_flags.last().unwrap_or(&false);
             let parent = *parents.last().unwrap_or(&root);
             let field_name = cursor.field_name();
-            let (node, in_catch_body, self_damage, entity_slot, owner_pushed) = open(
+            let parent_silenced = *silenced_flags.last().unwrap_or(&false);
+            let opened = open(
                 cursor.node(),
                 Some(parent),
                 parent_in_catch_body,
+                parent_silenced,
                 field_name,
                 tables,
                 &mut owner_stack,
             );
-            stack.push(node);
+            let (in_catch_body, self_damage, entity_slot, owner_pushed) = (
+                opened.in_catch_body,
+                opened.self_damage,
+                opened.entity_slot,
+                opened.owner_pushed,
+            );
+            stack.push(opened.ir_node);
+            silenced_flags.push(opened.silenced);
             catch_flags.push(in_catch_body);
             parents.push(cursor.node());
             dirty.push(self_damage);
@@ -881,6 +906,7 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
                 return fallback_node(root);
             };
             catch_flags.pop();
+            silenced_flags.pop();
             parents.pop();
             let own_dirty = dirty.pop().unwrap_or(false);
             if let Some(slot) = entity_slots.pop().unwrap_or(None) {
@@ -903,15 +929,24 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
                 let parent_in_catch_body = *catch_flags.last().unwrap_or(&false);
                 let parent_node = *parents.last().unwrap_or(&root);
                 let field_name = cursor.field_name();
-                let (node, in_catch_body, self_damage, entity_slot, owner_pushed) = open(
+                let parent_silenced = *silenced_flags.last().unwrap_or(&false);
+                let opened = open(
                     cursor.node(),
                     Some(parent_node),
                     parent_in_catch_body,
+                    parent_silenced,
                     field_name,
                     tables,
                     &mut owner_stack,
                 );
-                stack.push(node);
+                let (in_catch_body, self_damage, entity_slot, owner_pushed) = (
+                    opened.in_catch_body,
+                    opened.self_damage,
+                    opened.entity_slot,
+                    opened.owner_pushed,
+                );
+                stack.push(opened.ir_node);
+                silenced_flags.push(opened.silenced);
                 catch_flags.push(in_catch_body);
                 parents.push(cursor.node());
                 dirty.push(self_damage);
@@ -924,6 +959,18 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
             }
         }
     }
+}
+
+/// What `build_ir`'s `open` closure produces for one tree-sitter node: its
+/// `IrNode`, the two flags later children inherit, and the bookkeeping that
+/// pairs the node's table pushes with its finish-site pops.
+struct OpenedNode {
+    ir_node: IrNode,
+    in_catch_body: bool,
+    silenced: bool,
+    self_damage: bool,
+    entity_slot: Option<EntitySlot>,
+    owner_pushed: bool,
 }
 
 /// Which of `callable_dirty_out`/`block_dirty_out` (see `build_ir`) one
@@ -986,6 +1033,7 @@ mod tests {
             Grammar::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
             Grammar::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
             Grammar::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
+            Grammar::Rust => tree_sitter_rust::LANGUAGE.into(),
         }
     }
 

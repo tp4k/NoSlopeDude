@@ -308,6 +308,7 @@ pub(super) fn classify(
         damage: classify_damage(node, parent_kind),
         is_clone_statement: is_clone_statement(parent_kind, field_name, is_named, is_comment),
         is_hoisted_or_type_only: is_hoisted_or_type_only(kind),
+        silences_executable_subtree: false,
         block_kind: is_block_kind(kind),
         callable,
         owner_segment,
