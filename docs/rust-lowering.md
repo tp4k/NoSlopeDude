@@ -29,7 +29,7 @@ additive (see `docs/measurement-profile.md`).
 | Catch / Ternary | none | Rust has neither |
 | terminators | `return_expression` Return, `break_expression` Break, `continue_expression` Continue | no Throw; `panic!` is a macro, not a terminator |
 | blocks, clone statements | `block`; the clone statements are its named, non-comment direct children, tail expression included | `in_catch_body` is always false |
-| comments | `line_comment`, `block_comment`, and the `doc_comment` leaf inside them | `exec_lines::is_comment_kind` |
+| comments | `line_comment`, `block_comment`, the `doc_comment` text and the `outer`/`inner_doc_comment_marker` leaves inside them | `exec_lines::is_comment_kind`; a block comment's marker is a childless named leaf, so it is listed explicitly |
 | executable lines | as Java: named leaves are executable, so statements and expressions count; the whole subtree of an `attribute_item` or `inner_attribute_item` does not | an attribute identifier is a named leaf, so it is silenced by subtree (`Classification::silences_executable_subtree`) |
 | bare control flow | `return_expression`, `break_expression`, `continue_expression` join `BARE_CONTROL_FLOW_KINDS` | a bare `return;` line stays executable |
 | damage | `ERROR` / `MISSING` give `DamageKind::Unclassified` | as Java |

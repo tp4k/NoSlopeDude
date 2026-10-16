@@ -15,9 +15,18 @@ pub(crate) fn is_comment_kind(kind: &str, language: LanguageFamily) -> bool {
     match language {
         LanguageFamily::Java => matches!(kind, "line_comment" | "block_comment"),
         LanguageFamily::JsTs => kind == "comment",
-        // `doc_comment` is the named leaf inside a doc comment's own
-        // `line_comment`/`block_comment` node, so it is dropped with them.
-        LanguageFamily::Rust => matches!(kind, "line_comment" | "block_comment" | "doc_comment"),
+        // `doc_comment` and the `outer`/`inner_doc_comment_marker` are named
+        // leaves inside a doc comment's own `line_comment`/`block_comment`
+        // node; a block comment's marker has no child, so it is dropped here
+        // explicitly rather than with its parent.
+        LanguageFamily::Rust => matches!(
+            kind,
+            "line_comment"
+                | "block_comment"
+                | "doc_comment"
+                | "outer_doc_comment_marker"
+                | "inner_doc_comment_marker"
+        ),
     }
 }
 
