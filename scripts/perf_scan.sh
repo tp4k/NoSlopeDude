@@ -182,7 +182,7 @@ insert_table_row() {
     echo "error: no table under the heading \"$heading\" in $file; not inserting" >&2
     return 1
   fi
-  cat "$tmp" >"$file" && rm -f "$tmp"
+  mv -f "$tmp" "$file"
 }
 
 # make_temp_paths
