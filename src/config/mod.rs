@@ -516,8 +516,13 @@ pub fn load_scan_root(root: &Path) -> Result<Option<Config>, ConfigError> {
             "{CONFIG_FILE_NAME} in the scanned root is not a regular file (a symlink is not followed)"
         )));
     }
-    let bytes = read_capped(&path, &format!("{CONFIG_FILE_NAME} in the scanned root"))?;
+    let bytes = read_scan_root_file(&path)?;
     Config::parse(&bytes).map(Some)
+}
+
+/// Opens and reads the scan root's `nsd.yml` once the pre-check has passed.
+fn read_scan_root_file(path: &Path) -> Result<Vec<u8>, ConfigError> {
+    read_capped(path, &format!("{CONFIG_FILE_NAME} in the scanned root"))
 }
 
 /// Reads at most `SOURCE_CEILING_BYTES` of `path`; one byte more is
