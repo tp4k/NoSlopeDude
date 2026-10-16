@@ -281,3 +281,21 @@ fn test_scan_reports_a_rust_family() {
         "no Java in this repo"
     );
 }
+
+/// A block doc comment holds named leaves of its own (the doc marker and the
+/// `doc_comment` text), so only dropping the whole `block_comment` subtree
+/// keeps its lines out of the executable set.
+#[test]
+fn test_rust_block_doc_comments_are_not_executable() {
+    let source = "/** outer\n * block doc\n */\n\
+fn probe(x: i32) -> i32 {\n\
+    /*! inner block doc */\n\
+    x + 1\n\
+}\n";
+    let analysis = analyze(source);
+    let lines = &analysis.executable_lines;
+    for line in [1, 2, 3, 5] {
+        assert!(!lines.contains(&line), "doc comment line {line}: {lines:?}");
+    }
+    assert!(lines.contains(&6), "statement line 6: {lines:?}");
+}
