@@ -125,7 +125,7 @@ checkout it came from:
 
 ## The `nsd-v1` digest (M0c-14)
 
-`nsd-plan-final.md:750-752` and `nsd-plan-implementation.md:167` make the
+`nsd-plan-final.md` (*Test and acceptance plan*) and `nsd-plan-implementation.md:175` make the
 `java-fixture-01` digest the committed Java E2E golden. M0c's grammar swap
 (`tree-sitter-java` 0.23.5 → `tree-sitter-java-orchard` 0.5.18) and the
 `Callable::end_line`/`-0.0` fixes (M0c-13) mean the M0b digest above no
@@ -163,8 +163,10 @@ the checkout passes it; a target outside any repository still fails loudly.
 
 The file was re-captured after the last M6 format change (status row M6-2b,
 `46f1525`), on `main@b069e55`, and once more after M7-1's new `skipped` key and
-default globs (status row M7-1a, `a7a7119`), on `main@67a0c5e`; see *M6-2b
-recapture delta* and *M7-1a recapture delta* below.
+default globs (status row M7-1a, `a7a7119`), on `main@67a0c5e`, and for the
+Rust lowering (status row PV-2, `a6bcd39`), and after the `adaptation` key's
+removal (status row PV-4); see *M6-2b recapture delta*, *M7-1a recapture
+delta*, *PV-1 recapture delta* and *PV-4 recapture delta* below.
 
 Re-capturing (implementer-only; overwrites the committed file) sets a
 second, separate opt-in alongside the archive path:
@@ -175,83 +177,38 @@ NSD_ARCHIVED_REPORT=… NSD_GOLDEN_CAPTURE=1 cargo test --test golden_digest
 
 ### Per-field delta against the M0b digest
 
-Every field this digest carries was compared directly against the M0b
-file at capture time:
-
-| field | delta | attributed to |
-|---|---|---|
-| `label`, `language`, `authorship`, `revision_sha`, `hash_version` | none | shared identity — see `test_nsd_v1_digest_shares_the_m0b_revision` |
-| `scores` (`overall`/`java`/`js_ts` `erosion` and `verbosity`) | none | measured directly: under orchard, no score, finding, clone, skip or top-25 triple moved on this fixture, and no language's eroded mass is exactly zero here, so the `-0.0` fix's edge case never triggers |
-| `findings_by_rule_id`, `clones`, `skips_by_reason`, `top25` | none | same reason — no rule finding, clone group, skip, or top-25 `(cc, sloc, mass)` triple moves; `Callable::end_line` (M0c-13) widens *where* a span is reported, not `cc`/`sloc`/`mass`, which are computed from the IR's own executable-line set, not from `end_line` |
-| `body_blake3` | **changed** (`blake3:f78712b43c6520413265b31903d724d8` → `blake3:bf38db177aef0a50836345834131cf68`) | measured directly: comparing the two normalized report bodies (archive vs. a live HEAD scan) shows the body moved only in `top25[].location.end_line` and `top25[].location.link`, for 20 of the 25 rows; `start_line` is unchanged, and no finding or clone location moved. The cause is M0c-13's `build_callable` change alone (`src/report/mod.rs:358`, `[start_line, end_line]` instead of `[start_line, start_line]`) — the orchard swap moved nothing in the normalized body |
-
-No path, name or excerpt appears in either file or in this table.
+At capture only `body_blake3` differed from the M0b file
+(`blake3:f78712b4…` → `blake3:bf38db17…`): M0c-13's `build_callable` change
+widened `top25[].location.{end_line, link}` on 20 of 25 rows; the orchard swap
+moved no score, finding, clone, skip or top-25 triple on this fixture.
 
 ### M6-2b recapture delta
 
-Re-captured at `main@b069e55` (after PR #8, the last M6 format change)
-with `NSD_ARCHIVED_REPORT=… NSD_GOLDEN_CAPTURE=1`, then verified with
-`NSD_ARCHIVED_REPORT=… NSD_REQUIRE_ARCHIVE_VERIFIED=1` (23 passed, no
-PENDING notice). The archive checkout was at the pinned `revision_sha` with
-an empty `git status --porcelain --untracked-files=all`.
-
-| field | delta | attributed to |
-|---|---|---|
-| `label`, `language`, `authorship`, `revision_sha`, `hash_version`, `findings_by_rule_id`, `clones`, `skips_by_reason`, `top25` | none | no measurement moved |
-| `scores` | `complete: true` and `unanalyzed_lines: 0` added to `overall`, `java` and `js_ts` `verbosity`; every existing number unchanged | M1-8 (WS-1): nothing on this fixture is unanalyzed |
-| `body_blake3` | **changed** (`blake3:bf38db177aef0a50836345834131cf68` → `blake3:ce58a4d80304c246a51b62420af4e46a`) | measured directly: diffing the normalized archive body against a live `main@b069e55` scan by key path finds exactly the six WS-3 top-level keys (`schema_version`, `result_scope`, `snapshots`, `fingerprints`, `skipped`, `callables`), `scan.revision.dirty` `false` → `null`, the six WS-1 `verbosity` keys above, and the M0c-13 `top25[].location.{end_line, link}` change on 20 of 25 rows already present in the previous capture. Nothing else differs |
-
-Removed excerpts and the null `scan.target` cannot move the digest, because
-`normalize` erases both before the body is hashed.
+Re-captured at `main@b069e55` (status row M6-2b): M1-8 added `complete: true`
+and `unanalyzed_lines: 0` to every `scores.*.verbosity`, and the six WS-3
+canonical top-level keys plus `scan.revision.dirty` `null` moved
+`body_blake3` to `blake3:ce58a4d8…`; no measurement moved.
 
 ### M7-1a recapture delta
 
-Re-captured at `a7a7119` on `main@67a0c5e` with
-`NSD_ARCHIVED_REPORT=… NSD_GOLDEN_CAPTURE=1`, then verified with
-`NSD_REQUIRE_ARCHIVE_VERIFIED=1` (25 passed, no PENDING notice) and without
-the capture variable. The archive checkout was at the pinned `revision_sha`
-with a clean `git status`, and the live scan was complete. Before the capture,
-`test_nsd_v1_digest_matches_a_live_scan_of_java_fixture_01` failed on digest
-equality.
-
-The delta was measured by diffing, by key path, a live scan built from
-`c745f8d` (the last `src` commit before M7-1, which reproduces the previous
-committed digest) against a live scan at `main@67a0c5e`, both with the archive
-recipe (`include_tests` false, no excludes, `min_clone_lines` 10). The six new
-test globs moved no file (`skips_by_reason.test` stays 853). Exactly one file
-moved: one WebJar file (built-in exclusion), from scanned to skipped as
-`dependency_or_build_output`.
-
-| field | delta | attributed to |
-|---|---|---|
-| `body_blake3` | **changed** (`blake3:ce58a4d80304c246a51b62420af4e46a` → `blake3:9db99d29028507858afab544b5830d3d`) | the `skipped.nested_checkout` key (`0`) and the WebJar file leaving callables, findings, scores, `top25` and `skipped_files`; nothing else differs |
-| `skips_by_reason.dependency_or_build_output` | 1 → 2 | the WebJar glob, one file |
-| `skips_by_reason.test` | 853, unchanged | no test-glob match with `include_tests` false |
-| `findings_by_rule_id` | `JSTS-EMPTY-CATCH` (7) and `JSTS-UNREACHABLE-AFTER-RETURN` (1) removed; `JAVA-*` unchanged | the findings of the WebJar file |
-| `scores.js_ts` | erosion 0.14008623369905362 → 0.0; verbosity `flagged_lines` 1 → 0, `ratio` 0.3333333333333333 → 0.0, `scanned_lines` 3 → 0 | the WebJar file was the only `js_ts` input |
-| `scores.overall` | erosion 0.13313797553867948 → 0.13294913151043064; `flagged_lines` 2153 → 2152; `ratio` 0.009970962408591792 → 0.009966469683777625; `scanned_lines` 215927 → 215924 | the `js_ts` contribution removed; overall now equals java |
-| `top25` | the five `js_ts` rows (sloc 1) dropped; the other 20 rows keep their order; five java rows at ranks 26–30 fill the tail | the WebJar file leaving callables (21168 → 20164) |
-| `clones` | 71 groups, 1372 redundant lines, unchanged | duplicates identical |
-| `label`, `language`, `authorship`, `revision_sha`, `hash_version`, `scores.java` | none | no measurement moved |
-
-The report's `fingerprints`, `snapshots`, `scan` and `adaptation` are identical
-before and after, so no discovery-default fingerprint moved. No difference
-without an M7-1 cause was found.
+Re-captured at `a7a7119` on `main@67a0c5e` (status row M7-1a): the built-in
+WebJar exclusion moved one file to `dependency_or_build_output` (1 → 2),
+removing its two `JSTS-*` finding kinds, the whole `js_ts` contribution (so
+`overall` now equals `java`) and five `top25` rows; with the new
+`skipped.nested_checkout` key this moved `body_blake3` to
+`blake3:9db99d29…`. Clones and `java` scores are unchanged.
 
 ### PV-1 recapture delta
 
-Re-captured at `a6bcd39` on `feat/deferred-correctness-rust` with
-`NSD_ARCHIVED_REPORT=… NSD_GOLDEN_CAPTURE=1`, then verified with
-`NSD_REQUIRE_ARCHIVE_VERIFIED=1` (25 passed, no PENDING notice) and without
-the archive (25 passed). The archive checkout was at the pinned
-`revision_sha` with a clean `git status`. Before the capture,
-`test_nsd_v1_digest_matches_a_live_scan_of_java_fixture_01` failed on digest
-equality, and the shape check rejected the captured file because it pinned
-`scores` to `{overall, java, js_ts}`; the expected family set now comes from
-the file's `VerbosityShape`, so the M0b file keeps three families.
+Re-captured at `a6bcd39` (status row PV-2): the Rust lowering adds a
+`scores.rust` family (erosion `0.0`, every verbosity count `0`, `complete`
+true; the fixture has no `.rs` file), which moved `body_blake3` to
+`blake3:e7285498089bb0e90f2a617f24ab1d32`; no Java or JS/TS measurement
+moved.
 
-| field | delta | attributed to |
-|---|---|---|
-| `body_blake3` | **changed** (`blake3:9db99d29028507858afab544b5830d3d` → `blake3:e7285498089bb0e90f2a617f24ab1d32`) | the new `rust` score family in the report body |
-| `scores.rust` | added: erosion 0.0; verbosity `complete` true, `flagged_lines` 0, `ratio` 0.0, `scanned_lines` 0, `unanalyzed_lines` 0 | PV-1 reports a `rust` family on every scan; the fixture has no `.rs` file |
-| every other field | none | no Java or JS/TS measurement moved |
+### PV-4 recapture delta
+
+Re-captured for status row PV-4: dropping the top-level `adaptation` object
+from the report body moved `body_blake3` to the current
+`blake3:d2f08c7b7f26c5376acbea7f9d8ae1eb`; every other field, and so every
+measurement, is unchanged.

@@ -790,3 +790,235 @@ fn test_capped_helper_rejects_a_location_whose_marker_names_the_wrong_span() {
     );
     assert_long_locations_capped(&wrong, "duplicates", &locations, &sources);
 }
+
+// Readability: collapsed blocks, a folder tree for skipped files, and a
+// static navigation row.
+
+/// The text between `id="{section_id}"` and that section's `</section>`.
+fn section_of<'a>(html: &'a str, section_id: &str) -> &'a str {
+    html.split(&format!("id=\"{section_id}\""))
+        .nth(1)
+        .and_then(|rest| rest.split("</section>").next())
+        .unwrap_or_else(|| panic!("no {section_id} section"))
+}
+
+fn position_of(haystack: &str, needle: &str) -> usize {
+    haystack
+        .find(needle)
+        .unwrap_or_else(|| panic!("no {needle:?} in: {haystack}"))
+}
+
+/// The byte range of the `<details>` block whose `<summary>` contains
+/// `marker`, from its opening tag through its matching `</details>`.
+fn details_block_of(haystack: &str, marker: &str) -> std::ops::Range<usize> {
+    let marker_at = position_of(haystack, marker);
+    let start = haystack[..marker_at]
+        .rfind("<details")
+        .unwrap_or_else(|| panic!("{marker:?} is in no <details> block"));
+    let mut depth = 0usize;
+    let mut at = start;
+    loop {
+        let next_open = haystack[at..].find("<details").map(|i| at + i);
+        let next_close = haystack[at..]
+            .find("</details>")
+            .map(|i| at + i)
+            .unwrap_or_else(|| panic!("unclosed block around {marker:?}"));
+        match next_open {
+            Some(open) if open < next_close => {
+                depth += 1;
+                at = open + "<details".len();
+            }
+            _ => {
+                depth -= 1;
+                at = next_close + "</details>".len();
+                if depth == 0 {
+                    return start..at;
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn test_every_block_starts_collapsed() {
+    let (_dir, output) = run_scan(&fixture_root(), |settings| {
+        settings.exclude = vec!["**/*.js".to_string()];
+    });
+    let html = written_html(&output);
+
+    assert!(
+        html.contains("<details"),
+        "the report should have collapsible blocks"
+    );
+    for (at, _) in html.match_indices("<details") {
+        let tag = &html[at..at + html[at..].find('>').expect("a closed tag")];
+        assert!(
+            !tag.split_whitespace()
+                .any(|attribute| attribute == "open" || attribute.starts_with("open=")),
+            "every block should start collapsed: {tag}"
+        );
+    }
+}
+
+#[test]
+fn test_findings_are_grouped_into_one_block_per_rule_id() {
+    let (_dir, output) = run_scan(&fixture_root(), |_| {});
+    let html = written_html(&output);
+    let json = written_json_value(&output);
+    let section = section_of(&html, "findings");
+
+    let mut expected: std::collections::BTreeMap<String, usize> = Default::default();
+    for finding in json["findings"].as_array().unwrap() {
+        *expected
+            .entry(finding["rule_id"].as_str().unwrap().to_string())
+            .or_default() += 1;
+    }
+    assert!(
+        expected.len() >= 2,
+        "the fixture should yield at least two rule ids, got {expected:?}"
+    );
+
+    assert_eq!(
+        section.matches("<details class=\"rule\"").count(),
+        expected.len(),
+        "one block per rule id"
+    );
+    for (rule, count) in &expected {
+        let summary = format!(
+            "id=\"rule-{rule}\"><summary><code>{rule}</code> <span class=\"muted\">({count})</span></summary>"
+        );
+        assert_eq!(section.matches(&summary).count(), 1, "{rule}: {section}");
+        let block = section
+            .split(&summary)
+            .nth(1)
+            .and_then(|rest| rest.split("</details>").next())
+            .unwrap();
+        assert_eq!(
+            block.matches("<tr><td>").count(),
+            *count,
+            "{rule}: its block should hold exactly its own findings"
+        );
+    }
+    // Rule-id order, the BTreeMap's order.
+    let positions: Vec<_> = expected
+        .keys()
+        .map(|rule| position_of(section, &format!("id=\"rule-{rule}\"")))
+        .collect();
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+}
+
+#[test]
+fn test_skipped_files_render_as_a_collapsed_folder_tree() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let broken = fs::read_to_string(fixture_root().join("src/Broken.java")).expect("Broken.java");
+    for (path, text) in [
+        ("Keep.java", java_method_source("Keep", 4)),
+        ("top.js", "let a = 1;\n".to_string()),
+        ("deep/a/b/x.js", "let x = 1;\n".to_string()),
+        ("deep/a/b/y.js", "let y = 1;\n".to_string()),
+        ("wide/p.js", "let p = 1;\n".to_string()),
+        ("wide/sub/q.js", "let q = 1;\n".to_string()),
+        ("wide/sub/Broken.java", broken),
+    ] {
+        let file = root.path().join(path);
+        fs::create_dir_all(file.parent().unwrap()).expect("dirs");
+        fs::write(file, text).expect("write source");
+    }
+    let (_out, output) = run_scan(root.path(), |settings| {
+        settings.exclude = vec!["**/*.js".to_string()];
+    });
+    let html = written_html(&output);
+    let section = section_of(&html, "skipped-files");
+
+    // A chain of single-subfolder folders merges into one block.
+    assert!(
+        section
+            .contains("<code>deep/a/b/</code> (2) <span class=\"muted\">— user_exclude 2</span>"),
+        "{section}"
+    );
+    assert!(!section.contains("<code>deep/</code>"), "{section}");
+    assert!(!section.contains("<code>deep/a/</code>"), "{section}");
+
+    // Totals count every file below a folder; the breakdown is by count,
+    // then reason name.
+    let wide = "<code>wide/</code> (3) <span class=\"muted\">— user_exclude 2, parse_syntax_error 1</span>";
+    let sub =
+        "<code>sub/</code> (2) <span class=\"muted\">— parse_syntax_error 1, user_exclude 1</span>";
+    let wide_block = details_block_of(section, wide);
+    let sub_block = details_block_of(section, sub);
+    let deep_block = details_block_of(section, "<code>deep/a/b/</code>");
+    let p_at = position_of(section, "<td>wide/p.js</td>");
+    let q_at = position_of(section, "<td>wide/sub/q.js</td>");
+    assert!(
+        wide_block.start < sub_block.start && sub_block.end <= wide_block.end,
+        "sub/ nests inside wide/: {section}"
+    );
+    assert!(
+        sub_block.contains(&q_at),
+        "q.js sits inside sub/: {section}"
+    );
+    assert!(
+        wide_block.contains(&p_at) && !sub_block.contains(&p_at),
+        "p.js sits inside wide/ but outside sub/: {section}"
+    );
+    for file in ["<td>deep/a/b/x.js</td>", "<td>deep/a/b/y.js</td>"] {
+        assert!(
+            deep_block.contains(&position_of(section, file)),
+            "{file} sits inside deep/a/b/: {section}"
+        );
+    }
+    assert!(q_at < p_at, "subfolders come before a folder's own files");
+
+    // A top-level file sits outside every folder block.
+    let top_at = position_of(section, "<td>top.js</td>");
+    let last_close = section.rfind("</details>").expect("folder blocks");
+    assert!(
+        top_at > last_close,
+        "top.js belongs to no folder: {section}"
+    );
+
+    assert_eq!(count_of(&html, "skipped-count"), 6);
+}
+
+#[test]
+fn test_navigation_links_every_section_with_its_count() {
+    let (_dir, output) = run_scan(&fixture_root(), |_| {});
+    let html = written_html(&output);
+    let report = &output.report;
+    let nav = html
+        .split("<nav>")
+        .nth(1)
+        .and_then(|rest| rest.split("</nav>").next())
+        .expect("a <nav> row");
+
+    for link in [
+        "<a href=\"#scan-settings\">Settings</a>".to_string(),
+        "<a href=\"#scores\">Scores</a>".to_string(),
+        format!(
+            "<a href=\"#findings\">Findings ({})</a>",
+            report.findings.len()
+        ),
+        format!(
+            "<a href=\"#duplicates\">Duplicates ({})</a>",
+            report.duplicates.len()
+        ),
+        format!("<a href=\"#top25\">Top CC ({})</a>", report.top25.len()),
+        format!(
+            "<a href=\"#skipped-files\">Skipped ({})</a>",
+            report.skipped_files.len()
+        ),
+    ] {
+        assert!(nav.contains(&link), "missing {link} in {nav}");
+    }
+    for target in nav.split("href=\"#").skip(1) {
+        let id = target.split('"').next().unwrap();
+        assert!(
+            html.contains(&format!("<section id=\"{id}\">")),
+            "nav link #{id} has no section"
+        );
+    }
+    assert!(
+        position_of(&html, "<nav>") < position_of(&html, "<section"),
+        "the nav comes before every section"
+    );
+}

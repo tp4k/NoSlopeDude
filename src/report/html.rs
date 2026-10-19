@@ -3,10 +3,17 @@
 //! from the scanned repository (a source excerpt, a file path, a rule id,
 //! a callable name) passes through `escape_html`, the single escaping
 //! helper this whole module uses.
+//!
+//! Large sections render as native `<details>` blocks, all collapsed on
+//! load: findings grouped per rule id, one block per duplicate group, the
+//! top-25 table, and skipped files as a folder tree. No script — a static
+//! link row at the top navigates between sections.
 
+use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::fmt::Write as _;
 
-use super::{Report, ReportFamilyScores, SourceLocation};
+use super::{Report, ReportFamilyScores, ReportFinding, ReportSkippedFile, SourceLocation};
 
 /// D19's single escaping helper. Every value interpolated into the HTML
 /// below that originates in the scanned repository goes through this and
@@ -32,7 +39,14 @@ th,td{border:1px solid #ccc;padding:0.35rem 0.6rem;text-align:left;vertical-alig
 th{background:#f0f0f0}\
 pre{white-space:pre-wrap;margin:0;font-size:0.85em}\
 section{margin-bottom:2rem}\
-.metric{font-weight:bold}";
+.metric{font-weight:bold}\
+nav{margin-bottom:1.5rem;padding:0.5rem 0;border-bottom:1px solid #ccc}\
+nav a{margin-right:1rem}\
+details{margin:0.3rem 0}\
+summary{cursor:pointer;padding:0.25rem 0}\
+summary .muted{color:#666}\
+details>table,details>ul,details>.tree{margin-top:0.4rem}\
+.tree{margin-left:1.2rem}";
 
 /// D17/D19: the standalone `report.html`, built entirely by hand-written
 /// writers into one `String` (`std::fmt::Write`) — no template engine.
@@ -43,15 +57,30 @@ pub fn render_html(report: &Report) -> String {
         "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>nsd report</title><style>{STYLE}</style></head><body>"
     );
     let _ = write!(out, "<h1>nsd scan report</h1>");
+    render_nav(&mut out, report);
     render_scan_section(&mut out, report);
     render_scores_section(&mut out, report);
     render_findings_section(&mut out, report);
     render_duplicates_section(&mut out, report);
     render_top25_section(&mut out, report);
     render_skipped_section(&mut out, report);
-    render_adaptation_section(&mut out, report);
     let _ = write!(out, "</body></html>");
     out
+}
+
+/// The static link row: one anchor per section, each list section's count
+/// beside it. Counts here carry no `id` — the section headings own those.
+fn render_nav(out: &mut String, report: &Report) {
+    let _ = write!(
+        out,
+        "<nav><a href=\"#scan-settings\">Settings</a><a href=\"#scores\">Scores</a>\
+<a href=\"#findings\">Findings ({})</a><a href=\"#duplicates\">Duplicates ({})</a>\
+<a href=\"#top25\">Top CC ({})</a><a href=\"#skipped-files\">Skipped ({})</a></nav>",
+        report.findings.len(),
+        report.duplicates.len(),
+        report.top25.len(),
+        report.skipped_files.len()
+    );
 }
 
 fn render_scan_section(out: &mut String, report: &Report) {
@@ -142,24 +171,31 @@ fn render_location(out: &mut String, location: &SourceLocation) {
 fn render_findings_section(out: &mut String, report: &Report) {
     let _ = write!(
         out,
-        "<section id=\"findings\"><h2>Rule findings (<span id=\"findings-count\">{}</span>)</h2><table>",
+        "<section id=\"findings\"><h2>Rule findings (<span id=\"findings-count\">{}</span>)</h2>",
         report.findings.len()
     );
-    let _ = write!(
-        out,
-        "<tr><th>Rule</th><th>Language</th><th>Location</th></tr>"
-    );
+    // One collapsed block per rule id, in rule-id order; findings keep
+    // their report order inside a block.
+    let mut by_rule: BTreeMap<&str, Vec<&ReportFinding>> = BTreeMap::new();
     for finding in &report.findings {
+        by_rule.entry(finding.rule_id).or_default().push(finding);
+    }
+    for (rule_id, findings) in &by_rule {
+        let rule = escape_html(rule_id);
         let _ = write!(
             out,
-            "<tr><td>{}</td><td>{}</td><td>",
-            escape_html(finding.rule_id),
-            escape_html(finding.language)
+            "<details class=\"rule\" id=\"rule-{rule}\"><summary><code>{rule}</code> <span class=\"muted\">({})</span></summary><table>\
+<tr><th>Language</th><th>Location</th></tr>",
+            findings.len()
         );
-        render_location(out, &finding.location);
-        let _ = write!(out, "</td></tr>");
+        for finding in findings {
+            let _ = write!(out, "<tr><td>{}</td><td>", escape_html(finding.language));
+            render_location(out, &finding.location);
+            let _ = write!(out, "</td></tr>");
+        }
+        let _ = write!(out, "</table></details>");
     }
-    let _ = write!(out, "</table></section>");
+    let _ = write!(out, "</section>");
 }
 
 fn render_duplicates_section(out: &mut String, report: &Report) {
@@ -171,16 +207,17 @@ fn render_duplicates_section(out: &mut String, report: &Report) {
     for group in &report.duplicates {
         let _ = write!(
             out,
-            "<div><p>{} — {} redundant lines</p><ul>",
+            "<details class=\"duplicate\"><summary>{} — {} redundant lines <span class=\"muted\">({} occurrences)</span></summary><ul>",
             escape_html(group.language),
-            group.redundant_lines
+            group.redundant_lines,
+            group.locations.len()
         );
         for location in &group.locations {
             let _ = write!(out, "<li>");
             render_location(out, location);
             let _ = write!(out, "</li>");
         }
-        let _ = write!(out, "</ul></div>");
+        let _ = write!(out, "</ul></details>");
     }
     let _ = write!(out, "</section>");
 }
@@ -188,7 +225,8 @@ fn render_duplicates_section(out: &mut String, report: &Report) {
 fn render_top25_section(out: &mut String, report: &Report) {
     let _ = write!(
         out,
-        "<section id=\"top25\"><h2>Top callables by CC (<span id=\"top25-count\">{}</span>)</h2><table>",
+        "<section id=\"top25\"><h2>Top callables by CC (<span id=\"top25-count\">{}</span>)</h2>\
+<details><summary>Show table</summary><table>",
         report.top25.len()
     );
     let _ = write!(
@@ -208,17 +246,67 @@ fn render_top25_section(out: &mut String, report: &Report) {
         render_location(out, &callable.location);
         let _ = write!(out, "</td></tr>");
     }
-    let _ = write!(out, "</table></section>");
+    let _ = write!(out, "</table></details></section>");
+}
+
+/// One folder of the skipped-files tree. `total` and `reasons` count every
+/// file at or below this folder. Folders are keyed by their raw name, so two
+/// non-UTF-8 names that render alike stay separate folders.
+#[derive(Default)]
+struct SkippedDir<'a> {
+    dirs: BTreeMap<OsString, SkippedDir<'a>>,
+    files: Vec<&'a ReportSkippedFile>,
+    reasons: BTreeMap<&'a str, usize>,
+    total: usize,
+}
+
+impl<'a> SkippedDir<'a> {
+    fn build(files: &'a [ReportSkippedFile]) -> Self {
+        let mut root = SkippedDir::default();
+        for file in files {
+            let mut node = &mut root;
+            node.count(file);
+            if let Some(parent) = file.relative_path.parent() {
+                for part in parent.iter() {
+                    node = node.dirs.entry(part.to_os_string()).or_default();
+                    node.count(file);
+                }
+            }
+            node.files.push(file);
+        }
+        root
+    }
+
+    fn count(&mut self, file: &'a ReportSkippedFile) {
+        self.total += 1;
+        *self.reasons.entry(file.reason.as_str()).or_default() += 1;
+    }
 }
 
 fn render_skipped_section(out: &mut String, report: &Report) {
     let _ = write!(
         out,
-        "<section id=\"skipped-files\"><h2>Skipped files (<span id=\"skipped-count\">{}</span>)</h2><table>",
+        "<section id=\"skipped-files\"><h2>Skipped files (<span id=\"skipped-count\">{}</span>)</h2>",
         report.skipped_files.len()
     );
-    let _ = write!(out, "<tr><th>Path</th><th>Reason</th><th>Detail</th></tr>");
-    for file in &report.skipped_files {
+    let root = SkippedDir::build(&report.skipped_files);
+    render_skipped_contents(out, &root);
+    let _ = write!(out, "</section>");
+}
+
+/// A folder's subfolders (each a collapsed block), then its own files.
+fn render_skipped_contents(out: &mut String, dir: &SkippedDir) {
+    for (name, child) in &dir.dirs {
+        render_skipped_dir(out, name.to_string_lossy().into_owned(), child);
+    }
+    if dir.files.is_empty() {
+        return;
+    }
+    let _ = write!(
+        out,
+        "<table><tr><th>Path</th><th>Reason</th><th>Detail</th></tr>"
+    );
+    for file in &dir.files {
         let _ = write!(
             out,
             "<tr><td>{}</td><td>{}</td><td>{}</td></tr>",
@@ -227,15 +315,66 @@ fn render_skipped_section(out: &mut String, report: &Report) {
             escape_html(file.detail.as_deref().unwrap_or(""))
         );
     }
-    let _ = write!(out, "</table></section>");
+    let _ = write!(out, "</table>");
 }
 
-fn render_adaptation_section(out: &mut String, report: &Report) {
+/// One collapsed folder block. A chain of folders holding nothing but a
+/// single subfolder merges into one block (`a/b/c/`).
+fn render_skipped_dir(out: &mut String, mut name: String, mut dir: &SkippedDir) {
+    while dir.files.is_empty() && dir.dirs.len() == 1 {
+        let (child_name, child) = dir.dirs.iter().next().expect("one subfolder");
+        name = format!("{name}/{}", child_name.to_string_lossy());
+        dir = child;
+    }
+    let mut reasons: Vec<(&str, usize)> = dir.reasons.iter().map(|(r, n)| (*r, *n)).collect();
+    reasons.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+    let breakdown = reasons
+        .iter()
+        .map(|(reason, n)| format!("{} {n}", escape_html(reason)))
+        .collect::<Vec<_>>()
+        .join(", ");
     let _ = write!(
         out,
-        "<section id=\"adaptation\"><h2>Adaptation note</h2><p>{}</p><p>See <code>{}</code> and <code>{}</code>.</p></section>",
-        escape_html(&report.adaptation.summary),
-        escape_html(&report.adaptation.cc_rules_doc),
-        escape_html(&report.adaptation.wasteful_rules_doc)
+        "<details class=\"dir\"><summary><code>{}/</code> ({}) <span class=\"muted\">— {breakdown}</span></summary><div class=\"tree\">",
+        escape_html(&name),
+        dir.total
     );
+    render_skipped_contents(out, dir);
+    let _ = write!(out, "</div></details>");
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::PathBuf;
+
+    fn skipped(path: &[u8]) -> ReportSkippedFile {
+        ReportSkippedFile {
+            relative_path: PathBuf::from(OsStr::from_bytes(path)),
+            reason: "user_exclude".to_string(),
+            detail: None,
+            gaps: None,
+            unmeasured_callables: None,
+        }
+    }
+
+    /// Two folders whose names are distinct non-UTF-8 bytes but share a
+    /// lossy rendering (`a\u{FFFD}`) stay two folder blocks of one file each.
+    #[test]
+    fn test_non_utf8_sibling_folders_stay_separate() {
+        let files = [skipped(b"a\x80/x.js"), skipped(b"a\x81/y.js")];
+        let root = SkippedDir::build(&files);
+        assert_eq!(root.dirs.len(), 2);
+        assert!(root.dirs.values().all(|dir| dir.total == 1));
+
+        let mut out = String::new();
+        render_skipped_contents(&mut out, &root);
+        assert_eq!(
+            out.matches("<code>a\u{FFFD}/</code> (1)").count(),
+            2,
+            "{out}"
+        );
+    }
 }

@@ -32,7 +32,7 @@ not itself a fingerprint input.
 | `java_lowering_version` | `lower::JAVA_LOWERING_VERSION` | What the Java lowering classifies a parse tree into (`src/lower/mod.rs`) |
 | `jsts_lowering_version` | `lower::JSTS_LOWERING_VERSION` | The JS/TS counterpart |
 | `rust_lowering_version` | `lower::RUST_LOWERING_VERSION` | The Rust counterpart (`docs/rust-lowering.md`) |
-| `tree_sitter_runtime_version` | `profile::TREE_SITTER_RUNTIME_VERSION`, pinned against `Cargo.lock`'s `tree-sitter` package | The parsing runtime itself, distinct from either grammar (*Corrections applied* #18) |
+| `tree_sitter_runtime_version` | `profile::TREE_SITTER_RUNTIME_VERSION`, pinned against `Cargo.lock`'s `tree-sitter` package | The parsing runtime itself, distinct from either grammar: it belongs in the fingerprint but is not a grammar |
 | `java_grammar_version` | `profile::JAVA_GRAMMAR_VERSION`, pinned against `Cargo.lock`'s `tree-sitter-java-orchard` package | A lowering can be correct and still be handed different input by a grammar bump (*Settled decisions* → *Measurement profile*) |
 | `javascript_grammar_version` | `profile::JAVASCRIPT_GRAMMAR_VERSION`, pinned against `Cargo.lock`'s `tree-sitter-javascript` package | Same reasoning, JS half |
 | `typescript_grammar_version` | `profile::TYPESCRIPT_GRAMMAR_VERSION`, pinned against `Cargo.lock`'s `tree-sitter-typescript` package | Same reasoning, TS half |

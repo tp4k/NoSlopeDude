@@ -1,8 +1,9 @@
 # nsd — structural regression gate for agent-heavy codebases (v1, frozen)
 
 Supersedes `nsd-plan.md` and `nsd-plan-reviewed.md`. Where either disagrees
-with this document, this document wins. Section *Corrections applied* records
-what changed and the evidence, so no correction has to be rediscovered.
+with this document, this document wins. The corrections adjudicated against
+those drafts are in git history (`cb33206`); *Amendments* records the
+decisions taken after the freeze.
 
 ---
 
@@ -54,42 +55,7 @@ and private repository-name mappings out of the new repository.
 
 ---
 
-## Corrections applied
-
-Errors carried by `nsd-plan.md` (P) or introduced by `nsd-plan-reviewed.md` (R),
-each verified rather than asserted.
-
-| # | Claim | Verdict | Evidence |
-|---|---|---|---|
-| 1 | R: *"Orchard `0.5.18` does not exist"*; pin `0.5.15` | **R wrong — P right** | crates.io `max_version = 0.5.18`, published 2026-09-18; `docs.rs/.../latest` serves 0.5.18 (HTTP 200). A docs.rs `/latest/` URL shows the newest version whose *docs built*, and cannot prove non-existence. |
-| 2 | P+R: orchard *forces* `tree-sitter` 0.25.10 → 0.27.0 | **both wrong** | Orchard 0.5.18 runtime deps are `tree-sitter-language ^0.1` + `cc`; `tree-sitter ^0.26.12` is **dev-only**. A probe crate with `tree-sitter 0.25.10` + orchard 0.5.18 calling `set_language` compiles clean (`cargo check` exit 0). The bump is **elective** — see D-GRAMMAR. |
-| 3 | P: `js-ts-fixture-01` is Java-bearing | **wrong** | `the archived JS/TS fixture 01 report`: `java.scanned_lines = 0`. Its orchard delta is necessarily zero. |
-| 4 | P: erosion `0.5399` as reproducible baseline | **wrong** | `the archived JS/TS fixture 02 report`: `revision.dirty = true`, and `incomplete = true`. |
-| 5 | P: "9 suites" | **wrong — 10** | `tests/` holds ten `.rs` suites; P's own inline list names ten. |
-| 6 | P: "§12 M12" | **wrong — §84** | `M12 — Cache + Large-Repo Performance` at `LSD_plan_openai_v2.md:2880`, under `# 84. MVP Milestones`. |
-| 7 | R: `java-fixture-01` validates **WebJar** exclusion | **unsupported** | Zero webjar path mentions in its 854 skips (853 `test`, 1 `dependency_or_build_output`). Criterion would pass vacuously; dropped. |
-| 8 | R: persisted `DefaultHasher` output | **R right, and load-bearing** | `src/clones/mod.rs:427-434` builds the 128-bit clone fingerprint from two `DefaultHasher` (SipHash) streams. Harmless in-memory today; becomes a persistent cache key at M5, and its output is not stable across Rust releases. |
-| 9 | R: suppression example `nsd-ignore[NSD-V101]` → a rule ID | **R right** | `NSD-V101` is a diagnostic code, not a rule. `JSTS-EMPTY-CATCH` is real (`src/rules/mod.rs:31`). |
-| 10 | R: `NSD-C101` fires on any config change, exit table maps config → `2` | **contradiction, fixed** | Would exit 2 on every legitimate config edit. C101 is now informational. |
-| 11 | R: base config may set `warn`, exit table has no warn state | **gap, fixed** | `warn` now defined as exit-neutral. |
-| 12 | R: tests "unused suppressions", no such diagnostic defined | **gap, fixed** | `NSD-S102` added. |
-| 13 | R: ordinal removed from the finding fingerprint, no replacement | **gap, fixed** | Order-preserving greedy pairing specified under *Finding matching*. |
-| 14 | P: spec is "3,069 lines" | **3,068** | `wc -l`. |
-| 15 | F: CLI grammar block lists neither `--config` nor `--allow-new-suppressions` | **internal gap, fixed** | The prose under *CLI and configuration* relies on both ("a trusted external `--config <path>` overrides it"; "unless the invocation supplies `--allow-new-suppressions`"), but the fenced grammar shows only `--format`. Grammar block extended. |
-| 16 | F: `E101`/`E102`/`V102`'s "only escapes are the invocation flag and an explicit `off`" | **internal contradiction, fixed** | `--allow-new-suppressions` affects `S101` alone. Trusted policy may downgrade these diagnostics to exit-neutral `warn` or disable them with `off`; neither requires a source suppression. |
-| 17 | F: "`blake3` is the one new runtime dependency v1 takes on" | **wrong — three** | *Settled decisions* chooses `git2` (libgit2) for index reads, merge-base and blob OIDs, and `nsd.yml` needs a YAML parser (`serde_yaml_ng`; `serde_yaml` is deprecated). All three are new runtime dependencies. |
-| 18 | F: freeze fingerprint includes "all four grammar versions" | **miscount, fixed** | There are three grammars (`tree-sitter-java-orchard`, `tree-sitter-typescript`, `tree-sitter-javascript`). The fourth version is the `tree-sitter` runtime, which belongs in the fingerprint but is not a grammar. Wording fixed here and in M0c step 12. |
-
-Final-review corrections also make M0b compare both binaries against the same
-fixed fixture checkout with identical revision metadata and legacy serialization,
-and carry the malformed-fixture exception into the acceptance criteria below.
-
-F = this document, found by the 2026-09-22 implementation review. The
-implementation plan's draft claimed *five* such inconsistencies; four were
-recoverable and are recorded above, the fifth could not be reconstructed and
-is not claimed.
-
-### Amendments (2026-09-22, from the implementation grilling)
+## Amendments (2026-09-22, from the implementation grilling)
 
 Decisions taken after the freeze, applied in place below so this document
 stays the single spec. Each is a deliberate change, not a correction.

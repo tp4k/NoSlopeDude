@@ -85,12 +85,7 @@ the raw name.
     { "relative_path": "src/Broken.java", "reason": "parse_syntax_error", "detail": "salvaged; first error at line 2",
       "gaps": [{ "start_line": 2, "end_line": 2 }], "unmeasured_callables": 1 }
   ],
-  "incomplete": true,
-  "adaptation": {
-    "summary": "CC, SLOC, mass, erosion and verbosity are computed from this scanner's own Java/JS-TS AST rules, adapted from scb-check's Python-only formulas. No numerical equivalence to scb-check's own scores is claimed.",
-    "cc_rules_doc": "docs/cc-rules.md",
-    "wasteful_rules_doc": "docs/wasteful-rules.md"
-  }
+  "incomplete": true
 }
 ```
 
@@ -100,6 +95,14 @@ the raw name.
 family covers `.rs` files (`docs/rust-lowering.md`). `schema_version` stays
 `1`. A repository with no Rust reports the zeroed row shown above, and a
 clone group of Rust files carries `"language": "rust"`.
+
+### The removed `adaptation` key
+
+`report.json` once carried a top-level `adaptation` object (a summary
+saying the metrics are nsd's own, not numerically equivalent to
+scb-check's, plus two doc paths). It is removed from the JSON, the HTML
+and the terminal summary. No reader in this repository consumed it, so
+`schema_version` stays `1`.
 
 ### `scores` (D20)
 
@@ -278,6 +281,12 @@ was not cut has none:
 `N` is the span's own line count (`end_line - start_line + 1`), not the
 number of lines shown. `report.json` carries no excerpt and is unchanged.
 
+A `<nav>` row of plain anchor links precedes the sections: Settings,
+Scores, Findings (N), Duplicates (N), Top CC (N), Skipped (N). The page has
+no script. Long lists render as native `<details>` blocks, and every block
+starts collapsed (no `open` attribute); a nav jump lands on a section's
+heading, not inside a block.
+
 Sections, in document order, each its own `<section id="...">`:
 
 1. **`#scan-settings`** — target, revision (sha/dirty/unavailable reason),
@@ -287,17 +296,23 @@ Sections, in document order, each its own `<section id="...">`:
    each numeric cell carries a stable `id` (`#erosion-<family>`,
    `#verbosity-<family>`) so a reader — or a test — can cross-check a
    number against `report.json` without parsing prose.
-3. **`#findings`** (`#findings-count`) — one row per rule finding: rule id,
-   language, and its location (link + excerpt).
+3. **`#findings`** (`#findings-count`) — one block per rule id
+   (`<details class="rule" id="rule-<RULE-ID>">`, in rule-id order, its
+   finding count in the summary), holding one row per finding: language
+   and its location (link + excerpt), in report order.
 4. **`#duplicates`** (`#duplicates-count`) — one block per clone group:
-   language, redundant line count, and every occurrence's location.
-5. **`#top25`** (`#top25-count`) — one row per top-25 callable: name,
-   language, CC, SLOC, mass, and its (single-line, see above) location.
-6. **`#skipped-files`** (`#skipped-count`) — one row per skipped file:
-   path, reason, detail.
-7. **`#adaptation`** — the same adaptation summary and doc links as the
-   JSON, so a reader of the HTML alone sees the non-equivalence disclosure
-   the Assumptions section requires.
+   language, redundant line count and occurrence count in the summary,
+   every occurrence's location inside.
+5. **`#top25`** (`#top25-count`) — one block holding one row per top-25
+   callable: name, language, CC, SLOC, mass, and its (single-line, see
+   above) location.
+6. **`#skipped-files`** (`#skipped-count`) — a folder tree. Each folder is a
+   block whose summary shows the count of skipped files at or below it and a
+   per-reason breakdown (by count, then reason name); a chain of folders
+   that holds nothing but one subfolder merges into one block (`a/b/c/`).
+   Inside a folder, subfolders come first, then a table of its own files:
+   full path, reason, detail. Top-level files sit in a table outside every
+   block.
 
 ## Check JSON (M6-1/M6-2 subset)
 
@@ -398,6 +413,5 @@ parent fails `NSD-G101` (ledger row 59; the check-then-read race remains).
 
 Printed to stdout by `nsd::report::terminal_summary`: the scan
 settings, the four score rows' (overall, Java, JS/TS, Rust) erosion and verbosity ratio, the count of
-findings/duplicate groups/top-25 rows/skipped files, the `incomplete`
-marker, and the adaptation note — the same numbers as the two files, in
-prose form.
+findings/duplicate groups/top-25 rows/skipped files, and the `incomplete`
+marker — the same numbers as the two files, in prose form.
