@@ -127,4 +127,19 @@ nsd check --base origin/main --format json
 
 Exit `0` passes the job, `1` and `3` fail it for a denied regression, and `2` and `3` fail it for an analysis or configuration error (see *Exit codes*).
 
-The repository itself runs `.github/workflows/self-check.yml`, which builds `nsd`, runs its tests and runs `nsd check --base`; through the Rust lowering it gates `nsd`'s own source, while the Java/JS/TS test fixtures stay excluded by the root `nsd.yml`.
+The repository itself runs `.github/workflows/self-check.yml` on macOS and Linux, which builds `nsd`, runs its tests and runs `nsd check --base`; through the Rust lowering it gates `nsd`'s own source, while the Java/JS/TS test fixtures stay excluded by the root `nsd.yml`.
+
+### Release binary
+
+Each `v*` tag publishes a static Linux binary through `.github/workflows/release.yml`: `nsd-x86_64-unknown-linux-musl.tar.gz` (the `nsd` binary and `LICENSE`) and its `.sha256`. A pipeline pins one tag and verifies the checksum before it runs the binary:
+
+```sh
+TAG=v0.1.1
+ASSET=nsd-x86_64-unknown-linux-musl.tar.gz
+curl -fsSLO "https://github.com/tp4k/NoSlopeDude/releases/download/$TAG/$ASSET"
+curl -fsSLO "https://github.com/tp4k/NoSlopeDude/releases/download/$TAG/$ASSET.sha256"
+sha256sum -c "$ASSET.sha256"
+tar -xzf "$ASSET" nsd
+```
+
+Pin the checksum value itself in the consuming pipeline, not only the downloaded `.sha256` file, so a replaced release asset fails the job.
