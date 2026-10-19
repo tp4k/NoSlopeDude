@@ -11,8 +11,8 @@ Every agent that finishes a piece of work updates its rows here in the same
 round; see *How to update this file* at the bottom and the matching rule in
 [`AGENTS.md`](../AGENTS.md).
 
-Last updated: 2026-10-19 (report readability and documentation sweep on
-`feat/html-report-readability`, verified against `main@cb33206`).
+Last updated: 2026-10-19 (Linux release binary, PV-6, on `ci/linux-release`,
+verified against `main@a3a47c2`).
 
 ## Legend
 
