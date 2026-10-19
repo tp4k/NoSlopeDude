@@ -33,7 +33,7 @@ fn cc_of_probe(source: &str) -> u32 {
 
 #[test]
 fn test_rust_decision_kinds_match_the_mapping() {
-    let cases: [(&str, &str, u32); 15] = [
+    let cases: [(&str, &str, u32); 18] = [
         ("straight line", "fn probe() -> i32 { 1 }", 1),
         (
             "if",
@@ -58,6 +58,21 @@ fn test_rust_decision_kinds_match_the_mapping() {
         (
             "guarded wildcard",
             "fn probe(x: i32) -> i32 {\n    match x {\n        1 => 10,\n        _ if x > 5 => 20,\n        _ => 0,\n    }\n}\n",
+            3,
+        ),
+        (
+            "guarded wildcard with a comment before the guard",
+            "fn probe(x: i32) -> i32 {\n    match x {\n        1 => 10,\n        _ /* note */ if x > 5 => 20,\n        _ => 0,\n    }\n}\n",
+            3,
+        ),
+        (
+            "wildcard with a comment before the arrow",
+            "fn probe(x: i32) -> i32 {\n    match x {\n        1 => 10,\n        2 => 20,\n        _ /* note */ => 0,\n    }\n}\n",
+            3,
+        ),
+        (
+            "wildcard with a comment before the pattern",
+            "fn probe(x: i32) -> i32 {\n    match x {\n        1 => 10,\n        2 => 20,\n        /* note */ _ => 0,\n    }\n}\n",
             3,
         ),
         (

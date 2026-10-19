@@ -153,13 +153,16 @@ fn is_block_kind(kind: &str) -> Option<&'static str> {
 /// A `match_arm` is the bare wildcard when its `match_pattern` starts with the
 /// `_` token and holds nothing else but a guard (`if` and its `condition`);
 /// tree-sitter-rust keeps the guard inside the pattern, and the guard's own
-/// Branch is counted separately.
+/// Branch is counted separately. Comments are tree-sitter extras that can sit
+/// anywhere inside the pattern, so they are skipped.
 fn is_bare_wildcard_arm(arm: Node) -> bool {
     let Some(pattern) = arm.child_by_field_name("pattern") else {
         return false;
     };
     let condition = pattern.child_by_field_name("condition");
-    let mut children = (0..pattern.child_count()).filter_map(|index| pattern.child(index));
+    let mut children = (0..pattern.child_count())
+        .filter_map(|index| pattern.child(index))
+        .filter(|child| !child.is_extra());
     let starts_with_wildcard = children
         .next()
         .is_some_and(|first| first.kind() == WILDCARD_TOKEN);
