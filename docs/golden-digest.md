@@ -164,8 +164,9 @@ the checkout passes it; a target outside any repository still fails loudly.
 The file was re-captured after the last M6 format change (status row M6-2b,
 `46f1525`), on `main@b069e55`, and once more after M7-1's new `skipped` key and
 default globs (status row M7-1a, `a7a7119`), on `main@67a0c5e`, and for the
-Rust lowering (status row PV-2, `a6bcd39`); see *M6-2b recapture delta*,
-*M7-1a recapture delta* and *PV-1 recapture delta* below.
+Rust lowering (status row PV-2, `a6bcd39`), and after the `adaptation` key's
+removal (status row PV-4); see *M6-2b recapture delta*, *M7-1a recapture
+delta*, *PV-1 recapture delta* and *PV-4 recapture delta* below.
 
 Re-capturing (implementer-only; overwrites the committed file) sets a
 second, separate opt-in alongside the archive path:
@@ -201,6 +202,13 @@ removing its two `JSTS-*` finding kinds, the whole `js_ts` contribution (so
 
 Re-captured at `a6bcd39` (status row PV-2): the Rust lowering adds a
 `scores.rust` family (erosion `0.0`, every verbosity count `0`, `complete`
-true; the fixture has no `.rs` file), which moved `body_blake3` to the
-current `blake3:e7285498089bb0e90f2a617f24ab1d32`; no Java or JS/TS
-measurement moved.
+true; the fixture has no `.rs` file), which moved `body_blake3` to
+`blake3:e7285498089bb0e90f2a617f24ab1d32`; no Java or JS/TS measurement
+moved.
+
+### PV-4 recapture delta
+
+Re-captured for status row PV-4: dropping the top-level `adaptation` object
+from the report body moved `body_blake3` to the current
+`blake3:d2f08c7b7f26c5376acbea7f9d8ae1eb`; every other field, and so every
+measurement, is unchanged.
