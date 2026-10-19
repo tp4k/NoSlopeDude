@@ -590,11 +590,12 @@ fn test_legal_cold_status_disagreeing_with_its_output_refuses_the_row() -> anyho
 
 const TIME_LOOKALIKE_STDERR: &str = "9.99 real\n123 maximum resident set size";
 
+/// Runs `main` with the fake nsd writing `fake_stderr`, and asserts the new
+/// table row's wall and RSS cells still come from `/usr/bin/time`.
 #[cfg(target_os = "macos")]
-#[test]
-fn test_nsd_stderr_cannot_alter_wall_and_rss_cells() -> anyhow::Result<()> {
+fn assert_nsd_stderr_cannot_alter_cells(fake_stderr: &str) -> anyhow::Result<()> {
     let h = harness()?;
-    let output = run_main_env(&h, false, None, &[("FAKE_STDERR", TIME_LOOKALIKE_STDERR)])?;
+    let output = run_main_env(&h, false, None, &[("FAKE_STDERR", fake_stderr)])?;
     assert!(
         output.status.success(),
         "main failed: {}",
@@ -619,6 +620,12 @@ fn test_nsd_stderr_cannot_alter_wall_and_rss_cells() -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn test_nsd_stderr_cannot_alter_wall_and_rss_cells() -> anyhow::Result<()> {
+    assert_nsd_stderr_cannot_alter_cells(TIME_LOOKALIKE_STDERR)
 }
 
 #[cfg(target_os = "macos")]
@@ -671,30 +678,5 @@ fn test_long_nsd_stderr_cannot_alter_wall_and_rss_cells() -> anyhow::Result<()> 
         vec![padding; PADDING_LINES].join("\n")
     );
     assert!(long_stderr.len() >= 4096, "padding must exceed 4 KB");
-    let h = harness()?;
-    let output = run_main_env(&h, false, None, &[("FAKE_STDERR", &long_stderr)])?;
-    assert!(
-        output.status.success(),
-        "main failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let measurements = std::fs::read_to_string(&h.measurements)?;
-    let new_rows: Vec<&str> = measurements
-        .lines()
-        .filter(|l| l.starts_with('|') && !MEASUREMENTS.lines().any(|m| m == *l))
-        .collect();
-    assert_eq!(new_rows.len(), 1, "expected one intact row: {new_rows:?}");
-    let cells: Vec<&str> = new_rows[0].split('|').map(str::trim).collect();
-    for (wall, rss) in [(cells[6], cells[7]), (cells[8], cells[9])] {
-        assert_ne!(
-            wall, "9.99s",
-            "wall cell taken from nsd stderr: {new_rows:?}"
-        );
-        assert!(wall.ends_with('s'), "wall cell: {wall}");
-        assert_ne!(
-            rss, "0.00 MB",
-            "RSS cell taken from nsd stderr: {new_rows:?}"
-        );
-    }
-    Ok(())
+    assert_nsd_stderr_cannot_alter_cells(&long_stderr)
 }

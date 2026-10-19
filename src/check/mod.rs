@@ -972,26 +972,27 @@ impl Sides<'_> {
             .map(|included| &included.path)
             .collect();
 
+        // A changed file the base cannot analyze is an analysis gap of its
+        // own, even when its candidate side fits; a deletion, or a change
+        // whose candidate side is out of scope, has nothing to compare.
+        let base_gap = |included: &IncludedEntry, failure| {
+            let compared = counterparts
+                .get(&included.path)
+                .is_some_and(|to| candidate_included.contains(to));
+            compared.then(|| CoverageInput {
+                entry: included.clone(),
+                changed: true,
+                failure,
+            })
+        };
         let mut base_tasks = Vec::new();
         let mut base_coverage = Vec::new();
         for included in &base_discovery.included {
             if !changed_base.contains(&included.path) {
                 continue;
             }
-            // A changed file the base cannot analyze is an analysis gap of its
-            // own, even when its candidate side fits; a deletion, or a change
-            // whose candidate side is out of scope, has nothing to compare.
             if included.too_large || included.non_utf8_path {
-                let compared = counterparts
-                    .get(&included.path)
-                    .is_some_and(|to| candidate_included.contains(to));
-                if compared {
-                    base_coverage.push(CoverageInput {
-                        entry: included.clone(),
-                        changed: true,
-                        failure: None,
-                    });
-                }
+                base_coverage.extend(base_gap(included, None));
                 continue;
             }
             base_tasks.push(LoadTask {
@@ -1009,16 +1010,7 @@ impl Sides<'_> {
                 Load::Failure(failure) => loads.failures.push(failure),
                 Load::Changed(loaded) => loads.base.push(*loaded),
                 Load::Unanalyzable(reason) => {
-                    let compared = counterparts
-                        .get(&task.included.path)
-                        .is_some_and(|to| candidate_included.contains(to));
-                    if compared {
-                        base_coverage.push(CoverageInput {
-                            entry: task.included.clone(),
-                            changed: true,
-                            failure: Some(reason),
-                        });
-                    }
+                    base_coverage.extend(base_gap(task.included, Some(reason)));
                 }
                 Load::Unchanged(..) => {}
             }
