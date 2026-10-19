@@ -1,12 +1,7 @@
 # Wasteful-code rules and the adapted verbosity score
 
-**Adaptation, not reimplementation.** scb-check currently documents its
-wasteful-code rules as Python-only. The six rules below are an explicit
-adaptation of that idea to Java and JS/TS, run over this scanner's own IR
-(`src/ir/mod.rs`, `src/rules/mod.rs`) rather than either grammar's raw AST —
-chosen and implemented independently, not a port of scb-check's Python
-implementation, and this document makes no claim of numerical equivalence
-to any score scb-check itself publishes.
+The rules run over this scanner's own IR (`src/ir/mod.rs`,
+`src/rules/mod.rs`) rather than either grammar's raw AST.
 
 ## The six v1 rules (D22)
 

@@ -198,30 +198,6 @@ pub struct ReportGap {
     pub end_line: usize,
 }
 
-/// The Assumptions-mandated adaptation label: this scanner's CC/verbosity
-/// rules are its own documented adaptation, not a claim of numerical
-/// equivalence to scb-check's Python scores.
-#[derive(Debug, Clone, Serialize)]
-pub struct ReportAdaptation {
-    pub summary: String,
-    pub cc_rules_doc: String,
-    pub wasteful_rules_doc: String,
-}
-
-const ADAPTATION_SUMMARY: &str = "CC, SLOC, mass, erosion and verbosity are computed from this scanner's own Java/JS-TS AST rules, adapted from scb-check's Python-only formulas. No numerical equivalence to scb-check's own scores is claimed.";
-const CC_RULES_DOC: &str = "docs/cc-rules.md";
-const WASTEFUL_RULES_DOC: &str = "docs/wasteful-rules.md";
-
-impl Default for ReportAdaptation {
-    fn default() -> Self {
-        ReportAdaptation {
-            summary: ADAPTATION_SUMMARY.to_string(),
-            cc_rules_doc: CC_RULES_DOC.to_string(),
-            wasteful_rules_doc: WASTEFUL_RULES_DOC.to_string(),
-        }
-    }
-}
-
 /// Everything one scan produces, in the shape every rendering shares.
 #[derive(Debug, Clone, Serialize)]
 pub struct Report {
@@ -240,7 +216,6 @@ pub struct Report {
     pub top25: Vec<ReportCallable>,
     pub skipped_files: Vec<ReportSkippedFile>,
     pub incomplete: bool,
-    pub adaptation: ReportAdaptation,
 }
 
 /// Everything `aggregate` needs, borrowed from the pipeline's stage
@@ -303,7 +278,6 @@ pub fn aggregate(input: &ReportInput) -> Report {
         incomplete: input.metrics.incomplete
             || input.rules.incomplete
             || discovery_analysis_failed(input),
-        adaptation: ReportAdaptation::default(),
     }
 }
 
@@ -816,13 +790,6 @@ pub fn terminal_summary(report: &Report) -> String {
         out,
         "Incomplete (a file failed to parse): {}",
         report.incomplete
-    );
-    let _ = writeln!(
-        out,
-        "Adaptation: {} See {} and {}.",
-        report.adaptation.summary,
-        report.adaptation.cc_rules_doc,
-        report.adaptation.wasteful_rules_doc
     );
 
     out

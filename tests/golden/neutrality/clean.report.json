@@ -1,9 +1,4 @@
 {
-  "adaptation": {
-    "cc_rules_doc": "docs/cc-rules.md",
-    "summary": "CC, SLOC, mass, erosion and verbosity are computed from this scanner's own Java/JS-TS AST rules, adapted from scb-check's Python-only formulas. No numerical equivalence to scb-check's own scores is claimed.",
-    "wasteful_rules_doc": "docs/wasteful-rules.md"
-  },
   "callables": [
     {
       "cc": 1,

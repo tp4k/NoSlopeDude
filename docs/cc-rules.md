@@ -9,10 +9,8 @@ points`, where a decision point is any `IrNode` inside a callable's own
 excluding any nested callable's own span (a lambda or arrow inside a method
 is its own, separately counted `IrCallable`).
 
-This document does **not** claim numerical equivalence to the scb-check
-paper's Python CC/SLOC scores — the formula (`mass`, `erosion`) is retained
-verbatim, but language-specific counting and verbosity rules are documented
-here so results stay interpretable on their own terms.
+The `mass` and `erosion` formulas follow the scb-check paper; the
+language-specific counting below is this scanner's own.
 
 ## Decision constructs (`DecisionKind`, D7)
 

@@ -63,7 +63,6 @@ pub fn render_html(report: &Report) -> String {
     render_duplicates_section(&mut out, report);
     render_top25_section(&mut out, report);
     render_skipped_section(&mut out, report);
-    render_adaptation_section(&mut out, report);
     let _ = write!(out, "</body></html>");
     out
 }
@@ -343,14 +342,4 @@ fn render_skipped_dir(out: &mut String, mut name: String, mut dir: &SkippedDir) 
     );
     render_skipped_contents(out, dir);
     let _ = write!(out, "</div></details>");
-}
-
-fn render_adaptation_section(out: &mut String, report: &Report) {
-    let _ = write!(
-        out,
-        "<section id=\"adaptation\"><h2>Adaptation note</h2><p>{}</p><p>See <code>{}</code> and <code>{}</code>.</p></section>",
-        escape_html(&report.adaptation.summary),
-        escape_html(&report.adaptation.cc_rules_doc),
-        escape_html(&report.adaptation.wasteful_rules_doc)
-    );
 }

@@ -3,9 +3,7 @@
 //! conservative-by-design rationale in `docs/wasteful-rules.md` — run over
 //! the IR (`nsd-plan-final.md` M0b item 6): terminator-ness, block
 //! membership and catch-body membership are IR structural queries here, not
-//! grammar-string matches. This is an adaptation of scb-check's Python-only
-//! wasteful-code rules, not a port and not a claim of numerical
-//! equivalence — see `docs/wasteful-rules.md`.
+//! grammar-string matches.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;

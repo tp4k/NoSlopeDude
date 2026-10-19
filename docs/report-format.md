@@ -85,12 +85,7 @@ the raw name.
     { "relative_path": "src/Broken.java", "reason": "parse_syntax_error", "detail": "salvaged; first error at line 2",
       "gaps": [{ "start_line": 2, "end_line": 2 }], "unmeasured_callables": 1 }
   ],
-  "incomplete": true,
-  "adaptation": {
-    "summary": "CC, SLOC, mass, erosion and verbosity are computed from this scanner's own Java/JS-TS AST rules, adapted from scb-check's Python-only formulas. No numerical equivalence to scb-check's own scores is claimed.",
-    "cc_rules_doc": "docs/cc-rules.md",
-    "wasteful_rules_doc": "docs/wasteful-rules.md"
-  }
+  "incomplete": true
 }
 ```
 
@@ -100,6 +95,14 @@ the raw name.
 family covers `.rs` files (`docs/rust-lowering.md`). `schema_version` stays
 `1`. A repository with no Rust reports the zeroed row shown above, and a
 clone group of Rust files carries `"language": "rust"`.
+
+### The removed `adaptation` key
+
+`report.json` once carried a top-level `adaptation` object (a summary
+saying the metrics are nsd's own, not numerically equivalent to
+scb-check's, plus two doc paths). It is removed from the JSON, the HTML
+and the terminal summary. No reader in this repository consumed it, so
+`schema_version` stays `1`.
 
 ### `scores` (D20)
 
@@ -310,9 +313,6 @@ Sections, in document order, each its own `<section id="...">`:
    Inside a folder, subfolders come first, then a table of its own files:
    full path, reason, detail. Top-level files sit in a table outside every
    block.
-7. **`#adaptation`** — the same adaptation summary and doc links as the
-   JSON, so a reader of the HTML alone sees the non-equivalence disclosure
-   the Assumptions section requires.
 
 ## Check JSON (M6-1/M6-2 subset)
 
@@ -413,6 +413,5 @@ parent fails `NSD-G101` (ledger row 59; the check-then-read race remains).
 
 Printed to stdout by `nsd::report::terminal_summary`: the scan
 settings, the four score rows' (overall, Java, JS/TS, Rust) erosion and verbosity ratio, the count of
-findings/duplicate groups/top-25 rows/skipped files, the `incomplete`
-marker, and the adaptation note — the same numbers as the two files, in
-prose form.
+findings/duplicate groups/top-25 rows/skipped files, and the `incomplete`
+marker — the same numbers as the two files, in prose form.

@@ -215,13 +215,6 @@ fn test_json_report_contains_every_required_section() {
                 && file["detail"] == "salvaged; first error at line 2"),
         "the syntax-error file is listed as a salvaged skip: {skipped:?}"
     );
-
-    // Assumptions-mandated adaptation label (non-equivalence disclosure).
-    assert_eq!(
-        value["adaptation"]["cc_rules_doc"].as_str().unwrap(),
-        "docs/cc-rules.md"
-    );
-    assert!(!value["adaptation"]["summary"].as_str().unwrap().is_empty());
 }
 
 fn fixture_erosion_root() -> PathBuf {

@@ -416,7 +416,6 @@ fn test_report_json_gains_no_new_top_level_field() {
         .collect();
     keys.sort_unstable();
     let mut expected_keys = vec![
-        "adaptation",
         "callables",
         "duplicates",
         "findings",
