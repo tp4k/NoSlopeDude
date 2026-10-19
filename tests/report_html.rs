@@ -808,6 +808,37 @@ fn position_of(haystack: &str, needle: &str) -> usize {
         .unwrap_or_else(|| panic!("no {needle:?} in: {haystack}"))
 }
 
+/// The byte range of the `<details>` block whose `<summary>` contains
+/// `marker`, from its opening tag through its matching `</details>`.
+fn details_block_of(haystack: &str, marker: &str) -> std::ops::Range<usize> {
+    let marker_at = position_of(haystack, marker);
+    let start = haystack[..marker_at]
+        .rfind("<details")
+        .unwrap_or_else(|| panic!("{marker:?} is in no <details> block"));
+    let mut depth = 0usize;
+    let mut at = start;
+    loop {
+        let next_open = haystack[at..].find("<details").map(|i| at + i);
+        let next_close = haystack[at..]
+            .find("</details>")
+            .map(|i| at + i)
+            .unwrap_or_else(|| panic!("unclosed block around {marker:?}"));
+        match next_open {
+            Some(open) if open < next_close => {
+                depth += 1;
+                at = open + "<details".len();
+            }
+            _ => {
+                depth -= 1;
+                at = next_close + "</details>".len();
+                if depth == 0 {
+                    return start..at;
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn test_every_block_starts_collapsed() {
     let (_dir, output) = run_scan(&fixture_root(), |settings| {
@@ -819,10 +850,14 @@ fn test_every_block_starts_collapsed() {
         html.contains("<details"),
         "the report should have collapsible blocks"
     );
-    assert!(
-        !html.contains("<details open"),
-        "every block should start collapsed: {html}"
-    );
+    for (at, _) in html.match_indices("<details") {
+        let tag = &html[at..at + html[at..].find('>').expect("a closed tag")];
+        assert!(
+            !tag.split_whitespace()
+                .any(|attribute| attribute == "open" || attribute.starts_with("open=")),
+            "every block should start collapsed: {tag}"
+        );
+    }
 }
 
 #[test]
@@ -909,12 +944,29 @@ fn test_skipped_files_render_as_a_collapsed_folder_tree() {
     let wide = "<code>wide/</code> (3) <span class=\"muted\">— user_exclude 2, parse_syntax_error 1</span>";
     let sub =
         "<code>sub/</code> (2) <span class=\"muted\">— parse_syntax_error 1, user_exclude 1</span>";
-    let wide_at = position_of(section, wide);
-    let sub_at = position_of(section, sub);
+    let wide_block = details_block_of(section, wide);
+    let sub_block = details_block_of(section, sub);
+    let deep_block = details_block_of(section, "<code>deep/a/b/</code>");
     let p_at = position_of(section, "<td>wide/p.js</td>");
     let q_at = position_of(section, "<td>wide/sub/q.js</td>");
-    assert!(wide_at < sub_at, "sub/ nests inside wide/");
-    assert!(sub_at < q_at, "q.js sits inside sub/");
+    assert!(
+        wide_block.start < sub_block.start && sub_block.end <= wide_block.end,
+        "sub/ nests inside wide/: {section}"
+    );
+    assert!(
+        sub_block.contains(&q_at),
+        "q.js sits inside sub/: {section}"
+    );
+    assert!(
+        wide_block.contains(&p_at) && !sub_block.contains(&p_at),
+        "p.js sits inside wide/ but outside sub/: {section}"
+    );
+    for file in ["<td>deep/a/b/x.js</td>", "<td>deep/a/b/y.js</td>"] {
+        assert!(
+            deep_block.contains(&position_of(section, file)),
+            "{file} sits inside deep/a/b/: {section}"
+        );
+    }
     assert!(q_at < p_at, "subfolders come before a folder's own files");
 
     // A top-level file sits outside every folder block.
