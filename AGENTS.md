@@ -61,8 +61,9 @@ for the per-step detail and evidence:
   self-check workflow (no hosted run observed). On that branch it was a smoke run that gated no
   first-party source (no Java/JS/TS outside fixtures).
   The Rust lowering has since landed on `feat/deferred-correctness-rust` (status
-  row PV-1), so the self-check now gates `nsd`'s own Rust source; the
-  `java-fixture-01` golden digest recapture is open (status row PV-2, `[!]`).
+  row PV-1), so the self-check now gates `nsd`'s own Rust source, and a
+  hosted self-check run passed on PR #16; the `java-fixture-01` golden
+  digest is recaptured for it (status row PV-2, `[x]`).
 - `main` carries everything through PR #12; the run branch above is not merged
   into it until its PR lands. If this list disagrees with the status file, the
   status file wins.
