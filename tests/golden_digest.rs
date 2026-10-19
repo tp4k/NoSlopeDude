@@ -57,8 +57,8 @@ const TOP25_TRIPLE_COUNT: usize = 25;
 const EXPECTED_OVERALL_EROSION: f64 = 0.13313797553867948;
 const EXPECTED_JAVA_EROSION: f64 = 0.13294913151043064;
 
-/// Cross-checked against `nsd-plan-final.md:70` (*Corrections applied*,
-/// row 7): 854 skips split `test: 853` / `dependency_or_build_output: 1`.
+/// Cross-checked against the archived `java-fixture-01` report, whose 854
+/// skips split `test: 853` / `dependency_or_build_output: 1`.
 const EXPECTED_SKIPS_TEST: u64 = 853;
 const EXPECTED_SKIPS_DEPENDENCY_OR_BUILD_OUTPUT: u64 = 1;
 

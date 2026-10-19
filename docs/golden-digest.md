@@ -125,7 +125,7 @@ checkout it came from:
 
 ## The `nsd-v1` digest (M0c-14)
 
-`nsd-plan-final.md:750-752` and `nsd-plan-implementation.md:175` make the
+`nsd-plan-final.md` (*Test and acceptance plan*) and `nsd-plan-implementation.md:175` make the
 `java-fixture-01` digest the committed Java E2E golden. M0c's grammar swap
 (`tree-sitter-java` 0.23.5 → `tree-sitter-java-orchard` 0.5.18) and the
 `Callable::end_line`/`-0.0` fixes (M0c-13) mean the M0b digest above no
