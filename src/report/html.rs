@@ -10,6 +10,7 @@
 //! link row at the top navigates between sections.
 
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::fmt::Write as _;
 
 use super::{Report, ReportFamilyScores, ReportFinding, ReportSkippedFile, SourceLocation};
@@ -249,10 +250,11 @@ fn render_top25_section(out: &mut String, report: &Report) {
 }
 
 /// One folder of the skipped-files tree. `total` and `reasons` count every
-/// file at or below this folder.
+/// file at or below this folder. Folders are keyed by their raw name, so two
+/// non-UTF-8 names that render alike stay separate folders.
 #[derive(Default)]
 struct SkippedDir<'a> {
-    dirs: BTreeMap<String, SkippedDir<'a>>,
+    dirs: BTreeMap<OsString, SkippedDir<'a>>,
     files: Vec<&'a ReportSkippedFile>,
     reasons: BTreeMap<&'a str, usize>,
     total: usize,
@@ -266,10 +268,7 @@ impl<'a> SkippedDir<'a> {
             node.count(file);
             if let Some(parent) = file.relative_path.parent() {
                 for part in parent.iter() {
-                    node = node
-                        .dirs
-                        .entry(part.to_string_lossy().into_owned())
-                        .or_default();
+                    node = node.dirs.entry(part.to_os_string()).or_default();
                     node.count(file);
                 }
             }
@@ -298,7 +297,7 @@ fn render_skipped_section(out: &mut String, report: &Report) {
 /// A folder's subfolders (each a collapsed block), then its own files.
 fn render_skipped_contents(out: &mut String, dir: &SkippedDir) {
     for (name, child) in &dir.dirs {
-        render_skipped_dir(out, name.clone(), child);
+        render_skipped_dir(out, name.to_string_lossy().into_owned(), child);
     }
     if dir.files.is_empty() {
         return;
@@ -324,7 +323,7 @@ fn render_skipped_contents(out: &mut String, dir: &SkippedDir) {
 fn render_skipped_dir(out: &mut String, mut name: String, mut dir: &SkippedDir) {
     while dir.files.is_empty() && dir.dirs.len() == 1 {
         let (child_name, child) = dir.dirs.iter().next().expect("one subfolder");
-        name = format!("{name}/{child_name}");
+        name = format!("{name}/{}", child_name.to_string_lossy());
         dir = child;
     }
     let mut reasons: Vec<(&str, usize)> = dir.reasons.iter().map(|(r, n)| (*r, *n)).collect();
@@ -342,4 +341,40 @@ fn render_skipped_dir(out: &mut String, mut name: String, mut dir: &SkippedDir) 
     );
     render_skipped_contents(out, dir);
     let _ = write!(out, "</div></details>");
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::PathBuf;
+
+    fn skipped(path: &[u8]) -> ReportSkippedFile {
+        ReportSkippedFile {
+            relative_path: PathBuf::from(OsStr::from_bytes(path)),
+            reason: "user_exclude".to_string(),
+            detail: None,
+            gaps: None,
+            unmeasured_callables: None,
+        }
+    }
+
+    /// Two folders whose names are distinct non-UTF-8 bytes but share a
+    /// lossy rendering (`a\u{FFFD}`) stay two folder blocks of one file each.
+    #[test]
+    fn test_non_utf8_sibling_folders_stay_separate() {
+        let files = [skipped(b"a\x80/x.js"), skipped(b"a\x81/y.js")];
+        let root = SkippedDir::build(&files);
+        assert_eq!(root.dirs.len(), 2);
+        assert!(root.dirs.values().all(|dir| dir.total == 1));
+
+        let mut out = String::new();
+        render_skipped_contents(&mut out, &root);
+        assert_eq!(
+            out.matches("<code>a\u{FFFD}/</code> (1)").count(),
+            2,
+            "{out}"
+        );
+    }
 }
