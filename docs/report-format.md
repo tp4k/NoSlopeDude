@@ -278,6 +278,12 @@ was not cut has none:
 `N` is the span's own line count (`end_line - start_line + 1`), not the
 number of lines shown. `report.json` carries no excerpt and is unchanged.
 
+A `<nav>` row of plain anchor links precedes the sections: Settings,
+Scores, Findings (N), Duplicates (N), Top CC (N), Skipped (N). The page has
+no script. Long lists render as native `<details>` blocks, and every block
+starts collapsed (no `open` attribute); a nav jump lands on a section's
+heading, not inside a block.
+
 Sections, in document order, each its own `<section id="...">`:
 
 1. **`#scan-settings`** — target, revision (sha/dirty/unavailable reason),
@@ -287,14 +293,23 @@ Sections, in document order, each its own `<section id="...">`:
    each numeric cell carries a stable `id` (`#erosion-<family>`,
    `#verbosity-<family>`) so a reader — or a test — can cross-check a
    number against `report.json` without parsing prose.
-3. **`#findings`** (`#findings-count`) — one row per rule finding: rule id,
-   language, and its location (link + excerpt).
+3. **`#findings`** (`#findings-count`) — one block per rule id
+   (`<details class="rule" id="rule-<RULE-ID>">`, in rule-id order, its
+   finding count in the summary), holding one row per finding: language
+   and its location (link + excerpt), in report order.
 4. **`#duplicates`** (`#duplicates-count`) — one block per clone group:
-   language, redundant line count, and every occurrence's location.
-5. **`#top25`** (`#top25-count`) — one row per top-25 callable: name,
-   language, CC, SLOC, mass, and its (single-line, see above) location.
-6. **`#skipped-files`** (`#skipped-count`) — one row per skipped file:
-   path, reason, detail.
+   language, redundant line count and occurrence count in the summary,
+   every occurrence's location inside.
+5. **`#top25`** (`#top25-count`) — one block holding one row per top-25
+   callable: name, language, CC, SLOC, mass, and its (single-line, see
+   above) location.
+6. **`#skipped-files`** (`#skipped-count`) — a folder tree. Each folder is a
+   block whose summary shows the count of skipped files at or below it and a
+   per-reason breakdown (by count, then reason name); a chain of folders
+   that holds nothing but one subfolder merges into one block (`a/b/c/`).
+   Inside a folder, subfolders come first, then a table of its own files:
+   full path, reason, detail. Top-level files sit in a table outside every
+   block.
 7. **`#adaptation`** — the same adaptation summary and doc links as the
    JSON, so a reader of the HTML alone sees the non-equivalence disclosure
    the Assumptions section requires.
