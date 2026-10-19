@@ -2,8 +2,8 @@
 # suite passes and that `nsd check --base` runs end to end against the real
 # change set of each event. It gates nsd's own Rust source, which the Rust
 # lowering analyzes. The repository has no first-party Java/JS/TS outside
-# tests/fixtures and tests/golden, which the root nsd.yml excludes. The steps
-# below are unchanged.
+# tests/fixtures and tests/golden, which the root nsd.yml excludes. It runs on
+# macOS and on Linux; the Linux leg covers the platform release.yml ships.
 name: self-check
 
 on:
@@ -16,7 +16,11 @@ permissions:
 
 jobs:
   self-check:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:

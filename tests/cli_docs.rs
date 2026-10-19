@@ -272,7 +272,7 @@ fn test_self_check_workflow_checks_the_resolved_base() {
 }
 
 #[test]
-fn test_self_check_workflow_is_unprivileged_and_runs_on_macos() {
+fn test_self_check_workflow_is_unprivileged_and_runs_on_macos_and_linux() {
     let text = fs::read_to_string(WORKFLOW).expect("read the self-check workflow");
     let workflow = workflow();
 
@@ -281,13 +281,46 @@ fn test_self_check_workflow_is_unprivileged_and_runs_on_macos() {
     let permissions = workflow["permissions"].as_mapping().expect("permissions");
     assert_eq!(permissions.len(), 1);
     assert_eq!(workflow["permissions"]["contents"].as_str(), Some("read"));
-    let job = workflow["jobs"].as_mapping().expect("jobs").values().next();
-    let runner = job.and_then(|job| job["runs-on"].as_str());
-    assert_eq!(runner, Some("macos-latest"));
+    let job = &workflow["jobs"]["self-check"];
+    assert_eq!(job["runs-on"].as_str(), Some("${{ matrix.os }}"));
+    let runners: Vec<&str> = job["strategy"]["matrix"]["os"]
+        .as_sequence()
+        .expect("an os matrix")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(runners, ["macos-latest", "ubuntu-latest"]);
+}
+
+const RELEASE_WORKFLOW: &str = ".github/workflows/release.yml";
+const PUBLISH_COMMAND: &str = "gh release create";
+const TAG_CONDITION: &str = "github.ref_type == 'tag'";
+
+#[test]
+fn test_release_workflow_publishes_only_from_a_tag() {
+    let text = fs::read_to_string(RELEASE_WORKFLOW).expect("read the release workflow");
+    let workflow: Value = serde_yaml_ng::from_str(&text).expect("valid YAML");
+
+    assert!(!text.contains("pull_request_target"));
+    assert!(!text.contains("secrets."));
+    let tags = workflow["on"]["push"]["tags"].as_sequence().expect("push tags");
+    assert_eq!(tags.len(), 1);
+    assert_eq!(tags[0].as_str(), Some("v*"));
+    let steps = workflow["jobs"]["linux-musl"]["steps"]
+        .as_sequence()
+        .expect("release steps");
+    let publish = &steps[step_index(steps, PUBLISH_COMMAND)];
+    assert_eq!(publish["if"].as_str(), Some(TAG_CONDITION));
+    let tag_check = &steps[step_index(steps, "test \"$TAG\" = \"v$VERSION\"")];
+    assert_eq!(tag_check["if"].as_str(), Some(TAG_CONDITION));
+    assert!(
+        step_index(steps, TEST_COMMAND) < step_index(steps, PUBLISH_COMMAND),
+        "the release publishes only after the tests run"
+    );
 }
 
 #[test]
-fn test_only_the_self_check_workflow_ships() {
+fn test_only_the_self_check_and_release_workflows_ship() {
     let mut names: Vec<String> = fs::read_dir(WORKFLOW_DIR)
         .expect("read .github/workflows")
         .map(|entry| {
@@ -300,7 +333,7 @@ fn test_only_the_self_check_workflow_ships() {
         .collect();
     names.sort();
 
-    assert_eq!(names, ["self-check.yml"]);
+    assert_eq!(names, ["release.yml", "self-check.yml"]);
 }
 
 #[test]

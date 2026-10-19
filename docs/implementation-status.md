@@ -166,6 +166,14 @@ Plan: the user request of 2026-10-19 (the HTML report had become unreadable; dro
 | PV-4 | Remove the scb-check adaptation note from `report.json` (top-level `adaptation` key), `report.html` and the terminal summary; drop the matching disclaimers in `docs/cc-rules.md`, `docs/wasteful-rules.md`, `src/rules/mod.rs`. `schema_version` stays `1` | `[x]` — `2e0be2b`. Checks: `tests/salvage.rs::test_report_json_gains_no_new_top_level_field` (exact key set, `adaptation` absent), `tests/neutrality.rs` against the two re-cut baselines (only the `adaptation` object removed); `tests/golden/java-fixture-01.nsd-v1.digest.json` re-captured (the digest's `body_blake3` hashes the whole report body; only that field moved), verified by `NSD_ARCHIVED_REPORT=<archive> NSD_REQUIRE_ARCHIVE_VERIFIED=1 cargo test --test golden_digest` (25 passed, no `PENDING:`); `docs/golden-digest.md` *PV-4 recapture delta*. `docs/report-format.md` *The removed `adaptation` key* |
 | PV-5 | Documentation sweep: delete `docs/dod-sweep.md` (links repointed to M7-2/4/5/6), condense closed incident logs and run history in `ir-neutrality.md`, `golden-digest.md`, `measurements.md`, this file's header, and `nsd-plan-implementation.md`; drop `nsd-plan-final.md` *Corrections applied* (kept in git history at `cb33206`; *Measured starting state* stays, it holds the fixture pins) | `[x]` — `b21f718` plus this round's final commit. Checks: `tests/cli_docs.rs`, `tests/perf_scan.rs`, `tests/perf_check.rs` (the `## Rows` / `## Check rows` contract of `measurements.md`), `tests/neutrality.rs`, `tests/golden_digest.rs`, `tests/policy_trust.rs` (its `nsd-plan-implementation.md:76` citation is byte-identical). Branch total: `cargo test --locked` 1033 passed, 0 failed; release `nsd check --base origin/main` exits 0 |
 
+## Post-v1 — Distribution
+
+Plan: the user request of 2026-10-19 (a report-only nsd job in another repository's Linux CI needs a downloadable binary; patch bump only, MIT license).
+
+| ID | Deliverable | Status |
+|---|---|---|
+| PV-6 | `0.1.1` with `license = "MIT"` and a root `LICENSE`; `.github/workflows/release.yml` publishes `nsd-x86_64-unknown-linux-musl.tar.gz` plus `.sha256` per `v*` tag (tag must equal the Cargo.toml version), and on a pull request that edits it runs test, build and smoke check without publishing; `self-check.yml` gains an `ubuntu-latest` leg; `docs/cli.md` *Release binary* | `[~]` — no hosted Linux run observed yet |
+
 ## Standing gates and known debt
 
 - **`scripts/neutrality_gate.sh` is not re-run on merged `main`.** Proof A is
