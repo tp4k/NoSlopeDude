@@ -28,7 +28,9 @@ const PAD_METHODS: usize = 10;
 const FILE: &str = "Widget.java";
 const CATCH: &str = "try { work(); } catch (Exception e) { }";
 const OTHER_CATCH: &str = "try { other(); } catch (Exception e) { }";
-const SCALE_BOUND: Duration = Duration::from_secs(1);
+const SCALE_FACTOR: usize = 8;
+const SCALE_RATIO_BOUND: u32 = 32;
+const SCALE_SAMPLES_PER_SIDE: usize = 3;
 const SCALE_PAIRS: usize = 14_000;
 const SCALE_DIRECTIVE: &str = "// nsd-ignore[JAVA-EMPTY-CATCH]: x";
 const SCALE_CATCH: &str = "try{a();}catch(Exception e){}";
@@ -756,10 +758,12 @@ fn test_directive_on_a_later_block_comment_line_is_invalid() {
     assert_eq!(v101_lines(&output), vec![line_of(&text, CATCH)]);
 }
 
-#[test]
-fn test_scan_with_many_directives_and_findings_is_not_quadratic() {
+/// Scans `pairs` directive/catch pairs plus one unused trailing directive.
+/// Returns the scan time, the diagnostics' sites and the trailing directive's
+/// line.
+fn timed_scale_scan(pairs: usize) -> (Duration, Vec<(&'static str, usize)>, usize) {
     let mut text = String::from("class W { void run() {\n");
-    for _ in 0..SCALE_PAIRS {
+    for _ in 0..pairs {
         text.push_str(SCALE_DIRECTIVE);
         text.push('\n');
         text.push_str(SCALE_CATCH);
@@ -778,10 +782,31 @@ fn test_scan_with_many_directives_and_findings_is_not_quadratic() {
     let found = scan_suppressions(&files, &Config::default().policy);
     let elapsed = started.elapsed();
 
-    assert!(elapsed < SCALE_BOUND, "scan took {elapsed:?}");
     let sites: Vec<(&str, usize)> = found.iter().map(|d| (d.code, d.directive_line)).collect();
-    let unused = line_of(&text, "tail();") - 1;
-    assert_eq!(sites, vec![(CODE_INVALID_SUPPRESSION, unused)]);
+    (elapsed, sites, line_of(&text, "tail();") - 1)
+}
+
+#[test]
+fn test_scan_with_many_directives_and_findings_is_not_quadratic() {
+    let mut small = Duration::MAX;
+    let mut large = Duration::MAX;
+    for _ in 0..SCALE_SAMPLES_PER_SIDE {
+        let (elapsed, sites, unused) = timed_scale_scan(SCALE_PAIRS / SCALE_FACTOR);
+        small = small.min(elapsed);
+        assert_eq!(sites, vec![(CODE_INVALID_SUPPRESSION, unused)]);
+        let (elapsed, sites, unused) = timed_scale_scan(SCALE_PAIRS);
+        large = large.min(elapsed);
+        assert_eq!(sites, vec![(CODE_INVALID_SUPPRESSION, unused)]);
+    }
+
+    assert!(
+        large < small * SCALE_RATIO_BOUND,
+        "a quadratic scan grows {SCALE_FACTOR}x in size and ~{}x in time; scanning {SCALE_PAIRS} \
+         pairs took {large:?} against {small:?} for {} pairs, expected under \
+         {SCALE_RATIO_BOUND}x",
+        SCALE_FACTOR * SCALE_FACTOR,
+        SCALE_PAIRS / SCALE_FACTOR
+    );
 }
 
 #[test]

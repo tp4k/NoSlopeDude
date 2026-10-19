@@ -1,6 +1,6 @@
 //! M0c-12: the frozen `nsd-v1` measurement fingerprint (`src/profile.rs`).
-//! `nsd-plan-final.md` M0c step 12: the fingerprint covers IR version, both
-//! lowering versions, the three grammar versions, the `tree-sitter` runtime
+//! `nsd-plan-final.md` M0c step 12: the fingerprint covers IR version, all three
+//! lowering versions, the four grammar versions, the `tree-sitter` runtime
 //! version, the rule catalog, and the effective clone configuration
 //! (`min_clone_lines`) — nothing else, and every one of those inputs must
 //! actually move the fingerprint.
@@ -54,6 +54,11 @@ fn test_version_constants_match_cargo_lock() {
         cargo_lock_version("tree-sitter-typescript"),
         "profile::TYPESCRIPT_GRAMMAR_VERSION is stale against Cargo.lock"
     );
+    assert_eq!(
+        profile::RUST_GRAMMAR_VERSION,
+        cargo_lock_version("tree-sitter-rust"),
+        "profile::RUST_GRAMMAR_VERSION is stale against Cargo.lock"
+    );
 }
 
 #[test]
@@ -68,6 +73,11 @@ fn test_current_inputs_read_the_live_constants() {
         current.jsts_lowering_version,
         nsd::lower::JSTS_LOWERING_VERSION
     );
+    assert_eq!(
+        current.rust_lowering_version,
+        nsd::lower::RUST_LOWERING_VERSION
+    );
+    assert_eq!(current.rust_grammar_version, profile::RUST_GRAMMAR_VERSION);
     assert_eq!(current.rule_catalog, &nsd::rules::ALL_RULE_IDS);
     assert_eq!(current.min_clone_lines, nsd::model::DEFAULT_MIN_CLONE_LINES);
     assert_eq!(
@@ -128,6 +138,14 @@ fn test_each_input_changes_the_fingerprint() {
     );
 
     let mut changed = baseline;
+    changed.rust_lowering_version += 1;
+    assert_ne!(
+        profile::fingerprint(&changed),
+        baseline_fingerprint,
+        "rust_lowering_version"
+    );
+
+    let mut changed = baseline;
     changed.tree_sitter_runtime_version = "0.27.1";
     assert_ne!(
         profile::fingerprint(&changed),
@@ -160,6 +178,14 @@ fn test_each_input_changes_the_fingerprint() {
     );
 
     let mut changed = baseline;
+    changed.rust_grammar_version = "0.24.3";
+    assert_ne!(
+        profile::fingerprint(&changed),
+        baseline_fingerprint,
+        "rust_grammar_version"
+    );
+
+    let mut changed = baseline;
     changed.rule_catalog = &nsd::rules::ALL_RULE_IDS[..nsd::rules::ALL_RULE_IDS.len() - 1];
     assert_ne!(
         profile::fingerprint(&changed),
@@ -182,6 +208,9 @@ fn test_each_input_changes_the_fingerprint() {
 /// recorded reason), rather than silently drift.
 #[test]
 fn test_nsd_v1_fingerprint_is_frozen() {
+    // Re-pinned for PV-1: the Rust lowering adds two hashed inputs,
+    // `rust_lowering_version` and `rust_grammar_version` (nine -> eleven);
+    // the name stays `nsd-v1` and `schema_version` stays 1.
     // Re-pinned for M3-4: `ir::IR_VERSION` moved 4 -> 5 (`IrFile` gains
     // `excluded_callables` for A101); the name stays `nsd-v1` for the same
     // reason as below.
@@ -193,7 +222,7 @@ fn test_nsd_v1_fingerprint_is_frozen() {
     // generation, not any one literal); only the hash moves.
     let fingerprint = profile::fingerprint(&MeasurementProfileInputs::current());
     assert_eq!(
-        fingerprint, "blake3:43340e59d6e269babeb275808dda9960",
+        fingerprint, "blake3:ee1b3117a8eca80df2994125c61fe745",
         "nsd-v1's frozen fingerprint moved — bump this literal deliberately, with a reason, \
          if the input that moved it is an intentional profile change"
     );

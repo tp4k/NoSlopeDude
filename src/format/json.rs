@@ -158,6 +158,7 @@ fn detail_fields(details: &CheckDetails) -> Map<String, Value> {
             "overall": family(&summaries.overall),
             "java": family(&summaries.java),
             "js_ts": family(&summaries.js_ts),
+            "rust": family(&summaries.rust),
         }),
     );
     fields.insert(

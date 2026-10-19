@@ -80,6 +80,7 @@ pub struct Summaries {
     pub overall: FamilySummary,
     pub java: FamilySummary,
     pub js_ts: FamilySummary,
+    pub rust: FamilySummary,
 }
 
 /// One parse-damage span of a candidate file, mapped to its base.
@@ -267,5 +268,6 @@ pub(super) fn summarize(
         overall: summary(None, verbosity.overall),
         java: summary(Some(LanguageFamily::Java), verbosity.java),
         js_ts: summary(Some(LanguageFamily::JsTs), verbosity.js_ts),
+        rust: summary(Some(LanguageFamily::Rust), verbosity.rust),
     }
 }

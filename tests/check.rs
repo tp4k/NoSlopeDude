@@ -779,6 +779,120 @@ fn test_deleting_a_file_over_ceiling_raises_nothing() {
     assert_eq!(outcome.exit_status, EXIT_PASS);
 }
 
+/// `class` followed by a comment holding a byte that is not UTF-8.
+fn with_invalid_utf8(class: &str) -> Vec<u8> {
+    let mut bytes = class.as_bytes().to_vec();
+    bytes.extend_from_slice(b"// \xff\xfe\n");
+    bytes
+}
+
+#[test]
+fn test_changed_file_with_invalid_encoding_only_in_the_base_raises_a102_on_the_base_path() {
+    let fx = fixture();
+    let class = java_class("Old", LOW_CC_IFS, 0);
+    fx.commit(&[("Old.java", &with_invalid_utf8(&class))]);
+    fx.stage("Old.java", class.as_bytes());
+
+    let outcome = fx.staged();
+
+    assert_eq!(
+        coverage_reasons(&outcome),
+        vec![("Old.java".to_string(), "invalid_encoding")]
+    );
+    assert_eq!(codes(&outcome), vec![A102]);
+    assert_eq!(outcome.exit_status, EXIT_ERROR);
+}
+
+#[test]
+fn test_deleting_an_invalid_encoding_file_raises_nothing() {
+    let fx = fixture();
+    fx.commit(&[
+        ("Foo.java", java_class("Foo", LOW_CC_IFS, 0).as_bytes()),
+        (
+            "Old.java",
+            &with_invalid_utf8(&java_class("Old", LOW_CC_IFS, 0)),
+        ),
+    ]);
+    fx.unstage("Old.java");
+
+    let outcome = fx.staged();
+
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    assert_eq!(outcome.exit_status, EXIT_PASS);
+}
+
+#[test]
+fn test_changed_file_with_invalid_encoding_only_in_the_base_raises_a102_while_v102_is_off() {
+    let fx = fixture();
+    let class = java_class("Old", LOW_CC_IFS, 0);
+    fx.commit(&[("Old.java", &with_invalid_utf8(&class))]);
+    fx.stage("Old.java", class.as_bytes());
+    let (_dir, off) = write_trusted_config(V102_OFF);
+
+    let outcome = fx.check_with(CheckMode::Staged, Some(&off), false);
+
+    assert_eq!(
+        coverage_reasons(&outcome),
+        vec![("Old.java".to_string(), "invalid_encoding")]
+    );
+    assert_eq!(outcome.exit_status, EXIT_ERROR);
+}
+
+#[test]
+fn test_renaming_an_invalid_encoding_file_out_of_scope_raises_nothing() {
+    let fx = fixture();
+    let bytes = with_invalid_utf8(&java_class("Old", LOW_CC_IFS, 0));
+    fx.commit(&[
+        ("nsd.yml", b"version: 1\nexclude:\n  - legacy/**\n"),
+        ("Foo.java", java_class("Foo", LOW_CC_IFS, 0).as_bytes()),
+        ("Old.java", &bytes),
+    ]);
+    fx.unstage("Old.java");
+    fx.stage("legacy/Old.java", &bytes);
+
+    let outcome = fx.staged();
+
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    assert_eq!(outcome.exit_status, EXIT_PASS);
+}
+
+#[test]
+fn test_invalid_encoding_on_both_sides_raises_one_a102() {
+    let fx = fixture();
+    fx.commit(&[("util.ts", INVALID_UTF8_TS)]);
+    fx.stage("util.ts", b"export const x = '\xfd';\n");
+
+    let outcome = fx.staged();
+
+    assert_eq!(
+        coverage_reasons(&outcome),
+        vec![("util.ts".to_string(), "invalid_encoding")]
+    );
+    assert_eq!(codes(&outcome), vec![A102]);
+    assert_eq!(outcome.exit_status, EXIT_ERROR);
+}
+
+#[test]
+fn test_invalid_encoding_base_with_a_high_cc_candidate_reports_a102_and_e101() {
+    let fx = fixture();
+    fx.commit(&[(
+        "Old.java",
+        &with_invalid_utf8(&java_class("Old", LOW_CC_IFS, 0)),
+    )]);
+    fx.stage("Old.java", java_class("Old", HIGH_CC_IFS, 0).as_bytes());
+
+    let outcome = fx.staged();
+
+    let found = codes(&outcome);
+    assert!(found.contains(&A102), "{found:?}");
+    assert!(found.contains(&E101), "{found:?}");
+    assert_eq!(
+        coverage_reasons(&outcome),
+        vec![("Old.java".to_string(), "invalid_encoding")]
+    );
+    assert_eq!(outcome.exit_status, EXIT_BOTH);
+}
+
 #[test]
 fn test_regression_and_analysis_error_together_exit_3() {
     let fx = fixture();

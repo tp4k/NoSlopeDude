@@ -58,9 +58,12 @@ for the per-step detail and evidence:
   `feat/plan-dod-gaps` (status rows M7-3 to M7-6): `scan` reads the root
   `nsd.yml` threshold, check-side total parse loss has a test, warm and cold
   `check` time and cache size are measured, and the repository ships a CI
-  self-check workflow (no hosted run observed). It is a smoke run: it gates no
-  first-party source, because the repository has no Java/JS/TS outside fixtures
-  and a Rust lowering is post-v1.
+  self-check workflow (no hosted run observed). On that branch it was a smoke run that gated no
+  first-party source (no Java/JS/TS outside fixtures).
+  The Rust lowering has since landed on `feat/deferred-correctness-rust` (status
+  row PV-1), so the self-check now gates `nsd`'s own Rust source, and a
+  hosted self-check run passed on PR #16; the `java-fixture-01` golden
+  digest is recaptured for it (status row PV-2, `[x]`).
 - `main` carries everything through PR #12; the run branch above is not merged
   into it until its PR lands. If this list disagrees with the status file, the
   status file wins.

@@ -97,6 +97,7 @@ fn grammar_label(grammar: Grammar) -> &'static str {
         Grammar::JavaScript => "javascript",
         Grammar::TypeScript => "typescript",
         Grammar::Tsx => "tsx",
+        Grammar::Rust => "rust",
     }
 }
 

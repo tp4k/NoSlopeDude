@@ -46,6 +46,7 @@ fn tree_sitter_language(grammar: Grammar) -> tree_sitter::Language {
         Grammar::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
         Grammar::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
         Grammar::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
+        Grammar::Rust => tree_sitter_rust::LANGUAGE.into(),
     }
 }
 
@@ -613,6 +614,80 @@ fn test_body_fingerprint_separates_languages() {
     let js_fingerprint = identity::body_fingerprint(&js_ir, js_callable, &js_parsed.source);
 
     assert_ne!(java_fingerprint, js_fingerprint);
+}
+
+/// `callable` with its `body_span` shrunk by one byte on each side: no
+/// `IrNode` carries that span, so `body_fingerprint` takes its degraded
+/// (span-miss) path while the source bytes it covers stay the real body.
+fn degraded_copy(callable: &IrCallable) -> IrCallable {
+    let mut degraded = callable.clone();
+    degraded.body_span.start_byte += 1;
+    degraded.body_span.end_byte -= 1;
+    degraded
+}
+
+/// Ledger row 84: two callables whose body span matches no IR node must not
+/// collide when their bodies differ only in a whitespace run inside a string
+/// literal (the normalized token stream collapses it). The degraded value
+/// still has no position salt, never equals the found-subtree value, and
+/// stays separated by language.
+#[test]
+fn test_degraded_bodies_differing_only_in_whitespace_get_distinct_fingerprints() {
+    let wide = "class A { String m() { return \"a  b\"; } }";
+    let narrow = "class A { String m() { return \"a b\"; } }";
+    let moved = "class Pad { void pad() {}\n\n  String m() { return \"a  b\"; } }";
+    let ts_wide = "function m() { return \"a  b\"; }";
+
+    let fingerprint = |source: &str, java: bool, degrade: bool| {
+        let parsed = if java {
+            parse_inline(source, Grammar::Java, JAVA)
+        } else {
+            parse_inline(source, Grammar::TypeScript, JS_TS)
+        };
+        let ir = lower::lower_file(&parsed);
+        let callable = ir
+            .callables
+            .iter()
+            .find(|candidate| candidate.name == "m")
+            .expect("callable m");
+        let callable = if degrade {
+            degraded_copy(callable)
+        } else {
+            callable.clone()
+        };
+        identity::body_fingerprint(&ir, &callable, &parsed.source)
+    };
+
+    let degraded_wide = fingerprint(wide, true, true);
+    assert!(is_well_formed_blake3(&degraded_wide), "{degraded_wide}");
+    assert_ne!(degraded_wide, fingerprint(narrow, true, true));
+    assert_eq!(degraded_wide, fingerprint(moved, true, true));
+    assert_ne!(degraded_wide, fingerprint(wide, true, false));
+    assert_ne!(degraded_wide, fingerprint(ts_wide, false, true));
+}
+
+/// Domain separation on identical hash input: a degraded body whose raw bytes
+/// are exactly a found body's normalized token stream (one separator byte,
+/// then the leaf text) hashes the same bytes, so only the degraded family
+/// prefix keeps the two values apart. A degraded value reusing the normal
+/// prefix would equal the found one here, which the differing-bytes test above
+/// cannot see.
+#[test]
+fn test_degraded_fingerprint_never_equals_the_found_one_for_the_same_bytes() {
+    let token_stream = "\u{1}x";
+    let source = format!("const f = () => x; const s = \"a{token_stream}b\";");
+    let parsed = parse_inline(&source, Grammar::TypeScript, JS_TS);
+    let ir = lower::lower_file(&parsed);
+    let found_callable = ir.callables.first().expect("arrow callable");
+    let found = identity::body_fingerprint(&ir, found_callable, &parsed.source);
+
+    let start = source.find(token_stream).expect("token stream in source");
+    let mut degraded_callable = found_callable.clone();
+    degraded_callable.body_span.start_byte = u32::try_from(start).expect("offset fits u32");
+    degraded_callable.body_span.end_byte =
+        u32::try_from(start + token_stream.len()).expect("offset fits u32");
+    let degraded = identity::body_fingerprint(&ir, &degraded_callable, &parsed.source);
+    assert_ne!(found, degraded);
 }
 
 /// `identity::identities` is a pure function of an already-lowered

@@ -568,6 +568,7 @@ fn family_prefix(language: LanguageFamily) -> &'static str {
     match language {
         LanguageFamily::Java => "java",
         LanguageFamily::JsTs => "js_ts",
+        LanguageFamily::Rust => "rust",
     }
 }
 

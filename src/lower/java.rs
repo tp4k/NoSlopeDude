@@ -328,6 +328,7 @@ pub(super) fn classify(node: Node, source: &str, parent: Option<Node>) -> Classi
         damage: classify_damage(node),
         is_clone_statement: is_clone_statement(kind, parent_kind, is_named, is_comment),
         is_hoisted_or_type_only: false,
+        silences_executable_subtree: false,
         block_kind: is_block_kind(kind),
         callable,
         owner_segment,

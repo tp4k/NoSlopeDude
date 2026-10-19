@@ -144,6 +144,8 @@ pub enum CallableKind {
     JsFunctionExpression,
     JsArrowFunction,
     JsMethodDefinition,
+    RustFunction,
+    RustClosure,
 }
 
 /// M1-7's lexical owner-chain segment kind: one enclosing named type,

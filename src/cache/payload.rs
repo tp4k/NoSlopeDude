@@ -56,6 +56,8 @@ mirror_enum!(CachedCallableKind <=> CallableKind {
     JsFunctionExpression,
     JsArrowFunction,
     JsMethodDefinition,
+    RustFunction,
+    RustClosure,
 });
 
 mirror_enum!(CachedDamageKind <=> DamageKind {

@@ -13,6 +13,7 @@
 
 mod java;
 mod jsts;
+mod rust;
 
 use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
@@ -39,6 +40,9 @@ pub const JAVA_LOWERING_VERSION: u32 = 3;
 
 /// The JS/TS counterpart of `JAVA_LOWERING_VERSION`.
 pub const JSTS_LOWERING_VERSION: u32 = 2;
+
+/// The Rust counterpart of `JAVA_LOWERING_VERSION`.
+pub const RUST_LOWERING_VERSION: u32 = 1;
 
 /// One D14 separator between adjacent leaf tokens in a statement's
 /// normalized stream -- the same control character
@@ -126,7 +130,7 @@ pub fn lower_all_inventoried(parsed_files: &[ParsedFile]) -> (Vec<IrFile>, Vec<u
 /// traced to this one function): `build_ir` already folds, for free during
 /// its single tree walk, each callable's and block's own bottom-up "does
 /// this entity's subtree touch damage anywhere" bit (`callable_dirty` /
-/// `block_dirty`, mirroring the `catch_flags` inheritance it already does).
+/// `block_dirty`, mirroring the `inherited_flags` inheritance it already does).
 /// `cascade_exclusions` turns that into a final exclusion decision per
 /// entity via one document-order interval-nesting sweep: an entity is
 /// excluded if it is itself dirty *or* its nearest enclosing entity is
@@ -572,6 +576,9 @@ struct Classification {
     is_clone_statement: bool,
     /// JS/TS only; always `false` from the Java lowering.
     is_hoisted_or_type_only: bool,
+    /// Rust only: this node's whole subtree is non-executable (an attribute),
+    /// inherited by every descendant like `is_catch_body_root`.
+    silences_executable_subtree: bool,
     /// This exact node's own canonical block-kind literal (the self-is-block
     /// predicate for `SyntaxBlock` classification), `None` if it is not a
     /// block-kind node. `&'static str`, not `node.kind()` directly: tree-sitter
@@ -620,6 +627,7 @@ fn classify(
     match language {
         LanguageFamily::Java => java::classify(node, source, parent),
         LanguageFamily::JsTs => jsts::classify(node, source, parent, field_name),
+        LanguageFamily::Rust => rust::classify(node, source, parent),
     }
 }
 
@@ -653,6 +661,7 @@ fn is_clone_statement(node: Node, language: LanguageFamily) -> bool {
             });
             jsts::is_clone_statement(parent_kind, field_name, is_named, is_comment)
         }
+        LanguageFamily::Rust => rust::is_clone_statement(parent_kind, is_named, is_comment),
     }
 }
 
@@ -729,8 +738,8 @@ struct IrTables<'a> {
 /// explicit work-list rather than a `TreeCursor` -- a different shape from
 /// this one, not the same one reused.
 fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrTables) -> IrNode {
-    // `parent_in_catch_body` is the already-computed `in_catch_body` flag of
-    // this node's own parent (or `false` for `root`), inherited rather than
+    // `parent_flags` is the already-computed `Inherited` flags of this
+    // node's own parent (all `false` for `root`), inherited rather than
     // re-derived -- see `Classification::is_catch_body_root`'s doc comment.
     // `parent` is this node's own parent `Node` (`None` for `root`),
     // threaded down the traversal by the caller for the same reason: a
@@ -763,11 +772,11 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
     let mut owner_stack: Vec<u32> = Vec::new();
     let open = |node: Node,
                 parent: Option<Node>,
-                parent_in_catch_body: bool,
+                parent_flags: Inherited,
                 field_name: Option<&str>,
                 tables: &mut IrTables,
                 owner_stack: &mut Vec<u32>|
-     -> (IrNode, bool, bool, Option<EntitySlot>, bool) {
+     -> OpenedNode {
         let span = Span::from_node(node);
         let classification = classify(node, language, source, parent, field_name);
         let self_damage = classification.damage.is_some();
@@ -809,37 +818,40 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
             tables.owner_spans.push(span);
             owner_stack.push((tables.owners.len() - 1) as u32);
         }
-        let in_catch_body = classification.is_catch_body_root || parent_in_catch_body;
+        let flags = Inherited {
+            in_catch_body: classification.is_catch_body_root || parent_flags.in_catch_body,
+            silenced: classification.silences_executable_subtree || parent_flags.silenced,
+        };
         let ir_node = IrNode {
             span,
-            executable: is_executable_leaf(node, language),
+            executable: !flags.silenced && is_executable_leaf(node, language),
             decision: classification.decision,
             terminator: classification.terminator,
             in_block: classification.in_block,
-            in_catch_body,
+            in_catch_body: flags.in_catch_body,
             is_comment: classification.is_comment,
             is_named: classification.is_named,
             is_clone_statement: classification.is_clone_statement,
             is_hoisted_or_type_only: classification.is_hoisted_or_type_only,
             children: Vec::with_capacity(node.child_count() as usize),
         };
-        (
+        OpenedNode {
             ir_node,
-            in_catch_body,
+            flags,
             self_damage,
             entity_slot,
             owner_pushed,
-        )
+        }
     };
 
     let mut cursor = root.walk();
-    let (root_node, root_in_catch_body, root_self_damage, root_entity_slot, root_owner_pushed) =
-        open(root, None, false, None, tables, &mut owner_stack);
-    let mut stack: Vec<IrNode> = vec![root_node];
-    // Mirrors `stack`'s depth exactly: `catch_flags[i]` is `stack[i]`'s own
-    // `in_catch_body` flag, so a child node reads its parent's flag in O(1)
-    // via `catch_flags.last()` instead of walking back up the tree.
-    let mut catch_flags: Vec<bool> = vec![root_in_catch_body];
+    let no_flags = Inherited::default();
+    let root_opened = open(root, None, no_flags, None, tables, &mut owner_stack);
+    let mut stack: Vec<IrNode> = vec![root_opened.ir_node];
+    // Mirrors `stack`'s depth exactly: `inherited_flags[i]` is `stack[i]`'s own
+    // `Inherited` flags, so a child node reads its parent's flags in O(1)
+    // via `inherited_flags.last()` instead of walking back up the tree.
+    let mut inherited_flags: Vec<Inherited> = vec![root_opened.flags];
     // Mirrors `stack`'s depth exactly too: `parents[i]` is the tree-sitter
     // `Node` that `stack[i]` was itself opened from, so a child node reads
     // its parent's `Node` in O(1) via `parents.last()` instead of via
@@ -848,39 +860,39 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
     // WS-6 round 3: `dirty[i]` is `stack[i]`'s own "does this subtree touch
     // damage anywhere so far" bit, seeded from that node's own
     // `self_damage` and OR'd with every child's own folded-in bit at the
-    // finish site below, exactly mirroring how `catch_flags` inherits down
+    // finish site below, exactly mirroring how `inherited_flags` inherits down
     // -- except this one folds bottom-up. `entity_slots[i]` is `Some` iff
     // `stack[i]` is itself a callable or block, naming which of
     // `callable_dirty_out`/`block_dirty_out` its own final bit belongs in.
-    let mut dirty: Vec<bool> = vec![root_self_damage];
-    let mut entity_slots: Vec<Option<EntitySlot>> = vec![root_entity_slot];
-    let mut owner_pushed_frames: Vec<bool> = vec![root_owner_pushed];
+    let mut dirty: Vec<bool> = vec![root_opened.self_damage];
+    let mut entity_slots: Vec<Option<EntitySlot>> = vec![root_opened.entity_slot];
+    let mut owner_pushed_frames: Vec<bool> = vec![root_opened.owner_pushed];
     loop {
         if cursor.goto_first_child() {
-            let parent_in_catch_body = *catch_flags.last().unwrap_or(&false);
+            let parent_flags = inherited_flags.last().copied().unwrap_or_default();
             let parent = *parents.last().unwrap_or(&root);
             let field_name = cursor.field_name();
-            let (node, in_catch_body, self_damage, entity_slot, owner_pushed) = open(
+            let opened = open(
                 cursor.node(),
                 Some(parent),
-                parent_in_catch_body,
+                parent_flags,
                 field_name,
                 tables,
                 &mut owner_stack,
             );
-            stack.push(node);
-            catch_flags.push(in_catch_body);
+            stack.push(opened.ir_node);
+            inherited_flags.push(opened.flags);
             parents.push(cursor.node());
-            dirty.push(self_damage);
-            entity_slots.push(entity_slot);
-            owner_pushed_frames.push(owner_pushed);
+            dirty.push(opened.self_damage);
+            entity_slots.push(opened.entity_slot);
+            owner_pushed_frames.push(opened.owner_pushed);
             continue;
         }
         loop {
             let Some(finished) = stack.pop() else {
                 return fallback_node(root);
             };
-            catch_flags.pop();
+            inherited_flags.pop();
             parents.pop();
             let own_dirty = dirty.pop().unwrap_or(false);
             if let Some(slot) = entity_slots.pop().unwrap_or(None) {
@@ -900,23 +912,23 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
                 *parent_dirty |= own_dirty;
             }
             if cursor.goto_next_sibling() {
-                let parent_in_catch_body = *catch_flags.last().unwrap_or(&false);
+                let parent_flags = inherited_flags.last().copied().unwrap_or_default();
                 let parent_node = *parents.last().unwrap_or(&root);
                 let field_name = cursor.field_name();
-                let (node, in_catch_body, self_damage, entity_slot, owner_pushed) = open(
+                let opened = open(
                     cursor.node(),
                     Some(parent_node),
-                    parent_in_catch_body,
+                    parent_flags,
                     field_name,
                     tables,
                     &mut owner_stack,
                 );
-                stack.push(node);
-                catch_flags.push(in_catch_body);
+                stack.push(opened.ir_node);
+                inherited_flags.push(opened.flags);
                 parents.push(cursor.node());
-                dirty.push(self_damage);
-                entity_slots.push(entity_slot);
-                owner_pushed_frames.push(owner_pushed);
+                dirty.push(opened.self_damage);
+                entity_slots.push(opened.entity_slot);
+                owner_pushed_frames.push(opened.owner_pushed);
                 break;
             }
             if !cursor.goto_parent() {
@@ -924,6 +936,26 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
             }
         }
     }
+}
+
+/// The two flags a node passes down to every descendant: inside a catch body
+/// (`Classification::is_catch_body_root`) and inside a non-executable subtree
+/// (`Classification::silences_executable_subtree`).
+#[derive(Debug, Clone, Copy, Default)]
+struct Inherited {
+    in_catch_body: bool,
+    silenced: bool,
+}
+
+/// What `build_ir`'s `open` closure produces for one tree-sitter node: its
+/// `IrNode`, the two flags later children inherit, and the bookkeeping that
+/// pairs the node's table pushes with its finish-site pops.
+struct OpenedNode {
+    ir_node: IrNode,
+    flags: Inherited,
+    self_damage: bool,
+    entity_slot: Option<EntitySlot>,
+    owner_pushed: bool,
 }
 
 /// Which of `callable_dirty_out`/`block_dirty_out` (see `build_ir`) one
@@ -986,6 +1018,7 @@ mod tests {
             Grammar::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
             Grammar::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
             Grammar::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
+            Grammar::Rust => tree_sitter_rust::LANGUAGE.into(),
         }
     }
 

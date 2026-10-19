@@ -602,7 +602,7 @@ fn read_task(
 
 /// A base-side file: read and fully analyzed, never cached. One that cannot
 /// be analyzed leaves its callables unmatched, so the candidate side is
-/// judged as new code.
+/// judged as new code; the caller reports the failure as A102.
 fn load_base(repo: &Repository, task: &LoadTask<'_>, read: ReadBlob<'_>) -> Load {
     let bytes = match read_task(repo, task, read) {
         Ok(bytes) => bytes,
@@ -972,26 +972,27 @@ impl Sides<'_> {
             .map(|included| &included.path)
             .collect();
 
+        // A changed file the base cannot analyze is an analysis gap of its
+        // own, even when its candidate side fits; a deletion, or a change
+        // whose candidate side is out of scope, has nothing to compare.
+        let base_gap = |included: &IncludedEntry, failure| {
+            let compared = counterparts
+                .get(&included.path)
+                .is_some_and(|to| candidate_included.contains(to));
+            compared.then(|| CoverageInput {
+                entry: included.clone(),
+                changed: true,
+                failure,
+            })
+        };
         let mut base_tasks = Vec::new();
         let mut base_coverage = Vec::new();
         for included in &base_discovery.included {
             if !changed_base.contains(&included.path) {
                 continue;
             }
-            // A changed file the base cannot analyze is an analysis gap of its
-            // own, even when its candidate side fits; a deletion, or a change
-            // whose candidate side is out of scope, has nothing to compare.
             if included.too_large || included.non_utf8_path {
-                let compared = counterparts
-                    .get(&included.path)
-                    .is_some_and(|to| candidate_included.contains(to));
-                if compared {
-                    base_coverage.push(CoverageInput {
-                        entry: included.clone(),
-                        changed: true,
-                        failure: None,
-                    });
-                }
+                base_coverage.extend(base_gap(included, None));
                 continue;
             }
             base_tasks.push(LoadTask {
@@ -1001,13 +1002,17 @@ impl Sides<'_> {
             });
         }
         let base_read = |repo: &Repository, entry: &Entry| self.base.read(repo, entry);
-        for load in load_in_parallel(self.repository, &base_tasks, |repo, task| {
+        let base_results = load_in_parallel(self.repository, &base_tasks, |repo, task| {
             load_base(repo, task, &base_read)
-        }) {
+        });
+        for (task, load) in base_tasks.iter().zip(base_results) {
             match load {
                 Load::Failure(failure) => loads.failures.push(failure),
                 Load::Changed(loaded) => loads.base.push(*loaded),
-                Load::Unchanged(..) | Load::Unanalyzable(_) => {}
+                Load::Unanalyzable(reason) => {
+                    base_coverage.extend(base_gap(task.included, Some(reason)));
+                }
+                Load::Unchanged(..) => {}
             }
         }
 

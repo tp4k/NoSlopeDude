@@ -1,6 +1,6 @@
 {
   "authorship": "unknown",
-  "body_blake3": "blake3:9db99d29028507858afab544b5830d3d",
+  "body_blake3": "blake3:e7285498089bb0e90f2a617f24ab1d32",
   "clones": {
     "group_count": 71,
     "total_redundant_lines": 1372
@@ -41,6 +41,16 @@
         "flagged_lines": 2152,
         "ratio": 0.009966469683777625,
         "scanned_lines": 215924,
+        "unanalyzed_lines": 0
+      }
+    },
+    "rust": {
+      "erosion": 0.0,
+      "verbosity": {
+        "complete": true,
+        "flagged_lines": 0,
+        "ratio": 0.0,
+        "scanned_lines": 0,
         "unanalyzed_lines": 0
       }
     }

@@ -176,6 +176,9 @@ pub(crate) fn findings_with_nodes<'a>(
     ir_file: &'a lower::IrFile,
 ) -> Vec<(RuleFinding, Vec<&'a IrNode>)> {
     let language = file.language;
+    let Some(rule_ids) = family_rule_ids(language) else {
+        return Vec::new();
+    };
     let mut findings = Vec::new();
     for_each_ir_node(&ir_file.root, |node, is_root| {
         let mut push = |rule_id: RuleId, flagged: Flagged<'a>| {
@@ -193,17 +196,17 @@ pub(crate) fn findings_with_nodes<'a>(
         };
         if is_unreachable_container(node, is_root, language) {
             if let Some(flagged) = find_unreachable_after_return(node) {
-                push(unreachable_rule_id(language), flagged);
+                push(rule_ids.unreachable, flagged);
             }
         }
         if node.decision == Some(DecisionKind::Catch) {
             if let Some(flagged) = find_empty_catch(node) {
-                push(empty_catch_rule_id(language), flagged);
+                push(rule_ids.empty_catch, flagged);
             }
         }
         if node.decision == Some(DecisionKind::Branch) {
             if let Some(flagged) = find_redundant_else(node) {
-                push(redundant_else_rule_id(language), flagged);
+                push(rule_ids.redundant_else, flagged);
             }
         }
     });
@@ -300,9 +303,11 @@ pub fn compute_verbosity(
     let mut scanned_overall = 0usize;
     let mut scanned_java = 0usize;
     let mut scanned_js_ts = 0usize;
+    let mut scanned_rust = 0usize;
     let mut unanalyzed_overall = 0usize;
     let mut unanalyzed_java = 0usize;
     let mut unanalyzed_js_ts = 0usize;
+    let mut unanalyzed_rust = 0usize;
     for file in files {
         scanned_overall = scanned_overall.saturating_add(file.scanned_lines);
         unanalyzed_overall = unanalyzed_overall.saturating_add(file.unanalyzed_lines);
@@ -314,6 +319,10 @@ pub fn compute_verbosity(
             LanguageFamily::JsTs => {
                 scanned_js_ts = scanned_js_ts.saturating_add(file.scanned_lines);
                 unanalyzed_js_ts = unanalyzed_js_ts.saturating_add(file.unanalyzed_lines);
+            }
+            LanguageFamily::Rust => {
+                scanned_rust = scanned_rust.saturating_add(file.scanned_lines);
+                unanalyzed_rust = unanalyzed_rust.saturating_add(file.unanalyzed_lines);
             }
         }
     }
@@ -349,11 +358,18 @@ pub fn compute_verbosity(
         .filter(|(_, file)| file.language == LanguageFamily::JsTs)
         .map(|(set, _)| set.len())
         .sum();
+    let flagged_rust: usize = flagged
+        .iter()
+        .zip(files)
+        .filter(|(_, file)| file.language == LanguageFamily::Rust)
+        .map(|(set, _)| set.len())
+        .sum();
 
     VerbosityScores {
         overall: verbosity_score(overall, scanned_overall, unanalyzed_overall),
         java: verbosity_score(flagged_java, scanned_java, unanalyzed_java),
         js_ts: verbosity_score(flagged_js_ts, scanned_js_ts, unanalyzed_js_ts),
+        rust: verbosity_score(flagged_rust, scanned_rust, unanalyzed_rust),
     }
 }
 
@@ -376,24 +392,28 @@ fn verbosity_score(
     }
 }
 
-fn unreachable_rule_id(language: LanguageFamily) -> RuleId {
-    match language {
-        LanguageFamily::Java => JAVA_UNREACHABLE_AFTER_RETURN,
-        LanguageFamily::JsTs => JSTS_UNREACHABLE_AFTER_RETURN,
-    }
+/// The three rule IDs one language family's files are checked against.
+struct FamilyRuleIds {
+    unreachable: RuleId,
+    empty_catch: RuleId,
+    redundant_else: RuleId,
 }
 
-fn empty_catch_rule_id(language: LanguageFamily) -> RuleId {
+/// `None` for Rust: it has no rule IDs (`ALL_RULE_IDS` keeps six), so its
+/// files are never rule-checked.
+fn family_rule_ids(language: LanguageFamily) -> Option<FamilyRuleIds> {
     match language {
-        LanguageFamily::Java => JAVA_EMPTY_CATCH,
-        LanguageFamily::JsTs => JSTS_EMPTY_CATCH,
-    }
-}
-
-fn redundant_else_rule_id(language: LanguageFamily) -> RuleId {
-    match language {
-        LanguageFamily::Java => JAVA_REDUNDANT_ELSE_AFTER_RETURN,
-        LanguageFamily::JsTs => JSTS_REDUNDANT_ELSE_AFTER_RETURN,
+        LanguageFamily::Java => Some(FamilyRuleIds {
+            unreachable: JAVA_UNREACHABLE_AFTER_RETURN,
+            empty_catch: JAVA_EMPTY_CATCH,
+            redundant_else: JAVA_REDUNDANT_ELSE_AFTER_RETURN,
+        }),
+        LanguageFamily::JsTs => Some(FamilyRuleIds {
+            unreachable: JSTS_UNREACHABLE_AFTER_RETURN,
+            empty_catch: JSTS_EMPTY_CATCH,
+            redundant_else: JSTS_REDUNDANT_ELSE_AFTER_RETURN,
+        }),
+        LanguageFamily::Rust => None,
     }
 }
 

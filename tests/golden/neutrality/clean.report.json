@@ -1926,7 +1926,7 @@
   ],
   "fingerprints": {
     "configuration": "blake3:28418c5b84cae6ec172c22fd9fc2ec9f",
-    "measurement": "blake3:43340e59d6e269babeb275808dda9960"
+    "measurement": "blake3:ee1b3117a8eca80df2994125c61fe745"
   },
   "incomplete": true,
   "result_scope": "scan",
@@ -1971,6 +1971,16 @@
         "ratio": 0.21996124031007752,
         "scanned_lines": 1032,
         "unanalyzed_lines": 5
+      }
+    },
+    "rust": {
+      "erosion": 0.0,
+      "verbosity": {
+        "complete": true,
+        "flagged_lines": 0,
+        "ratio": 0.0,
+        "scanned_lines": 0,
+        "unanalyzed_lines": 0
       }
     }
   },

@@ -108,6 +108,7 @@ pub struct ReportScores {
     pub overall: ReportFamilyScores,
     pub java: ReportFamilyScores,
     pub js_ts: ReportFamilyScores,
+    pub rust: ReportFamilyScores,
 }
 
 /// One reported source span: where it is, its D19-escaped-on-render
@@ -376,6 +377,14 @@ fn build_scores(input: &ReportInput) -> ReportScores {
         .cloned()
         .collect();
 
+    let rust_callables: Vec<Callable> = input
+        .metrics
+        .callables
+        .iter()
+        .filter(|callable| callable.language == LanguageFamily::Rust)
+        .cloned()
+        .collect();
+
     let parse_failed = |family: LanguageFamily| {
         input.parse_failures.iter().any(|failure| {
             failure
@@ -409,6 +418,13 @@ fn build_scores(input: &ReportInput) -> ReportScores {
             verbosity: ReportVerbosity::new(
                 &input.rules.verbosity.js_ts,
                 parse_failed(LanguageFamily::JsTs) || discovery_failed,
+            ),
+        },
+        rust: ReportFamilyScores {
+            erosion: normalize_zero(metrics::erosion(&rust_callables)),
+            verbosity: ReportVerbosity::new(
+                &input.rules.verbosity.rust,
+                parse_failed(LanguageFamily::Rust) || discovery_failed,
             ),
         },
     }
@@ -725,6 +741,7 @@ fn family_label(language: LanguageFamily) -> &'static str {
     match language {
         LanguageFamily::Java => "java",
         LanguageFamily::JsTs => "js_ts",
+        LanguageFamily::Rust => "rust",
     }
 }
 
@@ -779,6 +796,11 @@ pub fn terminal_summary(report: &Report) -> String {
         out,
         "  js_ts:    {:.4} / {:.4}",
         report.scores.js_ts.erosion, report.scores.js_ts.verbosity.ratio
+    );
+    let _ = writeln!(
+        out,
+        "  rust:     {:.4} / {:.4}",
+        report.scores.rust.erosion, report.scores.rust.verbosity.ratio
     );
     let _ = writeln!(out);
 

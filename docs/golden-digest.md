@@ -115,7 +115,8 @@ checkout it came from:
    value, not just a leading `/`); the exact eleven-key top-level set; the
    exact `label`, `authorship`, `revision_sha`, and `language` values;
    `body_blake3`'s `blake3:` + 32-lowercase-hex-char shape; `scores`' exact
-   `{overall, java, js_ts}` language set, per-language `{erosion,
+   language set (`{overall, java, js_ts}` for the M0b file; the `nsd-v1`
+   file adds PV-1's `rust`), per-language `{erosion,
    verbosity}` key shape and `verbosity`'s key shape (`{flagged_lines,
    ratio, scanned_lines}` for the M0b file; the `nsd-v1` file adds M1-8's
    `complete` and `unanalyzed_lines`); and that every leaf under `scores`,
@@ -236,3 +237,21 @@ moved: one WebJar file (built-in exclusion), from scanned to skipped as
 The report's `fingerprints`, `snapshots`, `scan` and `adaptation` are identical
 before and after, so no discovery-default fingerprint moved. No difference
 without an M7-1 cause was found.
+
+### PV-1 recapture delta
+
+Re-captured at `a6bcd39` on `feat/deferred-correctness-rust` with
+`NSD_ARCHIVED_REPORT=… NSD_GOLDEN_CAPTURE=1`, then verified with
+`NSD_REQUIRE_ARCHIVE_VERIFIED=1` (25 passed, no PENDING notice) and without
+the archive (25 passed). The archive checkout was at the pinned
+`revision_sha` with a clean `git status`. Before the capture,
+`test_nsd_v1_digest_matches_a_live_scan_of_java_fixture_01` failed on digest
+equality, and the shape check rejected the captured file because it pinned
+`scores` to `{overall, java, js_ts}`; the expected family set now comes from
+the file's `VerbosityShape`, so the M0b file keeps three families.
+
+| field | delta | attributed to |
+|---|---|---|
+| `body_blake3` | **changed** (`blake3:9db99d29028507858afab544b5830d3d` → `blake3:e7285498089bb0e90f2a617f24ab1d32`) | the new `rust` score family in the report body |
+| `scores.rust` | added: erosion 0.0; verbosity `complete` true, `flagged_lines` 0, `ratio` 0.0, `scanned_lines` 0, `unanalyzed_lines` 0 | PV-1 reports a `rust` family on every scan; the fixture has no `.rs` file |
+| every other field | none | no Java or JS/TS measurement moved |

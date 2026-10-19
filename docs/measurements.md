@@ -28,8 +28,12 @@ The fixture root lives **outside this repo's tree** (not a gitignored
 in-repo directory): the scanner's own walk honours a parent `.gitignore`
 by default (`require_git(false)`, `WalkBuilder::parents`), so an ignored
 in-repo path would be invisible to the scan itself and the measurement
-would silently run against an empty tree. Neither script writes anything
-under this repository.
+would silently run against an empty tree. Both scripts write this file,
+`docs/measurements.md`, and `insert_table_row` stages the new copy as
+`docs/measurements.md.tmp.$$` before renaming it over the old one.
+`perf_scan.sh` always runs `cargo build --release`, and `perf_check.sh` runs it
+unless given a binary argument, so both may write `target/`; nothing else under
+this repository is written.
 
 ## Accepted tradeoffs
 

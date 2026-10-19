@@ -174,6 +174,14 @@ D10 name resolution, when the node has no own `name` field: the enclosing
 A Java interface or abstract `method_declaration` with no `block` child is
 not a callable and contributes no SLOC, CC or mass.
 
+## Lowering: Rust
+
+The Rust node-kind table, the callable and owner rules, and the macro
+limitation are in `docs/rust-lowering.md`. In short: `if` (and `if let`),
+let-else and a match-arm guard are `Branch`; `while` and `for` are `Loop`;
+each non-wildcard `match` arm is `Case`; `&&` and `||` are `And` and `Or`.
+`loop` and the `?` operator add 0, and Rust has no `Catch` or `Ternary`.
+
 ## Lowering: JS/TS
 
 `src/lower/jsts.rs::decision_kind` is the only place a JS/TS grammar string

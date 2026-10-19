@@ -698,7 +698,9 @@ fn test_stray_damage_outside_any_callable_or_block_does_not_reach_metrics() {
 /// `src/lower` -- collapses that spread: three min-of-3 runs of the fixed
 /// code measured a tight ~3.9-4.0x, and three min-of-3 runs of the same
 /// reverted-to-linear patch measured a tight ~8.4-8.5x, a clean ~2x gap
-/// between the two populations. `SCALING_ASSERT_MULTIPLIER` is set to 6,
+/// between the two populations. The N and 4N samples alternate, so a load
+/// spike lands on both sides instead of only on the side measured during it.
+/// `SCALING_ASSERT_MULTIPLIER` is set to 6,
 /// centered in that gap with margin on both sides: well under the ~16x a
 /// true quadratic blowup would produce, comfortably above the fixed
 /// code's measured band, and comfortably below the regression's.
@@ -707,6 +709,7 @@ fn test_many_damaged_callables_do_not_cause_a_quadratic_blowup() {
     const DAMAGED_CALLABLE_COUNT: usize = 1_200;
     const SCALED_CALLABLE_COUNT: usize = DAMAGED_CALLABLE_COUNT * 4;
     const SCALING_ASSERT_MULTIPLIER: u32 = 6;
+    const LOWER_SAMPLES_PER_SIDE: usize = 3;
 
     fn write_fixture(dir: &Path, count: usize) {
         let mut source = String::new();
@@ -767,17 +770,16 @@ fn test_many_damaged_callables_do_not_cause_a_quadratic_blowup() {
     // `_lowered`'s callables are already covered by `output.metrics.callables`
     // via the full-pipeline `run_scan` assertion above; only its timing
     // matters here.
-    let (lower_elapsed_a, _lowered) = lower_only(DAMAGED_CALLABLE_COUNT);
-    let (lower_elapsed_b, _lowered2) = lower_only(DAMAGED_CALLABLE_COUNT);
-    let (lower_elapsed_c, _lowered3) = lower_only(DAMAGED_CALLABLE_COUNT);
-    let lower_elapsed = lower_elapsed_a.min(lower_elapsed_b).min(lower_elapsed_c);
-    let (lower_scaled_elapsed_a, scaled_lowered) = lower_only(SCALED_CALLABLE_COUNT);
-    let (lower_scaled_elapsed_b, _scaled_lowered2) = lower_only(SCALED_CALLABLE_COUNT);
-    let (lower_scaled_elapsed_c, _scaled_lowered3) = lower_only(SCALED_CALLABLE_COUNT);
-    let lower_scaled_elapsed = lower_scaled_elapsed_a
-        .min(lower_scaled_elapsed_b)
-        .min(lower_scaled_elapsed_c);
-
+    let mut lower_elapsed = std::time::Duration::MAX;
+    let mut lower_scaled_elapsed = std::time::Duration::MAX;
+    let mut scaled_lowered = Vec::new();
+    for _ in 0..LOWER_SAMPLES_PER_SIDE {
+        let (elapsed, _lowered) = lower_only(DAMAGED_CALLABLE_COUNT);
+        lower_elapsed = lower_elapsed.min(elapsed);
+        let (scaled_elapsed, lowered) = lower_only(SCALED_CALLABLE_COUNT);
+        lower_scaled_elapsed = lower_scaled_elapsed.min(scaled_elapsed);
+        scaled_lowered = lowered;
+    }
     assert!(
         scaled_lowered
             .iter()

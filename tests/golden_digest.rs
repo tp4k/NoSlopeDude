@@ -301,11 +301,20 @@ fn test_required_but_pending_message_names_both_env_vars() {
 enum VerbosityShape {
     /// The M0b file, frozen as history.
     M0b,
-    /// The `nsd-v1` file since M6-2b: M1-8's coverage keys added.
+    /// The `nsd-v1` file since M6-2b: M1-8's coverage keys added, and since
+    /// PV-1 a `rust` score family.
     WithCoverage,
 }
 
 impl VerbosityShape {
+    /// The `scores` families the file carries.
+    fn languages(self) -> &'static [&'static str] {
+        match self {
+            Self::M0b => &["overall", "java", "js_ts"],
+            Self::WithCoverage => &["overall", "java", "js_ts", "rust"],
+        }
+    }
+
     fn keys(self) -> &'static [&'static str] {
         match self {
             Self::M0b => &["flagged_lines", "ratio", "scanned_lines"],
@@ -467,22 +476,16 @@ fn assert_digest_carries_no_paths_names_or_excerpts(
         "body_blake3's hex portion must be lowercase hex: {hex:?}"
     );
 
-    const EXPECTED_LANGUAGES: [&str; 3] = ["overall", "java", "js_ts"];
     const EXPECTED_LANGUAGE_KEYS: [&str; 2] = ["erosion", "verbosity"];
     let expected_verbosity_keys: BTreeSet<&str> = verbosity_shape.keys().iter().copied().collect();
     let scores = committed["scores"]
         .as_object()
         .context("scores is not an object")?;
-    let score_langs: BTreeSet<&str> = scores.keys().map(String::as_str).collect();
-    let expected_langs: BTreeSet<&str> = EXPECTED_LANGUAGES.into_iter().collect();
-    assert_eq!(
-        score_langs, expected_langs,
-        "scores must cover exactly {{overall, java, js_ts}}"
-    );
-    for lang in EXPECTED_LANGUAGES {
-        let lang_obj = scores
-            .get(lang)
-            .and_then(Value::as_object)
+    // Each present family is checked before the family set, so a file
+    // under the wrong shape fails on its verbosity keys first.
+    for (lang, lang_value) in scores {
+        let lang_obj = lang_value
+            .as_object()
             .with_context(|| format!("scores.{lang} is not an object"))?;
         let lang_keys: BTreeSet<&str> = lang_obj.keys().map(String::as_str).collect();
         let expected_lang_keys: BTreeSet<&str> = EXPECTED_LANGUAGE_KEYS.into_iter().collect();
@@ -506,6 +509,12 @@ fn assert_digest_carries_no_paths_names_or_excerpts(
             );
         }
     }
+    let score_langs: BTreeSet<&str> = scores.keys().map(String::as_str).collect();
+    let expected_langs: BTreeSet<&str> = verbosity_shape.languages().iter().copied().collect();
+    assert_eq!(
+        score_langs, expected_langs,
+        "scores must cover exactly {expected_langs:?}"
+    );
 
     fn assert_all_leaves_are_numbers(value: &Value, path: &str) {
         match value {

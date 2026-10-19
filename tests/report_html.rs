@@ -620,6 +620,24 @@ fn long_else_source() -> String {
     text
 }
 
+/// The escaping `src/report/html.rs::escape_html` applies, mirrored for
+/// expected text (`&` first, so the other entities are not double-escaped).
+fn escape_expected(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+#[test]
+fn test_expected_text_helper_escapes_every_html_special_character() {
+    assert_eq!(
+        escape_expected("a&b<c>d\"e'f"),
+        "a&amp;b&lt;c&gt;d&quot;e&#39;f"
+    );
+}
+
 /// Asserts that every location of `locations` over 20 lines renders, inside
 /// the HTML section `section_id`, as its first 20 source lines followed by a
 /// marker naming the span's line count. Returns how many were checked.
@@ -663,7 +681,7 @@ fn assert_long_locations_capped(
             .join("\n");
         assert_eq!(
             pre,
-            expected.replace('>', "&gt;"),
+            escape_expected(&expected),
             "{path}: first 20 lines only"
         );
         let marker = rest

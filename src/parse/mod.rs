@@ -163,5 +163,6 @@ fn language_for(grammar: Grammar) -> Language {
         Grammar::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
         Grammar::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
         Grammar::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
+        Grammar::Rust => tree_sitter_rust::LANGUAGE.into(),
     }
 }

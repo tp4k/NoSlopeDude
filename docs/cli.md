@@ -127,4 +127,4 @@ nsd check --base origin/main --format json
 
 Exit `0` passes the job, `1` and `3` fail it for a denied regression, and `2` and `3` fail it for an analysis or configuration error (see *Exit codes*).
 
-The repository itself runs `.github/workflows/self-check.yml`, a smoke run that builds `nsd`, runs its tests and runs `nsd check --base`; it gates no first-party source, because the repository has no Java/JS/TS outside its test fixtures.
+The repository itself runs `.github/workflows/self-check.yml`, which builds `nsd`, runs its tests and runs `nsd check --base`; through the Rust lowering it gates `nsd`'s own source, while the Java/JS/TS test fixtures stay excluded by the root `nsd.yml`.

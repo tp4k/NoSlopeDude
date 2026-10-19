@@ -1,8 +1,9 @@
-# Smoke run of nsd on its own repository. It proves that nsd builds, that its
-# test suite passes and that `nsd check --base` runs end to end against the
-# real change set of each event. It gates NO first-party source: the
-# repository has no Java/JS/TS outside tests/fixtures and tests/golden, which
-# the root nsd.yml excludes, and nsd does not analyze Rust.
+# Run of nsd on its own repository. It proves that nsd builds, that its test
+# suite passes and that `nsd check --base` runs end to end against the real
+# change set of each event. It gates nsd's own Rust source, which the Rust
+# lowering analyzes. The repository has no first-party Java/JS/TS outside
+# tests/fixtures and tests/golden, which the root nsd.yml excludes. The steps
+# below are unchanged.
 name: self-check
 
 on:
