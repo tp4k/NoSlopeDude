@@ -113,35 +113,41 @@ in the final plan's *Amendments* tables (A1–A10).
 
 ## Implementation sequence
 
-1. **Bootstrap and measurement isolation**
-   - Use the initialized handoff repository; preserve its plans and agent instructions. Create the selective fresh import (`git archive` from `912ec7a`), the provenance record, and the golden digest (A1). Declare `rust-version = "1.90"` (A4).
-   - Consolidate executable-line logic and replace persisted `DefaultHasher` output with versioned BLAKE3. `report.json` carries no persisted fingerprint, so this cannot disturb the neutrality gate.
-   - Introduce the normalized IR and Java/JS-TS lowerings against existing grammars; prototype clone-token lowering first.
-   - Require byte-identical reports on unaffected fixtures and on `java-fixture-01`, compared locally against the archived full `report.json` from the checkout path it records. Do **not** clear the `Callable::end_line` ledger row before this gate passes; it widens Top-25 spans and would fail the gate by design. For existing malformed fixtures, allow only explicitly asserted salvage/skip-taxonomy deltas.
-   - Run the pre-IR and IR binaries against the same fixed fixture checkout
-     with identical target arguments, revision SHA, dirty state, and settings.
-     Comparing each crate's `CARGO_MANIFEST_DIR` fixture paths is invalid.
-     Keep legacy JSON serialization through M0b; new report fields and widened
-     spans land afterward. Unaffected measurements remain identical even in
-     fixtures with explicitly permitted salvage/skip-taxonomy deltas.
-2. **Grammar and profile freeze**
-   - Move to Orchard 0.5.18 and tree-sitter 0.27.0; retain current JavaScript/TypeScript grammar versions. A probe crate has already shown the four compile together and that Orchard parses `Class<?> @Nullable ... cs` cleanly (A7); the 55-file Spring corpus run remains the gate.
-   - Re-run and explain the Spring/Angular deltas; stop if all 55 Java varargs failures do not clear.
-   - Freeze `nsd-v1`. Its fingerprint includes the IR version, both lowering versions, the tree-sitter runtime version, the three grammar versions (Orchard, JavaScript, TypeScript), the rule catalog, and the effective clone configuration including `min_clone_lines`.
-   - Clear the remaining cheap ledger rows here, `end_line` included.
-3. **Snapshots, identity, and configuration**
-   - Add commit/index/worktree snapshots, empty-tree staging support, central diff mapping, 50% rename detection, strict YAML parsing including `measurement.min_clone_lines`, base-policy trust, callable matching, and deterministic snapshot IDs.
-   - Use maintained `serde_yaml_ng` rather than deprecated `serde_yaml`; add `git2` and BLAKE3 as separate runtime dependencies (three new runtime dependencies in total).
-   - **Parallel track (user-approved 2026-09-23).** The measurement-free part of this step starts early on `feat/m1-snapshots`, branched from `c5267c0` while M0b/M0c continue on `feat/m0a-import`: commit/index/worktree snapshots, empty-tree staging, central diff/line mapping, 50% rename detection, merge-base and `G101`, strict `nsd.yml` parsing with `C102` (`min_clone_lines` parsed but not yet in the fingerprint), and Git-backed discovery with immutable exclusions. It adds new modules only and does not wire them into `pipeline.rs` or touch analyzers. It does not change measurement, so M0's attribution order holds. Line-independent callable identity, callable matching, coverage metadata, and fingerprint wiring wait for the `nsd-v1` freeze. Rebase onto the M0 branch once M0c lands.
-4. **Policy, suppressions, clones, and cache**
-   - Implement all twelve diagnostics, delta-based finding/suppression matching, V102 move mapping and material clone-extension logic, and exit aggregation.
-   - Store versioned cache data under `$GIT_COMMON_DIR/nsd/cache/v1`, keyed by blob OID, language/grammar, and measurement fingerprint. Writes are atomic; corruption or I/O failure remains a recomputable miss; concurrent writers never corrupt a reader.
-   - **Best-effort LRU eviction, 1 GiB / 30-day default.** The payload is large because `enumerate_candidates` emits every contiguous sub-run, so eviction is real work, not a follow-up.
-5. **Output and delivery**
-   - Implement canonical scoped JSON, terminal and agent renderers, scan-only HTML with excerpts capped at 20 lines / 4 KiB and an explicit truncation marker, deterministic caps, and per-reason analysis accounting.
-   - Report mapped parser gaps and coverage explicitly; ratios use *analyzed* executable lines and carry completeness metadata (status row M1-8). Moved into this step on 2026-09-30 by user decision so it lands in the same run as M6-1 and M6-2 and the golden digest is recaptured once; it includes restoring the per-file `SyntaxError` provenance that M0b-7's salvage removed.
-   - Nested-checkout exclusion in `scan` discovery: a directory containing its own `.git` is excluded regardless of `.gitignore`.
-   - Document copyable pre-commit and CI commands; do not add a hook installer or provider-specific workflow in v1.
+All five steps are done; [docs/implementation-status.md](docs/implementation-status.md)
+records the evidence per row. What each step still binds:
+
+1. **Bootstrap and measurement isolation.** The IR retarget stays separate from
+   the grammar upgrade. Executable-line logic is consolidated and persisted
+   fingerprints use versioned BLAKE3, never `DefaultHasher`. A pre-IR/IR
+   comparison runs both binaries against the same fixed fixture checkout with
+   identical target arguments, revision SHA, dirty state, settings, and legacy
+   JSON serialization; `CARGO_MANIFEST_DIR` fixture paths are not comparable.
+2. **Grammar and profile freeze.** Orchard 0.5.18 and tree-sitter 0.27.0. The
+   `nsd-v1` fingerprint covers the IR version, both lowering versions, the
+   tree-sitter runtime version, the three grammar versions (Orchard,
+   JavaScript, TypeScript), the rule catalog, and the effective clone
+   configuration including `min_clone_lines`.
+3. **Snapshots, identity, and configuration.** Commit/index/worktree snapshots,
+   empty-tree staging, central diff mapping, 50% rename detection, strict YAML
+   parsing (`serde_yaml_ng`, not the deprecated `serde_yaml`) including
+   `measurement.min_clone_lines`, base-policy trust, callable matching, and
+   deterministic snapshot IDs. `git2`, BLAKE3 and `serde_yaml_ng` are the three
+   new runtime dependencies.
+4. **Policy, suppressions, clones, and cache.** All twelve diagnostics,
+   delta-based finding/suppression matching, V102 move mapping and material
+   clone-extension logic, and exit aggregation. Versioned cache data lives
+   under `$GIT_COMMON_DIR/nsd/cache/v1`, keyed by blob OID, language/grammar,
+   and measurement fingerprint; writes are atomic, corruption or I/O failure is
+   a recomputable miss, and concurrent writers never corrupt a reader.
+   Best-effort LRU eviction, 1 GiB / 30-day default.
+5. **Output and delivery.** Canonical scoped JSON, terminal and agent
+   renderers, scan-only HTML with excerpts capped at 20 lines / 4 KiB and an
+   explicit truncation marker, deterministic caps, per-reason analysis
+   accounting, ratios over *analyzed* executable lines with completeness
+   metadata (status row M1-8), nested-checkout exclusion in `scan` discovery,
+   and copyable pre-commit and CI commands with no hook installer. The
+   repository's own self-check workflow was added later by user decision
+   (status row M7-6).
 
 ## Test and acceptance plan
 
