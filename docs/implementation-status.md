@@ -172,7 +172,7 @@ Plan: the user request of 2026-10-19 (a report-only nsd job in another repositor
 
 | ID | Deliverable | Status |
 |---|---|---|
-| PV-6 | `0.1.1` with `license = "MIT"` and a root `LICENSE`; `.github/workflows/release.yml` publishes `nsd-x86_64-unknown-linux-musl.tar.gz` plus `.sha256` per `v*` tag (tag must equal the Cargo.toml version), and on a pull request that edits it runs test, build and smoke check without publishing; `self-check.yml` gains an `ubuntu-latest` leg; `docs/cli.md` *Release binary* | `[~]` — no hosted Linux run observed yet |
+| PV-6 | `0.1.1` with `license = "MIT"` and a root `LICENSE`; `.github/workflows/release.yml` publishes `nsd-x86_64-unknown-linux-musl.tar.gz` plus `.sha256` per `v*` tag (tag must equal the Cargo.toml version), and on a pull request that edits it runs test, build and smoke check without publishing; `self-check.yml` gains an `ubuntu-latest` leg; `docs/cli.md` *Release binary* | `[x]` — `066fdff`, `da06f5b`. Checks: `tests/cli_docs.rs::test_release_workflow_publishes_only_from_a_tag`, `::test_self_check_workflow_is_unprivileged_and_runs_on_macos_and_linux`, `::test_only_the_self_check_and_release_workflows_ship`; `cargo test --locked --no-fail-fast` 1035 passed, 0 failed (macOS). Hosted PR #18 run: `self-check (ubuntu-latest)` and `release / linux-musl` (tests, musl build, smoke `nsd check --base HEAD~1`, packaging) green; publishing first runs on the `v0.1.1` tag |
 
 ## Standing gates and known debt
 
