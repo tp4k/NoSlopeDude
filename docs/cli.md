@@ -131,15 +131,15 @@ The repository itself runs `.github/workflows/self-check.yml` on macOS and Linux
 
 ### Release binary
 
-Each `v*` tag publishes a static Linux binary through `.github/workflows/release.yml`: `nsd-x86_64-unknown-linux-musl.tar.gz` (the `nsd` binary and `LICENSE`) and its `.sha256`. A pipeline pins one tag and verifies the checksum before it runs the binary:
+Each `v*` tag publishes a static Linux binary through `.github/workflows/release.yml`: `nsd-x86_64-unknown-linux-musl.tar.gz` (the `nsd` binary and `LICENSE`) and its `.sha256`. A pipeline pins one tag and the checksum value itself, copied once from that tag's `.sha256`, and verifies the download against it before it runs the binary:
 
 ```sh
 TAG=v0.1.1
 ASSET=nsd-x86_64-unknown-linux-musl.tar.gz
+SHA256=ed27c474c50fc07d0e54c926ee7fe161d6b999b63fc9bcaf925f2563fc1ca7c9
 curl -fsSLO "https://github.com/tp4k/NoSlopeDude/releases/download/$TAG/$ASSET"
-curl -fsSLO "https://github.com/tp4k/NoSlopeDude/releases/download/$TAG/$ASSET.sha256"
-sha256sum -c "$ASSET.sha256"
+echo "$SHA256  $ASSET" | sha256sum -c -
 tar -xzf "$ASSET" nsd
 ```
 
-Pin the checksum value itself in the consuming pipeline, not only the downloaded `.sha256` file, so a replaced release asset fails the job.
+Do not verify against a `.sha256` downloaded from the same release: a replaced asset can come with a replaced checksum file, while a pinned value makes it fail the job.

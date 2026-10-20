@@ -295,27 +295,188 @@ fn test_self_check_workflow_is_unprivileged_and_runs_on_macos_and_linux() {
 const RELEASE_WORKFLOW: &str = ".github/workflows/release.yml";
 const PUBLISH_COMMAND: &str = "gh release create";
 const TAG_CONDITION: &str = "github.ref_type == 'tag'";
+const MUSL_TEST_COMMAND: &str = "cargo test --locked --target \"$TARGET\"";
+const MUSL_BUILD_COMMAND: &str = "cargo build --locked --release --target \"$TARGET\"";
+const STATIC_ASSERTION: &str = "grep -q 'statically linked\\|static-pie linked'";
+const SMOKE_CHECK: &str = "\"$BIN\" check --base HEAD\n";
+const PACKAGE_COMMAND: &str = "sha256sum";
+const UPLOAD_ACTION: &str = "actions/upload-artifact@";
+
+fn release_workflow() -> (String, Value) {
+    let text = fs::read_to_string(RELEASE_WORKFLOW).expect("read the release workflow");
+    let workflow = serde_yaml_ng::from_str(&text).expect("valid YAML");
+    (text, workflow)
+}
+
+fn job_steps<'a>(workflow: &'a Value, job: &str) -> &'a [Value] {
+    workflow["jobs"][job]["steps"]
+        .as_sequence()
+        .unwrap_or_else(|| panic!("job `{job}` has steps"))
+}
+
+fn uses_index(steps: &[Value], action: &str) -> usize {
+    steps
+        .iter()
+        .position(|step| {
+            step["uses"]
+                .as_str()
+                .is_some_and(|uses| uses.starts_with(action))
+        })
+        .unwrap_or_else(|| panic!("no step uses `{action}`"))
+}
 
 #[test]
 fn test_release_workflow_publishes_only_from_a_tag() {
-    let text = fs::read_to_string(RELEASE_WORKFLOW).expect("read the release workflow");
-    let workflow: Value = serde_yaml_ng::from_str(&text).expect("valid YAML");
+    let (text, workflow) = release_workflow();
 
     assert!(!text.contains("pull_request_target"));
     assert!(!text.contains("secrets."));
-    let tags = workflow["on"]["push"]["tags"].as_sequence().expect("push tags");
+    let tags = workflow["on"]["push"]["tags"]
+        .as_sequence()
+        .expect("push tags");
     assert_eq!(tags.len(), 1);
     assert_eq!(tags[0].as_str(), Some("v*"));
-    let steps = workflow["jobs"]["linux-musl"]["steps"]
-        .as_sequence()
-        .expect("release steps");
-    let publish = &steps[step_index(steps, PUBLISH_COMMAND)];
-    assert_eq!(publish["if"].as_str(), Some(TAG_CONDITION));
-    let tag_check = &steps[step_index(steps, "test \"$TAG\" = \"v$VERSION\"")];
+    let build = job_steps(&workflow, "build");
+    let tag_check = &build[step_index(build, "test \"$TAG\" = \"v$VERSION\"")];
     assert_eq!(tag_check["if"].as_str(), Some(TAG_CONDITION));
+    let publish_job = &workflow["jobs"]["publish"];
+    assert_eq!(publish_job["if"].as_str(), Some(TAG_CONDITION));
+    assert_eq!(publish_job["needs"].as_str(), Some("build"));
+    let publish = job_steps(&workflow, "publish");
+    let script = run_text(&publish[step_index(publish, PUBLISH_COMMAND)]);
     assert!(
-        step_index(steps, TEST_COMMAND) < step_index(steps, PUBLISH_COMMAND),
-        "the release publishes only after the tests run"
+        script.contains("--draft"),
+        "a new release stays a draft until its assets upload"
+    );
+    assert!(
+        script.contains("--clobber"),
+        "a re-run replaces partially uploaded assets"
+    );
+    assert!(
+        script.contains("--draft=false"),
+        "the release is published after the upload"
+    );
+}
+
+#[test]
+fn test_release_workflow_gives_the_write_token_only_to_the_publish_job() {
+    let (_, workflow) = release_workflow();
+
+    let permissions = workflow["permissions"].as_mapping().expect("permissions");
+    assert_eq!(permissions.len(), 1);
+    assert_eq!(workflow["permissions"]["contents"].as_str(), Some("read"));
+    let jobs = workflow["jobs"].as_mapping().expect("jobs");
+    assert_eq!(
+        jobs.len(),
+        2,
+        "the release has a build job and a publish job"
+    );
+    assert!(workflow["jobs"]["build"]["permissions"].is_null());
+    let publish = workflow["jobs"]["publish"]["permissions"]
+        .as_mapping()
+        .expect("publish permissions");
+    assert_eq!(publish.len(), 1);
+    assert_eq!(
+        workflow["jobs"]["publish"]["permissions"]["contents"].as_str(),
+        Some("write")
+    );
+    let steps = job_steps(&workflow, "publish");
+    assert!(
+        steps.iter().all(|step| step["uses"]
+            .as_str()
+            .is_none_or(|uses| !uses.starts_with("actions/checkout@"))),
+        "the publish job never checks out, so it runs no code from the branch"
+    );
+    let checkout = &job_steps(&workflow, "build")[0];
+    assert_eq!(
+        checkout["with"]["persist-credentials"].as_bool(),
+        Some(false)
+    );
+}
+
+#[test]
+fn test_release_build_runs_for_every_pull_request_and_main_push() {
+    let (_, workflow) = release_workflow();
+
+    assert!(
+        workflow["on"]["pull_request"].is_null(),
+        "the pull_request trigger has no paths or branches filter"
+    );
+    let branches = workflow["on"]["push"]["branches"]
+        .as_sequence()
+        .expect("push branches");
+    let branches: Vec<&str> = branches.iter().filter_map(Value::as_str).collect();
+    assert_eq!(branches, ["main"]);
+}
+
+#[test]
+fn test_release_build_tests_and_smoke_checks_the_shipped_target() {
+    let (_, workflow) = release_workflow();
+    let steps = job_steps(&workflow, "build");
+
+    let order = [
+        step_index(steps, MUSL_TEST_COMMAND),
+        step_index(steps, MUSL_BUILD_COMMAND),
+        step_index(steps, STATIC_ASSERTION),
+        step_index(steps, PACKAGE_COMMAND),
+        uses_index(steps, UPLOAD_ACTION),
+    ];
+    assert!(
+        order.windows(2).all(|pair| pair[0] < pair[1]),
+        "test, build, smoke, package and upload run in that order: {order:?}"
+    );
+    let smoke = run_text(&steps[order[2]]);
+    assert!(
+        smoke.contains(SMOKE_CHECK),
+        "the smoke check has an empty change set"
+    );
+    assert!(
+        !smoke.contains("HEAD~1"),
+        "the smoke check does not depend on the last commit"
+    );
+}
+
+#[test]
+fn test_workflow_actions_are_pinned_to_a_commit() {
+    for path in [WORKFLOW, RELEASE_WORKFLOW] {
+        let text = fs::read_to_string(path).expect("read a workflow");
+        let workflow: Value = serde_yaml_ng::from_str(&text).expect("valid YAML");
+        let jobs = workflow["jobs"].as_mapping().expect("jobs");
+        for job in jobs.values() {
+            for step in job["steps"].as_sequence().expect("steps") {
+                let Some(uses) = step["uses"].as_str() else {
+                    continue;
+                };
+                let (_, sha) = uses.split_once('@').expect("an action ref");
+                assert!(
+                    sha.len() == 40 && sha.bytes().all(|byte| byte.is_ascii_hexdigit()),
+                    "{path}: `{uses}` is not pinned to a commit SHA"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_release_snippet_pins_the_checksum_value() {
+    let doc = fs::read_to_string(CLI_DOC).expect("read docs/cli.md");
+    let snippet = doc
+        .split_once("### Release binary")
+        .and_then(|(_, rest)| rest.split_once("```sh\n"))
+        .and_then(|(_, rest)| rest.split_once("```"))
+        .map(|(snippet, _)| snippet)
+        .expect("a release snippet");
+
+    let pinned = snippet
+        .lines()
+        .find_map(|line| line.strip_prefix("SHA256="))
+        .expect("a pinned SHA256");
+    assert_eq!(pinned.len(), 64);
+    assert!(pinned.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    assert!(snippet.contains("sha256sum -c -"));
+    assert!(
+        !snippet.contains(".sha256\""),
+        "the snippet does not download the .sha256 file"
     );
 }
 
