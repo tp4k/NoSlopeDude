@@ -480,6 +480,20 @@ fn test_candidate_deleting_a_base_ignore_line_exposes_the_files() {
 }
 
 #[test]
+fn test_a_candidate_ignored_ancestor_still_skips_a_base_ignored_directory() {
+    let fx = fixture();
+    fx.commit(&[(".gitignore", b"a/b/\n")]);
+    fx.disk(".gitignore", b"a/\n");
+    fx.disk("a/b/X.java", violating("X").as_bytes());
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert!(fx.repo.is_path_ignored("a/b/X.java").expect("git"));
+    assert!(complexity_paths(&outcome).is_empty());
+    assert_eq!(outcome.exit_status, EXIT_PASS);
+}
+
+#[test]
 fn test_deeper_base_gitignore_negation_overrides_a_parent_rule() {
     let fx = fixture();
     fx.commit(&[
