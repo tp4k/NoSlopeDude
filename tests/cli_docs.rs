@@ -345,17 +345,27 @@ fn test_release_workflow_publishes_only_from_a_tag() {
     let publish = job_steps(&workflow, "publish");
     let script = run_text(&publish[step_index(publish, PUBLISH_COMMAND)]);
     assert!(
-        script.contains("--draft"),
+        gh_release_args(script, "create").contains(&"--draft"),
         "a new release stays a draft until its assets upload"
     );
     assert!(
-        script.contains("--clobber"),
+        gh_release_args(script, "upload").contains(&"--clobber"),
         "a re-run replaces partially uploaded assets"
     );
     assert!(
-        script.contains("--draft=false"),
+        gh_release_args(script, "edit").contains(&"--draft=false"),
         "the release is published after the upload"
     );
+}
+
+fn gh_release_args<'a>(script: &'a str, subcommand: &str) -> Vec<&'a str> {
+    let prefix = format!("gh release {subcommand} ");
+    script
+        .lines()
+        .find_map(|line| line.trim().strip_prefix(prefix.as_str()))
+        .unwrap_or_else(|| panic!("no `{prefix}` line"))
+        .split_whitespace()
+        .collect()
 }
 
 #[test]
@@ -398,6 +408,11 @@ fn test_release_workflow_gives_the_write_token_only_to_the_publish_job() {
 fn test_release_build_runs_for_every_pull_request_and_main_push() {
     let (_, workflow) = release_workflow();
 
+    let triggers = workflow["on"].as_mapping().expect("triggers");
+    assert!(
+        triggers.contains_key("pull_request"),
+        "every pull request runs the build"
+    );
     assert!(
         workflow["on"]["pull_request"].is_null(),
         "the pull_request trigger has no paths or branches filter"
