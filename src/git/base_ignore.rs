@@ -14,7 +14,7 @@ use git2::Repository;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use ignore::Match;
 
-use super::snapshot::{repo_path_to_fs, CommitSnapshot, EntryKind, SOURCE_CEILING_BYTES};
+use super::snapshot::{repo_path_to_fs, CommitSnapshot, SOURCE_CEILING_BYTES};
 use super::GitError;
 
 const GITIGNORE_NAME: &[u8] = b".gitignore";
@@ -35,7 +35,8 @@ pub(super) struct BaseIgnore<'a> {
     base: &'a CommitSnapshot,
     workdir: PathBuf,
     /// Directory (raw bytes, `""` for the root) to its `.gitignore` entry in
-    /// the base snapshot, for `Regular`/`Executable` entries only.
+    /// the base snapshot. `CommitSnapshot::read` yields nothing for a
+    /// non-regular entry, so a symlinked `.gitignore` contributes no rules.
     base_files: HashMap<Vec<u8>, usize>,
     base_matchers: HashMap<Vec<u8>, Option<Gitignore>>,
     candidate_matchers: HashMap<Vec<u8>, Option<Gitignore>>,
@@ -49,9 +50,6 @@ impl<'a> BaseIgnore<'a> {
     ) -> BaseIgnore<'a> {
         let mut base_files = HashMap::new();
         for (index, entry) in base.entries.iter().enumerate() {
-            if !matches!(entry.kind, EntryKind::Regular | EntryKind::Executable) {
-                continue;
-            }
             let bytes = entry.path.as_bytes();
             let (dir, name) = match bytes.iter().rposition(|byte| *byte == b'/') {
                 Some(slash) => (&bytes[..slash], &bytes[slash + 1..]),
