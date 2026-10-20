@@ -629,8 +629,8 @@ pub(crate) fn has_git_marker(dir: &Path) -> bool {
     fs::symlink_metadata(dir.join(GIT_DIR_NAME)).is_ok()
 }
 
-/// Adds every untracked worktree entry under `prefix` to `by_path` (D6:
-/// ignoring the candidate's own `.gitignore`), skipping the `tracked` paths
+/// Adds every untracked worktree entry under `prefix` to `by_path` (D6: all
+/// of them unless `ignore_rules` says otherwise), skipping the `tracked` paths
 /// already handled by the index overlay and any path with a `.git`
 /// component (built-in exclusion, D7 defence in depth). A directory is
 /// skipped only when it is a `tracked_submodules` path; a directory that
