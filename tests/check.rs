@@ -335,6 +335,204 @@ fn test_worktree_mode_sees_unstaged_and_untracked_files() {
 }
 
 // ---------------------------------------------------------------------
+// Base-ignore filter for `--worktree` (an untracked entry is left out only
+// when the base snapshot's `.gitignore` rules AND the candidate's own
+// `.gitignore` files both ignore it).
+// ---------------------------------------------------------------------
+
+fn violating(name: &str) -> String {
+    java_class(name, HIGH_CC_IFS, 0)
+}
+
+fn complexity_paths(outcome: &CheckOutcome) -> Vec<String> {
+    let mut paths: Vec<String> = complexity_lines(outcome)
+        .into_iter()
+        .map(|(path, _, _)| path)
+        .collect();
+    paths.sort();
+    paths
+}
+
+/// Restores a directory's mode on drop so a failing assertion cannot leave
+/// an undeletable directory behind in the temp tree.
+#[cfg(unix)]
+struct Unlock(std::path::PathBuf);
+
+#[cfg(unix)]
+impl Drop for Unlock {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn test_worktree_skips_untracked_files_the_base_gitignore_ignores() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fx = fixture();
+    fx.commit(&[
+        (".gitignore", b"playwright-report/\n"),
+        ("Foo.java", java_class("Foo", LOW_CC_IFS, 0).as_bytes()),
+    ]);
+    fx.disk(
+        "playwright-report/trace/assets/codeMirrorModule-x.java",
+        violating("Minified").as_bytes(),
+    );
+    let locked = fx.dir.path().join("playwright-report/locked");
+    fs::create_dir_all(&locked).expect("create the locked directory");
+    let _unlock = Unlock(locked.clone());
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).expect("lock the directory");
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    assert_eq!(outcome.exit_status, EXIT_PASS);
+}
+
+#[test]
+fn test_candidate_gitignore_addition_hides_nothing() {
+    let fx = fixture();
+    fx.commit(&[(".gitignore", b"build/\n")]);
+    fx.disk(".gitignore", b"build/\nhidden/\n");
+    fx.disk("hidden/X.java", violating("X").as_bytes());
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert_eq!(complexity_paths(&outcome), vec!["hidden/X.java"]);
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
+#[test]
+fn test_tracked_file_under_a_base_ignored_directory_is_still_checked() {
+    let fx = fixture();
+    fx.commit(&[
+        (".gitignore", b"codegen/\n"),
+        ("codegen/T.java", java_class("T", LOW_CC_IFS, 0).as_bytes()),
+    ]);
+    fx.disk("codegen/T.java", violating("T").as_bytes());
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert_eq!(complexity_paths(&outcome), vec!["codegen/T.java"]);
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
+#[test]
+fn test_base_gitignore_negation_reincludes_an_untracked_file() {
+    let fx = fixture();
+    fx.commit(&[(".gitignore", b"emitted/*\n!emitted/Keep.java\n")]);
+    fx.disk("emitted/Keep.java", violating("Keep").as_bytes());
+    fx.disk("emitted/Other.java", violating("Other").as_bytes());
+    assert!(!fx.repo.is_path_ignored("emitted/Keep.java").expect("git"));
+    assert!(fx.repo.is_path_ignored("emitted/Other.java").expect("git"));
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert_eq!(complexity_paths(&outcome), vec!["emitted/Keep.java"]);
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+
+    // Git: a parent-directory exclusion cannot be re-included.
+    let excluded = fixture();
+    excluded.commit(&[(".gitignore", b"emitted/\n!emitted/Keep.java\n")]);
+    excluded.disk("emitted/Keep.java", violating("Keep").as_bytes());
+    assert!(excluded
+        .repo
+        .is_path_ignored("emitted/Keep.java")
+        .expect("git"));
+
+    let skipped = excluded.check(base_mode("HEAD", true));
+
+    assert!(skipped.diagnostics.is_empty(), "{:?}", skipped.diagnostics);
+    assert_eq!(skipped.exit_status, EXIT_PASS);
+}
+
+#[test]
+fn test_nested_base_gitignore_applies_only_below_its_directory() {
+    let fx = fixture();
+    fx.commit(&[("sub/.gitignore", b"gen.java\n")]);
+    fx.disk("sub/gen.java", violating("SubGen").as_bytes());
+    fx.disk("sub/deep/gen.java", violating("DeepGen").as_bytes());
+    fx.disk("gen.java", violating("RootGen").as_bytes());
+    fx.disk("other/gen.java", violating("OtherGen").as_bytes());
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert_eq!(
+        complexity_paths(&outcome),
+        vec!["gen.java", "other/gen.java"]
+    );
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
+#[test]
+fn test_candidate_deleting_a_base_ignore_line_exposes_the_files() {
+    let fx = fixture();
+    fx.commit(&[(".gitignore", b"tmp/\n")]);
+    fx.disk(".gitignore", b"");
+    fx.disk("tmp/X.java", violating("X").as_bytes());
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert_eq!(complexity_paths(&outcome), vec!["tmp/X.java"]);
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
+#[test]
+fn test_deeper_base_gitignore_negation_overrides_a_parent_rule() {
+    let fx = fixture();
+    fx.commit(&[
+        (".gitignore", b"*.gen.java\n"),
+        ("sub/.gitignore", b"!keep.gen.java\n"),
+    ]);
+    fx.disk("sub/keep.gen.java", violating("KeepGen").as_bytes());
+    fx.disk("sub/x.gen.java", violating("XGen").as_bytes());
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert_eq!(complexity_paths(&outcome), vec!["sub/keep.gen.java"]);
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
+#[test]
+fn test_directory_only_base_pattern_does_not_skip_a_file_of_that_name() {
+    let fx = fixture();
+    fx.commit(&[(".gitignore", b"Gen.java/\n")]);
+    fx.disk("Gen.java", violating("Gen").as_bytes());
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert_eq!(complexity_paths(&outcome), vec!["Gen.java"]);
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
+#[test]
+fn test_info_exclude_and_core_excludes_file_do_not_skip_in_check() {
+    let fx = fixture();
+    fx.commit(&[(".gitignore", b"build/\n")]);
+    let info = fx.dir.path().join(".git/info");
+    fs::create_dir_all(&info).expect("create .git/info");
+    fs::write(info.join("exclude"), b"Excluded.java\n").expect("write info/exclude");
+    let global = fx.dir.path().join(".git/global-excludes");
+    fs::write(&global, b"Global.java\n").expect("write the excludes file");
+    fx.repo
+        .config()
+        .and_then(|mut config| config.set_str("core.excludesFile", &global.display().to_string()))
+        .expect("set core.excludesFile");
+    fx.disk("Excluded.java", violating("Excluded").as_bytes());
+    fx.disk("Global.java", violating("Global").as_bytes());
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert_eq!(
+        complexity_paths(&outcome),
+        vec!["Excluded.java", "Global.java"]
+    );
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
+// ---------------------------------------------------------------------
 // Internal failures are diagnostics.
 // ---------------------------------------------------------------------
 
