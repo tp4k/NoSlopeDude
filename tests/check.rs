@@ -641,6 +641,70 @@ fn test_a_bom_prefixed_base_gitignore_still_ignores_its_first_pattern() {
     assert_eq!(outcome.exit_status, EXIT_PASS);
 }
 
+/// Git's own verdict (the CLI, not libgit2) on whether `path` is ignored.
+fn git_cli_ignores(fx: &Fixture, path: &str) -> bool {
+    let status = std::process::Command::new("git")
+        .arg("-C")
+        .arg(fx.dir.path())
+        .args(["check-ignore", "--no-index", "-q", "--", path])
+        .status()
+        .expect("run git check-ignore");
+    status.success()
+}
+
+#[test]
+fn test_trailing_non_space_whitespace_in_a_gitignore_pattern_does_not_skip_the_trimmed_name() {
+    let rules: &[u8] = b"Tab.java\t\nNbsp.java\xc2\xa0\nSpaces.java  \n";
+    let fx = fixture();
+    fx.commit(&[(".gitignore", rules)]);
+    fx.disk(".gitignore", rules);
+    for name in ["Tab", "Nbsp", "Spaces"] {
+        fx.disk(&format!("{name}.java"), violating(name).as_bytes());
+    }
+    assert!(!git_cli_ignores(&fx, "Tab.java"));
+    assert!(!git_cli_ignores(&fx, "Nbsp.java"));
+    assert!(git_cli_ignores(&fx, "Spaces.java"));
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert_eq!(complexity_paths(&outcome), vec!["Nbsp.java", "Tab.java"]);
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
+#[test]
+fn test_a_negation_ending_in_a_tab_still_reincludes_the_file_git_reincludes() {
+    let rules: &[u8] = b"gen*\n!gen\t\n";
+    let fx = fixture();
+    fx.commit(&[(".gitignore", rules)]);
+    fx.disk(".gitignore", rules);
+    fx.disk("gen\t/X.java", violating("TabDir").as_bytes());
+    fx.disk("generated/X.java", violating("Generated").as_bytes());
+    assert!(!git_cli_ignores(&fx, "gen\t/X.java"));
+    assert!(git_cli_ignores(&fx, "generated/X.java"));
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert_eq!(complexity_paths(&outcome), vec!["gen\t/X.java"]);
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
+#[test]
+fn test_a_non_utf8_gitignore_line_does_not_skip_a_replacement_char_name() {
+    let rules: &[u8] = b"X\xff.java\nPlain.java\n";
+    let fx = fixture();
+    fx.commit(&[(".gitignore", rules)]);
+    fx.disk(".gitignore", rules);
+    fx.disk("X\u{FFFD}.java", violating("Replaced").as_bytes());
+    fx.disk("Plain.java", violating("Plain").as_bytes());
+    assert!(!git_cli_ignores(&fx, "X\u{FFFD}.java"));
+    assert!(git_cli_ignores(&fx, "Plain.java"));
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert_eq!(complexity_paths(&outcome), vec!["X\u{FFFD}.java"]);
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
 // ---------------------------------------------------------------------
 // Internal failures are diagnostics.
 // ---------------------------------------------------------------------
