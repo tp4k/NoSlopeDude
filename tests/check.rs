@@ -705,6 +705,38 @@ fn test_a_non_utf8_gitignore_line_does_not_skip_a_replacement_char_name() {
     assert_eq!(outcome.exit_status, EXIT_REGRESSION);
 }
 
+#[test]
+fn test_a_negation_ending_in_nbsp_is_widened_by_its_byte_length() {
+    let rules: &[u8] = b"gen*\n!gen\xc2\xa0\n";
+    let fx = fixture();
+    fx.commit(&[(".gitignore", rules)]);
+    fx.disk(".gitignore", rules);
+    fx.disk("gen\u{a0}/X.java", violating("NbspDir").as_bytes());
+    fx.disk("genp/X.java", violating("Genp").as_bytes());
+    assert!(!git_cli_ignores(&fx, "gen\u{a0}/X.java"));
+    assert!(git_cli_ignores(&fx, "genp/X.java"));
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert_eq!(complexity_paths(&outcome), vec!["gen\u{a0}/X.java"]);
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
+#[test]
+fn test_a_non_utf8_negation_is_widened_never_dropped() {
+    let rules: &[u8] = b"bad*\n!bad\xff\n";
+    let fx = fixture();
+    fx.commit(&[(".gitignore", rules)]);
+    fx.disk(".gitignore", rules);
+    fx.disk("bad\u{FFFD}/X.java", violating("Widened").as_bytes());
+    assert!(git_cli_ignores(&fx, "bad\u{FFFD}/X.java"));
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert_eq!(complexity_paths(&outcome), vec!["bad\u{FFFD}/X.java"]);
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
 // ---------------------------------------------------------------------
 // Internal failures are diagnostics.
 // ---------------------------------------------------------------------
