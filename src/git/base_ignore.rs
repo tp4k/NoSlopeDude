@@ -18,7 +18,7 @@ use super::snapshot::{repo_path_to_fs, CommitSnapshot, SOURCE_CEILING_BYTES};
 use super::GitError;
 
 const GITIGNORE_NAME: &[u8] = b".gitignore";
-const UTF8_BOM: char = '\u{feff}';
+const UTF8_BOM: [u8; 3] = [0xEF, 0xBB, 0xBF];
 /// `ignore`'s builder strips a leading `./` and, for a root of `.`, strips
 /// nothing else, so paths handed to `matched` stay relative to their own
 /// `.gitignore` directory.
@@ -214,15 +214,100 @@ fn decide(matcher: Option<&Gitignore>, relative: &[u8], node_is_dir: bool) -> Ma
     }
 }
 
-/// A matcher from `.gitignore` bytes, decoded lossily, with one leading
-/// UTF-8 BOM stripped as git does; a line the builder rejects is skipped,
-/// as git skips a bad pattern.
+/// A matcher from `.gitignore` bytes. One leading UTF-8 BOM is stripped as
+/// git does, and each line loses a trailing CR and its trailing unescaped
+/// spaces (git trims only U+0020). A line the `ignore` matcher cannot match
+/// byte-exactly (invalid UTF-8, or trailing non-space whitespace that the
+/// matcher would trim) never skips anything: an ignore line is dropped and a
+/// negation is widened to re-include a superset. A line the builder rejects
+/// is skipped, as git skips a bad pattern.
 fn build_matcher(bytes: &[u8]) -> Option<Gitignore> {
     let mut builder = GitignoreBuilder::new(MATCHER_ROOT);
-    let text = String::from_utf8_lossy(bytes);
-    let text = text.strip_prefix(UTF8_BOM).unwrap_or(&text);
-    for line in text.lines() {
-        let _ = builder.add_line(None, line);
+    let bytes = bytes.strip_prefix(UTF8_BOM.as_slice()).unwrap_or(bytes);
+    let mut lines: Vec<&[u8]> = bytes.split(|byte| *byte == b'\n').collect();
+    if lines.last().is_some_and(|line| line.is_empty()) {
+        lines.pop();
+    }
+    for line in lines {
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        if let Some(pattern) = representable(line) {
+            let _ = builder.add_line(None, &pattern);
+        }
     }
     builder.build().ok()
+}
+
+/// The text to hand to the builder for one `.gitignore` line, or `None` when
+/// the line must contribute no rule.
+fn representable(line: &[u8]) -> Option<String> {
+    let negation = line.first() == Some(&b'!');
+    let text = match std::str::from_utf8(line) {
+        Ok(text) => text.to_string(),
+        Err(_) if negation => widen_invalid_bytes(line),
+        Err(_) => return None,
+    };
+    if text.starts_with('#') {
+        return Some(text);
+    }
+    let trimmed = trim_unescaped_trailing_spaces(&text);
+    let tail = trimmed
+        .trim_end_matches(|ch: char| ch.is_whitespace() && ch != ' ')
+        .len();
+    if tail == trimmed.len() {
+        return Some(trimmed.to_string());
+    }
+    if !negation {
+        return None;
+    }
+    let mut widened = trimmed[..tail].to_string();
+    for ch in trimmed[tail..].chars() {
+        widened.extend(std::iter::repeat_n('?', ch.len_utf8()));
+    }
+    Some(widened)
+}
+
+/// Git's `trim_trailing_spaces`: drop trailing U+0020 unless a backslash
+/// escapes the space.
+fn trim_unescaped_trailing_spaces(text: &str) -> &str {
+    let mut last_space = None;
+    let mut chars = text.char_indices();
+    while let Some((index, ch)) = chars.next() {
+        match ch {
+            ' ' => {
+                last_space.get_or_insert(index);
+            }
+            '\\' => {
+                if chars.next().is_none() {
+                    return text;
+                }
+                last_space = None;
+            }
+            _ => last_space = None,
+        }
+    }
+    last_space.map_or(text, |index| &text[..index])
+}
+
+/// A negation line with each maximal run of invalid UTF-8 replaced by `*`,
+/// which matches a superset of the bytes it replaces.
+fn widen_invalid_bytes(line: &[u8]) -> String {
+    let mut widened = String::new();
+    let mut rest = line;
+    while !rest.is_empty() {
+        match std::str::from_utf8(rest) {
+            Ok(text) => {
+                widened.push_str(text);
+                break;
+            }
+            Err(error) => {
+                let (valid, invalid) = rest.split_at(error.valid_up_to());
+                widened.push_str(&String::from_utf8_lossy(valid));
+                if !widened.ends_with('*') {
+                    widened.push('*');
+                }
+                rest = &invalid[error.error_len().unwrap_or(invalid.len())..];
+            }
+        }
+    }
+    widened
 }
