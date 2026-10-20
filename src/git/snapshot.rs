@@ -207,7 +207,7 @@ impl WorktreeSnapshot {
         let workdir = worktree_dir(repo)?;
         Self::open_with(
             repo,
-            IgnoreFilter::Base(BaseIgnore::new(repo, base, workdir)),
+            IgnoreFilter::Base(Box::new(BaseIgnore::new(repo, base, workdir))),
         )
     }
 
@@ -773,7 +773,7 @@ enum IgnoreFilter<'a> {
     /// The repository's own rules (`scan`, D22).
     Repository(&'a Repository),
     /// Base-tree `.gitignore` AND candidate `.gitignore` (`check --worktree`).
-    Base(BaseIgnore<'a>),
+    Base(Box<BaseIgnore<'a>>),
 }
 
 impl IgnoreFilter<'_> {

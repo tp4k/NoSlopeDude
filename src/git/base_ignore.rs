@@ -21,6 +21,7 @@ const GITIGNORE_NAME: &[u8] = b".gitignore";
 /// `ignore`'s builder strips a leading `./` and, for a root of `.`, strips
 /// nothing else, so paths handed to `matched` stay relative to their own
 /// `.gitignore` directory.
+const UTF8_BOM: char = '\u{feff}';
 const MATCHER_ROOT: &str = ".";
 
 #[derive(Clone, Copy)]
@@ -40,6 +41,9 @@ pub(super) struct BaseIgnore<'a> {
     base_files: HashMap<Vec<u8>, usize>,
     base_matchers: HashMap<Vec<u8>, Option<Gitignore>>,
     candidate_matchers: HashMap<Vec<u8>, Option<Gitignore>>,
+    /// Directory to "ignored on this side, ancestors included".
+    base_dirs: HashMap<Vec<u8>, bool>,
+    candidate_dirs: HashMap<Vec<u8>, bool>,
 }
 
 impl<'a> BaseIgnore<'a> {
@@ -66,6 +70,8 @@ impl<'a> BaseIgnore<'a> {
             base_files,
             base_matchers: HashMap::new(),
             candidate_matchers: HashMap::new(),
+            base_dirs: HashMap::new(),
+            candidate_dirs: HashMap::new(),
         }
     }
 
@@ -78,64 +84,90 @@ impl<'a> BaseIgnore<'a> {
     }
 
     /// Git's top-down rule: a path is ignored when any ancestor directory is
-    /// ignored (a child cannot be re-included) or the path itself is.
+    /// ignored (a child cannot be re-included) or the path itself is. The
+    /// walk is top-down, so each parent's verdict is memoized per side.
     fn ignores(&mut self, side: Side, path: &[u8], is_dir: bool) -> Result<bool, GitError> {
-        let components: Vec<&[u8]> = path.split(|byte| *byte == b'/').collect();
-        for node in 0..components.len() {
-            let node_is_dir = node + 1 < components.len() || is_dir;
-            if self.node_ignored(side, &components, node, node_is_dir)? {
-                return Ok(true);
+        let ignored = match path.iter().rposition(|byte| *byte == b'/') {
+            Some(slash) => {
+                self.dir_ignored(side, &path[..slash])? || self.node_ignored(side, path, is_dir)?
             }
+            None => self.node_ignored(side, path, is_dir)?,
+        };
+        if is_dir {
+            self.dir_memo(side).insert(path.to_vec(), ignored);
         }
-        Ok(false)
+        Ok(ignored)
     }
 
-    /// The verdict for `components[..=node]`: the deepest `.gitignore` with
-    /// a matching line decides; a whitelist line un-ignores.
+    /// Whether directory `dir` is ignored on `side`, ancestors included.
+    fn dir_ignored(&mut self, side: Side, dir: &[u8]) -> Result<bool, GitError> {
+        if let Some(ignored) = self.dir_memo(side).get(dir) {
+            return Ok(*ignored);
+        }
+        self.ignores(side, dir, true)
+    }
+
+    fn dir_memo(&mut self, side: Side) -> &mut HashMap<Vec<u8>, bool> {
+        match side {
+            Side::Base => &mut self.base_dirs,
+            Side::Candidate => &mut self.candidate_dirs,
+        }
+    }
+
+    /// The verdict for `node` alone (its ancestors are not asked): the
+    /// deepest `.gitignore` with a matching line decides; a whitelist line
+    /// un-ignores. Every ancestor of `node` is a directory.
     fn node_ignored(
         &mut self,
         side: Side,
-        components: &[&[u8]],
-        node: usize,
+        node: &[u8],
         node_is_dir: bool,
     ) -> Result<bool, GitError> {
-        for depth in (0..=node).rev() {
-            let dir = components[..depth].join(&b'/');
-            let relative = components[depth..=node].join(&b'/');
-            let Some(matcher) = self.matcher(side, dir)? else {
-                continue;
+        let mut dir_end = node.iter().rposition(|byte| *byte == b'/');
+        loop {
+            let (dir, relative) = match dir_end {
+                Some(slash) => (&node[..slash], &node[slash + 1..]),
+                None => (&node[..0], node),
             };
-            let relative = repo_path_to_fs(Path::new(""), &relative);
-            match matcher.matched(&relative, node_is_dir) {
-                Match::Ignore(_) => return Ok(true),
-                Match::Whitelist(_) => return Ok(false),
+            match self.verdict(side, dir, relative, node_is_dir)? {
+                Match::Ignore(()) => return Ok(true),
+                Match::Whitelist(()) => return Ok(false),
                 Match::None => {}
             }
+            let Some(slash) = dir_end else {
+                return Ok(false);
+            };
+            dir_end = node[..slash].iter().rposition(|byte| *byte == b'/');
         }
-        Ok(false)
     }
 
-    fn matcher(&mut self, side: Side, dir: Vec<u8>) -> Result<Option<&Gitignore>, GitError> {
+    /// What the `.gitignore` of `dir` says about `relative` (a path under
+    /// `dir`); the matcher is built and cached on first use.
+    fn verdict(
+        &mut self,
+        side: Side,
+        dir: &[u8],
+        relative: &[u8],
+        node_is_dir: bool,
+    ) -> Result<Match<()>, GitError> {
         let cached = match side {
-            Side::Base => self.base_matchers.contains_key(&dir),
-            Side::Candidate => self.candidate_matchers.contains_key(&dir),
+            Side::Base => self.base_matchers.get(dir),
+            Side::Candidate => self.candidate_matchers.get(dir),
         };
-        if !cached {
-            let bytes = match side {
-                Side::Base => self.read_base(&dir)?,
-                Side::Candidate => self.read_candidate(&dir),
-            };
-            let built = bytes.as_deref().and_then(build_matcher);
-            match side {
-                Side::Base => self.base_matchers.insert(dir.clone(), built),
-                Side::Candidate => self.candidate_matchers.insert(dir.clone(), built),
-            };
+        if let Some(matcher) = cached {
+            return Ok(decide(matcher.as_ref(), relative, node_is_dir));
         }
-        let cache = match side {
-            Side::Base => &self.base_matchers,
-            Side::Candidate => &self.candidate_matchers,
+        let bytes = match side {
+            Side::Base => self.read_base(dir)?,
+            Side::Candidate => self.read_candidate(dir),
         };
-        Ok(cache.get(&dir).and_then(Option::as_ref))
+        let built = bytes.as_deref().and_then(build_matcher);
+        let decision = decide(built.as_ref(), relative, node_is_dir);
+        match side {
+            Side::Base => self.base_matchers.insert(dir.to_vec(), built),
+            Side::Candidate => self.candidate_matchers.insert(dir.to_vec(), built),
+        };
+        Ok(decision)
     }
 
     /// The base `.gitignore` blob of `dir`; `None` when absent or over the
@@ -169,11 +201,27 @@ impl<'a> BaseIgnore<'a> {
     }
 }
 
-/// A matcher from `.gitignore` bytes, decoded lossily; a line the builder
-/// rejects is skipped, as git skips a bad pattern.
+/// The match of `relative` against an optional matcher, as an owned verdict.
+fn decide(matcher: Option<&Gitignore>, relative: &[u8], node_is_dir: bool) -> Match<()> {
+    let Some(matcher) = matcher else {
+        return Match::None;
+    };
+    let relative = repo_path_to_fs(Path::new(""), relative);
+    match matcher.matched(&relative, node_is_dir) {
+        Match::Ignore(_) => Match::Ignore(()),
+        Match::Whitelist(_) => Match::Whitelist(()),
+        Match::None => Match::None,
+    }
+}
+
+/// A matcher from `.gitignore` bytes, decoded lossily, with one leading
+/// UTF-8 BOM stripped as git does; a line the builder rejects is skipped,
+/// as git skips a bad pattern.
 fn build_matcher(bytes: &[u8]) -> Option<Gitignore> {
     let mut builder = GitignoreBuilder::new(MATCHER_ROOT);
-    for line in String::from_utf8_lossy(bytes).lines() {
+    let text = String::from_utf8_lossy(bytes);
+    let text = text.strip_prefix(UTF8_BOM).unwrap_or(&text);
+    for line in text.lines() {
         let _ = builder.add_line(None, line);
     }
     builder.build().ok()
