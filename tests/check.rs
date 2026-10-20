@@ -532,6 +532,70 @@ fn test_info_exclude_and_core_excludes_file_do_not_skip_in_check() {
     assert_eq!(outcome.exit_status, EXIT_REGRESSION);
 }
 
+#[test]
+fn test_a_base_ignored_parent_directory_cannot_be_reincluded_by_a_child_negation() {
+    let fx = fixture();
+    fx.commit(&[(".gitignore", b"emitted/\n!emitted/Keep.java\n")]);
+    fx.disk(".gitignore", b"Keep.java\n");
+    fx.disk("emitted/Keep.java", violating("Keep").as_bytes());
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    assert_eq!(outcome.exit_status, EXIT_PASS);
+}
+
+#[cfg(unix)]
+#[test]
+fn test_a_symlinked_gitignore_contributes_no_rules_on_either_side() {
+    let base_link = fixture();
+    let blob: Vec<(Vec<u8>, i32, Vec<u8>)> =
+        vec![(b".gitignore".to_vec(), 0o120000, b"Linked.java".to_vec())];
+    common::commit_entries(&base_link.repo, &blob);
+    base_link.disk(".gitignore", b"Linked.java\n");
+    base_link.disk("Linked.java", violating("Linked").as_bytes());
+
+    let outcome = base_link.check(base_mode("HEAD", true));
+
+    assert_eq!(complexity_paths(&outcome), vec!["Linked.java"]);
+
+    let candidate_link = fixture();
+    candidate_link.commit(&[(".gitignore", b"Linked.java\n")]);
+    fs::remove_file(candidate_link.dir.path().join(".gitignore")).expect("remove .gitignore");
+    fs::write(
+        candidate_link.dir.path().join("rules.txt"),
+        b"Linked.java\n",
+    )
+    .expect("rules");
+    std::os::unix::fs::symlink("rules.txt", candidate_link.dir.path().join(".gitignore"))
+        .expect("symlink .gitignore");
+    candidate_link.disk("Linked.java", violating("Linked").as_bytes());
+
+    let outcome = candidate_link.check(base_mode("HEAD", true));
+
+    assert_eq!(complexity_paths(&outcome), vec!["Linked.java"]);
+}
+
+#[test]
+fn test_an_over_ceiling_gitignore_contributes_no_rules_on_either_side() {
+    let mut oversized = b"big/\n".to_vec();
+    oversized.resize(ceiling() + 1, b'#');
+
+    let base_big = fixture();
+    base_big.commit(&[(".gitignore", oversized.as_slice())]);
+    base_big.disk(".gitignore", b"big/\n");
+    base_big.disk("big/X.java", violating("X").as_bytes());
+    let outcome = base_big.check(base_mode("HEAD", true));
+    assert_eq!(complexity_paths(&outcome), vec!["big/X.java"]);
+
+    let candidate_big = fixture();
+    candidate_big.commit(&[(".gitignore", b"big/\n")]);
+    candidate_big.disk(".gitignore", oversized.as_slice());
+    candidate_big.disk("big/X.java", violating("X").as_bytes());
+    let outcome = candidate_big.check(base_mode("HEAD", true));
+    assert_eq!(complexity_paths(&outcome), vec!["big/X.java"]);
+}
+
 // ---------------------------------------------------------------------
 // Internal failures are diagnostics.
 // ---------------------------------------------------------------------
