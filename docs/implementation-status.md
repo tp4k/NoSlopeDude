@@ -11,8 +11,8 @@ Every agent that finishes a piece of work updates its rows here in the same
 round; see *How to update this file* at the bottom and the matching rule in
 [`AGENTS.md`](../AGENTS.md).
 
-Last updated: 2026-10-19 (Linux release binary, PV-6, on `ci/linux-release`,
-verified against `main@a3a47c2`).
+Last updated: 2026-10-20 (release workflow hardening, PV-7, on
+`ci/release-hardening`, verified against `main@082b378`).
 
 ## Legend
 
@@ -172,7 +172,8 @@ Plan: the user request of 2026-10-19 (a report-only nsd job in another repositor
 
 | ID | Deliverable | Status |
 |---|---|---|
-| PV-6 | `0.1.1` with `license = "MIT"` and a root `LICENSE`; `.github/workflows/release.yml` publishes `nsd-x86_64-unknown-linux-musl.tar.gz` plus `.sha256` per `v*` tag (tag must equal the Cargo.toml version), and on a pull request that edits it runs test, build and smoke check without publishing; `self-check.yml` gains an `ubuntu-latest` leg; `docs/cli.md` *Release binary* | `[x]` — `066fdff`, `da06f5b`. Checks: `tests/cli_docs.rs::test_release_workflow_publishes_only_from_a_tag`, `::test_self_check_workflow_is_unprivileged_and_runs_on_macos_and_linux`, `::test_only_the_self_check_and_release_workflows_ship`; `cargo test --locked --no-fail-fast` 1035 passed, 0 failed (macOS). Hosted PR #18 run: `self-check (ubuntu-latest)` and `release / linux-musl` (tests, musl build, smoke `nsd check --base HEAD~1`, packaging) green; publishing first runs on the `v0.1.1` tag |
+| PV-6 | `0.1.1` with `license = "MIT"` and a root `LICENSE`; `.github/workflows/release.yml` publishes `nsd-x86_64-unknown-linux-musl.tar.gz` plus `.sha256` per `v*` tag (tag must equal the Cargo.toml version), and on a pull request that edits it runs test, build and smoke check without publishing; `self-check.yml` gains an `ubuntu-latest` leg; `docs/cli.md` *Release binary* | `[x]` — `066fdff`, `da06f5b`. Checks: `tests/cli_docs.rs::test_release_workflow_publishes_only_from_a_tag`, `::test_self_check_workflow_is_unprivileged_and_runs_on_macos_and_linux`, `::test_only_the_self_check_and_release_workflows_ship`; `cargo test --locked --no-fail-fast` 1035 passed, 0 failed (macOS). Hosted PR #18 run: `self-check (ubuntu-latest)` and `release / linux-musl` (tests, musl build, smoke `nsd check --base HEAD~1`, packaging) green. Tag run 39260936234 (`v0.1.1`, merged `main@082b378`) green: tag check and `gh release create` ran, the release carries both assets; PV-7 hardens this workflow |
+| PV-7 | Release workflow hardening after the PV-6 review: a read-only `build` job and a tag-only `publish` job that alone holds `contents: write` and checks nothing out; `build` runs on every pull request and `main` push; tests run on the shipped musl target; the smoke step asserts static linkage and runs `nsd check --base HEAD` (empty change set, verdict-independent); publishing is draft, `upload --clobber`, then un-draft, so a re-run completes a partial release; actions in both workflows pinned to commit SHAs; `docs/cli.md` pins the checksum value | `[~]` — branch `ci/release-hardening`. Checks: `tests/cli_docs.rs::test_release_workflow_publishes_only_from_a_tag`, `::test_release_workflow_gives_the_write_token_only_to_the_publish_job`, `::test_release_build_runs_for_every_pull_request_and_main_push`, `::test_release_build_tests_and_smoke_checks_the_shipped_target`, `::test_workflow_actions_are_pinned_to_a_commit`, `::test_release_snippet_pins_the_checksum_value`; the five workflow tests fail against `main`'s `release.yml`; `cargo test --locked --no-fail-fast` 1040 passed, 0 failed (macOS). Hosted PR #19 run 39402619453: `release / build` (musl tests, musl build, static assertion, smoke, packaging, artifact upload) green, `publish` skipped. Pending: the `publish` job first runs on the next tag |
 
 ## Standing gates and known debt
 
