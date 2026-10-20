@@ -18,10 +18,10 @@ use super::snapshot::{repo_path_to_fs, CommitSnapshot, SOURCE_CEILING_BYTES};
 use super::GitError;
 
 const GITIGNORE_NAME: &[u8] = b".gitignore";
+const UTF8_BOM: char = '\u{feff}';
 /// `ignore`'s builder strips a leading `./` and, for a root of `.`, strips
 /// nothing else, so paths handed to `matched` stay relative to their own
 /// `.gitignore` directory.
-const UTF8_BOM: char = '\u{feff}';
 const MATCHER_ROOT: &str = ".";
 
 #[derive(Clone, Copy)]
