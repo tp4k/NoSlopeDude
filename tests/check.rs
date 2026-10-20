@@ -706,6 +706,21 @@ fn test_a_non_utf8_gitignore_line_does_not_skip_a_replacement_char_name() {
 }
 
 #[test]
+fn test_a_tab_followed_by_a_space_is_not_trimmed_past_the_tab() {
+    let rules: &[u8] = b"TabSp.java\t \n";
+    let fx = fixture();
+    fx.commit(&[(".gitignore", rules)]);
+    fx.disk(".gitignore", rules);
+    fx.disk("TabSp.java", violating("TabSp").as_bytes());
+    assert!(!git_cli_ignores(&fx, "TabSp.java"));
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert_eq!(complexity_paths(&outcome), vec!["TabSp.java"]);
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
+#[test]
 fn test_a_negation_ending_in_nbsp_is_widened_by_its_byte_length() {
     let rules: &[u8] = b"gen*\n!gen\xc2\xa0\n";
     let fx = fixture();
