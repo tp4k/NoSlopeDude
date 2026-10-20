@@ -533,6 +533,22 @@ fn test_info_exclude_and_core_excludes_file_do_not_skip_in_check() {
 }
 
 #[test]
+fn test_an_anchored_nested_base_pattern_matches_only_in_its_own_directory() {
+    let fx = fixture();
+    fx.commit(&[("sub/.gitignore", b"/anchored.java\n")]);
+    fx.disk("sub/anchored.java", violating("Anchored").as_bytes());
+    fx.disk(
+        "sub/deep/anchored.java",
+        violating("DeepAnchored").as_bytes(),
+    );
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert_eq!(complexity_paths(&outcome), vec!["sub/deep/anchored.java"]);
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
+#[test]
 fn test_a_base_ignored_parent_directory_cannot_be_reincluded_by_a_child_negation() {
     let fx = fixture();
     fx.commit(&[(".gitignore", b"emitted/\n!emitted/Keep.java\n")]);
