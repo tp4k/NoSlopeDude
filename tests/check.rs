@@ -612,6 +612,21 @@ fn test_an_over_ceiling_gitignore_contributes_no_rules_on_either_side() {
     assert_eq!(complexity_paths(&outcome), vec!["big/X.java"]);
 }
 
+#[test]
+fn test_a_bom_prefixed_base_gitignore_still_ignores_its_first_pattern() {
+    let bom_rules: &[u8] = b"\xEF\xBB\xBFpw-report/\n";
+    let fx = fixture();
+    fx.commit(&[(".gitignore", bom_rules)]);
+    fx.disk(".gitignore", bom_rules);
+    fx.disk("pw-report/X.java", violating("X").as_bytes());
+    assert!(fx.repo.is_path_ignored("pw-report/X.java").expect("git"));
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    assert_eq!(outcome.exit_status, EXIT_PASS);
+}
+
 // ---------------------------------------------------------------------
 // Internal failures are diagnostics.
 // ---------------------------------------------------------------------
