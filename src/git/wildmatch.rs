@@ -8,9 +8,16 @@
 //! `*` met a `/`, so only a `**` further out can still help). Those two keep
 //! patterns such as `*a` repeated 64 times linear instead of exponential.
 
+use std::collections::HashMap;
+
 const SLASH: u8 = b'/';
 const STAR: u8 = b'*';
 const BACKSLASH: u8 = b'\\';
+
+/// Verdicts of `walk` calls made by a special `**` run, keyed by pattern and
+/// text position. Created on first use, so a pattern without such a run
+/// allocates nothing.
+type Memo = Option<HashMap<(usize, usize), Outcome>>;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Outcome {
@@ -23,18 +30,29 @@ enum Outcome {
 /// Whether `pattern` matches the whole of `text` under git's pathname
 /// wildmatch rules. Neither side is decoded: both are raw bytes.
 pub(super) fn wildmatch(pattern: &[u8], text: &[u8]) -> bool {
-    walk(pattern, 0, text, 0) == Outcome::Match
+    walk(pattern, 0, text, 0, &mut None) == Outcome::Match
+}
+
+/// `walk(pat, p, text, t)`, computed once per `(p, t)` for the caller.
+fn walk_memoized(pat: &[u8], p: usize, text: &[u8], t: usize, memo: &mut Memo) -> Outcome {
+    if let Some(known) = memo.as_ref().and_then(|table| table.get(&(p, t))) {
+        return *known;
+    }
+    let outcome = walk(pat, p, text, t, memo);
+    memo.get_or_insert_with(HashMap::new)
+        .insert((p, t), outcome);
+    outcome
 }
 
 /// Matches `pat[p..]` against `text[t..]`; `p == 0` is the pattern start.
-fn walk(pat: &[u8], mut p: usize, text: &[u8], mut t: usize) -> Outcome {
+fn walk(pat: &[u8], mut p: usize, text: &[u8], mut t: usize, memo: &mut Memo) -> Outcome {
     while p < pat.len() {
         let pattern_byte = pat[p];
         if t >= text.len() && pattern_byte != STAR {
             return Outcome::AbortAll;
         }
         match pattern_byte {
-            STAR => return star(pat, p, text, t),
+            STAR => return star(pat, p, text, t, memo),
             b'?' => {
                 if text[t] == SLASH {
                     return Outcome::NoMatch;
@@ -72,7 +90,7 @@ fn walk(pat: &[u8], mut p: usize, text: &[u8], mut t: usize) -> Outcome {
 }
 
 /// The star run starting at `pat[p]`, matched against `text[t..]`.
-fn star(pat: &[u8], p: usize, text: &[u8], t: usize) -> Outcome {
+fn star(pat: &[u8], p: usize, text: &[u8], t: usize, memo: &mut Memo) -> Outcome {
     let mut end = p + 1;
     let mut crosses_slash = false;
     if pat.get(end) == Some(&STAR) {
@@ -88,7 +106,9 @@ fn star(pat: &[u8], p: usize, text: &[u8], t: usize) -> Outcome {
         if at_segment_start && at_segment_end {
             // `**/` may match no directory at all, but only before a
             // literal `/`, not before an escaped one.
-            if pat.get(end) == Some(&SLASH) && walk(pat, end + 1, text, t) == Outcome::Match {
+            if pat.get(end) == Some(&SLASH)
+                && walk_memoized(pat, end + 1, text, t, memo) == Outcome::Match
+            {
                 return Outcome::Match;
             }
             crosses_slash = true;
@@ -119,7 +139,12 @@ fn star(pat: &[u8], p: usize, text: &[u8], t: usize) -> Outcome {
                 return Outcome::AbortToDoubleStar;
             }
         }
-        match walk(pat, end, text, cur) {
+        let outcome = if crosses_slash {
+            walk_memoized(pat, end, text, cur, memo)
+        } else {
+            walk(pat, end, text, cur, memo)
+        };
+        match outcome {
             Outcome::NoMatch => {
                 if !crosses_slash && text[cur] == SLASH {
                     return Outcome::AbortToDoubleStar;
