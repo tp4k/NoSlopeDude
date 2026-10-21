@@ -399,6 +399,7 @@ fn trim_unescaped_trailing_spaces(line: &[u8]) -> &[u8] {
 mod tests {
     use std::os::unix::fs::PermissionsExt;
 
+    use super::special_runs;
     use super::{fs, parse_rules, BaseIgnore, CommitSnapshot, Load, Repository};
 
     fn chained(runs: usize) -> Vec<u8> {
@@ -429,6 +430,13 @@ mod tests {
 
         let plain_stars = numbered(1_500, |i| format!("*a*b*c{i}\n"));
         assert!(parse_rules(&plain_stars).is_some(), "0 special runs");
+
+        let single_star_segments = numbered(1_500, |i| format!("*/*/x{i}\n"));
+        assert!(
+            parse_rules(&single_star_segments).is_some(),
+            "0 special runs: single-star segments"
+        );
+        assert_eq!(special_runs(b"*/*/x"), 0);
     }
 
     #[test]
