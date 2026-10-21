@@ -24,8 +24,6 @@ use super::GitError;
 
 const GITIGNORE_NAME: &[u8] = b".gitignore";
 const UTF8_BOM: [u8; 3] = [0xEF, 0xBB, 0xBF];
-/// Bytes that end the literal prefix of a pattern (git's glob specials).
-const GLOB_SPECIALS: &[u8] = b"*?[\\";
 /// A line with more star runs than this makes its file unavailable: the
 /// matcher recurses once per run, so the bound keeps the stack bounded.
 const MAX_STAR_RUNS_PER_LINE: usize = 1_000;
@@ -46,9 +44,6 @@ struct Rule {
     /// The pattern without `!`, the trailing `/` and (for an anchored
     /// pattern) the leading `/`.
     pattern: Vec<u8>,
-    /// Length of the literal prefix that git compares before wildmatching
-    /// the rest of an anchored pattern (counted on the stripped pattern).
-    literal_prefix: usize,
 }
 
 /// What one directory's `.gitignore` offers on one side.
@@ -293,11 +288,7 @@ impl Rule {
             };
             return wildmatch(&self.pattern, name);
         }
-        let prefix = self.literal_prefix;
-        if prefix > relative.len() || relative[..prefix] != self.pattern[..prefix] {
-            return false;
-        }
-        wildmatch(&self.pattern[prefix..], &relative[prefix..])
+        wildmatch(&self.pattern, relative)
     }
 }
 
@@ -350,20 +341,14 @@ fn parse_line(line: &[u8]) -> Option<Option<Rule>> {
         return None;
     }
     let basename = !body.contains(&b'/');
-    let mut literal_prefix = body
-        .iter()
-        .position(|byte| GLOB_SPECIALS.contains(byte))
-        .unwrap_or(body.len());
     if !basename && body[0] == b'/' {
         body = &body[1..];
-        literal_prefix -= 1;
     }
     Some(Some(Rule {
         negation,
         directory_only,
         basename,
         pattern: body.to_vec(),
-        literal_prefix,
     }))
 }
 
