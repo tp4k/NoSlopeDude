@@ -1102,6 +1102,34 @@ fn test_an_over_ceiling_nested_gitignore_stops_its_side_ignoring_below_it() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn test_an_unreadable_untracked_gitignore_fails_closed_with_g101_naming_it() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fx = fixture();
+    fx.commit(&[(".gitignore", b"*.java\n")]);
+    fx.disk(".gitignore", b"*.java\n");
+    fx.disk("p/.gitignore", b"!X.java\n");
+    fx.disk("p/X.java", violating("X").as_bytes());
+    fx.disk("Z.java", violating("Z").as_bytes());
+    let locked = fx.dir.path().join("p/.gitignore");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).expect("lock the file");
+    if fs::File::open(&locked).is_ok() {
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o644)).expect("unlock the file");
+        return;
+    }
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o644)).expect("unlock the file");
+    assert_eq!(codes(&outcome), vec![G101]);
+    let shown = format!("{:?}", outcome.diagnostics[0]);
+    assert!(shown.contains("p/.gitignore"), "{shown}");
+    assert_eq!(outcome.exit_status, EXIT_ERROR);
+    assert!(complexity_paths(&outcome).is_empty());
+}
+
 #[test]
 fn test_an_unavailable_ancestor_gitignore_outranks_a_deeper_match() {
     let oversized = over_ceiling(b"# oversized\n");
