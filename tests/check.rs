@@ -1102,6 +1102,31 @@ fn test_an_over_ceiling_nested_gitignore_stops_its_side_ignoring_below_it() {
     }
 }
 
+#[test]
+fn test_a_gitignore_over_the_double_star_budget_stops_its_side_ignoring() {
+    let mut chained = b"**/".repeat(600);
+    chained.extend_from_slice(b"x\n");
+    let mut over_budget = b"*.java\n".to_vec();
+    over_budget.extend_from_slice(&chained);
+    over_budget.extend_from_slice(&chained);
+
+    let control = fixture();
+    control.commit(&[(".gitignore", b"*.java\n")]);
+    control.disk(".gitignore", b"*.java\n");
+    control.disk("X.java", violating("X").as_bytes());
+    let outcome = control.check(base_mode("HEAD", true));
+    assert!(complexity_paths(&outcome).is_empty());
+    assert_eq!(outcome.exit_status, EXIT_PASS);
+
+    let fx = fixture();
+    fx.commit(&[(".gitignore", b"*.java\n")]);
+    fx.disk(".gitignore", over_budget.as_slice());
+    fx.disk("X.java", violating("X").as_bytes());
+    let outcome = fx.check(base_mode("HEAD", true));
+    assert_eq!(complexity_paths(&outcome), vec!["X.java"]);
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
 #[cfg(unix)]
 #[test]
 fn test_an_unreadable_untracked_gitignore_fails_closed_with_g101_naming_it() {

@@ -388,7 +388,37 @@ fn trim_unescaped_trailing_spaces(line: &[u8]) -> &[u8] {
 mod tests {
     use std::os::unix::fs::PermissionsExt;
 
-    use super::{fs, BaseIgnore, CommitSnapshot, Load, Repository};
+    use super::{fs, parse_rules, BaseIgnore, CommitSnapshot, Load, Repository};
+
+    fn chained(runs: usize) -> Vec<u8> {
+        let mut line = b"**/".repeat(runs);
+        line.extend_from_slice(b"x\n");
+        line
+    }
+
+    fn numbered(count: usize, make: impl Fn(usize) -> String) -> Vec<u8> {
+        (0..count)
+            .flat_map(|index| make(index).into_bytes())
+            .collect()
+    }
+
+    #[test]
+    fn test_too_many_double_star_runs_in_one_file_make_it_unavailable() {
+        let two_long = [chained(600), chained(600)].concat();
+        assert!(parse_rules(&two_long).is_none(), "1198 extra runs");
+
+        let one_long = [chained(1_000), b"*.log\ntarget/\n".to_vec()].concat();
+        assert!(parse_rules(&one_long).is_some(), "999 extra runs");
+
+        let at_budget = numbered(1_000, |i| format!("**/d{i}/**\n"));
+        assert!(parse_rules(&at_budget).is_some(), "1000 extra runs");
+
+        let single_runs = numbered(1_500, |i| format!("**/x{i}\n"));
+        assert!(parse_rules(&single_runs).is_some(), "0 extra runs");
+
+        let plain_stars = numbered(1_500, |i| format!("*a*b*c{i}\n"));
+        assert!(parse_rules(&plain_stars).is_some(), "0 special runs");
+    }
 
     #[test]
     fn test_an_unopenable_candidate_gitignore_is_unavailable_not_absent() {
