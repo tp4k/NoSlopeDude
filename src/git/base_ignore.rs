@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use git2::Repository;
 
 use super::snapshot::{repo_path_to_fs, CommitSnapshot, EntryKind, SOURCE_CEILING_BYTES};
-use super::wildmatch::wildmatch;
+use super::wildmatch::{special_runs, wildmatch};
 use super::GitError;
 
 const GITIGNORE_NAME: &[u8] = b".gitignore";
@@ -27,6 +27,10 @@ const UTF8_BOM: [u8; 3] = [0xEF, 0xBB, 0xBF];
 /// A line with more star runs than this makes its file unavailable: the
 /// matcher recurses once per run, so the bound keeps the stack bounded.
 const MAX_STAR_RUNS_PER_LINE: usize = 1_000;
+/// A file whose lines hold more special `**` runs than this, beyond each
+/// line's first, is unavailable: such a line costs the matcher time
+/// proportional to its runs times the path length, per path asked about.
+const MAX_EXTRA_DOUBLE_STAR_RUNS_PER_FILE: usize = 1_000;
 
 #[derive(Clone, Copy)]
 enum Side {
@@ -304,7 +308,9 @@ fn load_rules(bytes: &[u8]) -> Load {
 /// on `\n`; one `\r` before the `\n` is dropped; a line is a C string, so it
 /// is cut at its first NUL; an empty line and a line starting with `#` add
 /// nothing; trailing unescaped spaces are trimmed (U+0020 only). `None` when a
-/// line has more star runs than `MAX_STAR_RUNS_PER_LINE`.
+/// line has more star runs than `MAX_STAR_RUNS_PER_LINE`, or the file has more
+/// than `MAX_EXTRA_DOUBLE_STAR_RUNS_PER_FILE` special `**` runs beyond each
+/// line's first.
 fn parse_rules(bytes: &[u8]) -> Option<Vec<Rule>> {
     let bytes = bytes.strip_prefix(UTF8_BOM.as_slice()).unwrap_or(bytes);
     let mut lines: Vec<&[u8]> = bytes.split(|byte| *byte == b'\n').collect();
@@ -312,6 +318,7 @@ fn parse_rules(bytes: &[u8]) -> Option<Vec<Rule>> {
         lines.pop();
     }
     let mut rules = Vec::new();
+    let mut extra_double_star_runs = 0usize;
     for line in lines {
         let line = line.strip_suffix(b"\r").unwrap_or(line);
         let line = line.split(|byte| *byte == 0).next().unwrap_or(line);
@@ -319,6 +326,10 @@ fn parse_rules(bytes: &[u8]) -> Option<Vec<Rule>> {
             continue;
         }
         if let Some(rule) = parse_line(trim_unescaped_trailing_spaces(line))? {
+            extra_double_star_runs += special_runs(&rule.pattern).saturating_sub(1);
+            if extra_double_star_runs > MAX_EXTRA_DOUBLE_STAR_RUNS_PER_FILE {
+                return None;
+            }
             rules.push(rule);
         }
     }

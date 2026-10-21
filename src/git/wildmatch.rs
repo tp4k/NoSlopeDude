@@ -89,6 +89,37 @@ fn walk(pat: &[u8], mut p: usize, text: &[u8], mut t: usize, memo: &mut Memo) ->
     }
 }
 
+/// Whether the star run `pat[start..end]` is a whole-segment `**`: two or
+/// more stars after the pattern start or a `/`, before the end, `/` or `\/`.
+fn is_special_run(pat: &[u8], start: usize, end: usize) -> bool {
+    let at_segment_start = start == 0 || pat[start - 1] == SLASH;
+    let at_segment_end = match pat.get(end) {
+        None | Some(&SLASH) => true,
+        Some(&BACKSLASH) => pat.get(end + 1) == Some(&SLASH),
+        Some(_) => false,
+    };
+    end - start >= 2 && at_segment_start && at_segment_end
+}
+
+/// How many whole-segment `**` runs `pat` holds, as `star` sees them.
+pub(super) fn special_runs(pat: &[u8]) -> usize {
+    let mut count = 0;
+    let mut start = 0;
+    while start < pat.len() {
+        if pat[start] != STAR {
+            start += 1;
+            continue;
+        }
+        let mut end = start;
+        while pat.get(end) == Some(&STAR) {
+            end += 1;
+        }
+        count += usize::from(is_special_run(pat, start, end));
+        start = end;
+    }
+    count
+}
+
 /// The star run starting at `pat[p]`, matched against `text[t..]`.
 fn star(pat: &[u8], p: usize, text: &[u8], t: usize, memo: &mut Memo) -> Outcome {
     let mut end = p + 1;
@@ -97,13 +128,7 @@ fn star(pat: &[u8], p: usize, text: &[u8], t: usize, memo: &mut Memo) -> Outcome
         while pat.get(end) == Some(&STAR) {
             end += 1;
         }
-        let at_segment_start = p == 0 || pat[p - 1] == SLASH;
-        let at_segment_end = match pat.get(end) {
-            None | Some(&SLASH) => true,
-            Some(&BACKSLASH) => pat.get(end + 1) == Some(&SLASH),
-            Some(_) => false,
-        };
-        if at_segment_start && at_segment_end {
+        if is_special_run(pat, p, end) {
             // `**/` may match no directory at all, but only before a
             // literal `/`, not before an escaped one.
             if pat.get(end) == Some(&SLASH)
