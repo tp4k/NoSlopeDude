@@ -782,18 +782,18 @@ fn test_a_gitignore_line_outside_the_safe_subset_never_skips_a_file() {
 
 #[test]
 fn test_a_negation_outside_the_safe_subset_still_reincludes_what_git_reincludes() {
-    let rules: &[u8] = b"build/*\n!build/Gen{a,b}\nlib/*\n";
+    let rules: &[u8] = b"pkg/*\n!pkg/Gen{a,b}\nlib/*\n";
     let fx = fixture();
     fx.commit(&[(".gitignore", rules)]);
     fx.disk(".gitignore", rules);
-    fx.disk("build/Gen{a,b}/X.java", violating("Braced").as_bytes());
+    fx.disk("pkg/Gen{a,b}/X.java", violating("Braced").as_bytes());
     fx.disk("lib/Gena/X.java", violating("Lib").as_bytes());
-    assert!(!git_cli_ignores(&fx, "build/Gen{a,b}/X.java"));
+    assert!(!git_cli_ignores(&fx, "pkg/Gen{a,b}/X.java"));
     assert!(git_cli_ignores(&fx, "lib/Gena/X.java"));
 
     let outcome = fx.check(base_mode("HEAD", true));
 
-    assert_eq!(complexity_paths(&outcome), vec!["build/Gen{a,b}/X.java"]);
+    assert_eq!(complexity_paths(&outcome), vec!["pkg/Gen{a,b}/X.java"]);
     assert_eq!(outcome.exit_status, EXIT_REGRESSION);
 }
 
@@ -804,9 +804,9 @@ fn test_an_escaped_trailing_tab_in_a_negation_is_widened_without_its_backslash()
     fx.commit(&[(".gitignore", rules)]);
     fx.disk(".gitignore", rules);
     fx.disk("gen\t/X.java", violating("TabDir").as_bytes());
-    fx.disk("generated/X.java", violating("Generated").as_bytes());
+    fx.disk("genuine/X.java", violating("Genuine").as_bytes());
     assert!(!git_cli_ignores(&fx, "gen\t/X.java"));
-    assert!(git_cli_ignores(&fx, "generated/X.java"));
+    assert!(git_cli_ignores(&fx, "genuine/X.java"));
 
     let outcome = fx.check(base_mode("HEAD", true));
 
@@ -828,14 +828,14 @@ fn test_an_escaped_trailing_tab_in_a_negation_is_widened_without_its_backslash()
 
 #[test]
 fn test_an_invalid_byte_inside_a_negation_class_widens_the_whole_segment() {
-    let rules: &[u8] = b"bad*\n!bad[a-\xff]\nvendor/\n";
+    let rules: &[u8] = b"bad*\n!bad[a-\xff]\next/\n";
     let fx = fixture();
     fx.commit(&[(".gitignore", rules)]);
     fx.disk(".gitignore", rules);
     fx.disk("badz/X.java", violating("Badz").as_bytes());
-    fx.disk("vendor/X.java", violating("Vendor").as_bytes());
+    fx.disk("ext/X.java", violating("Ext").as_bytes());
     assert!(!git_cli_ignores(&fx, "badz/X.java"));
-    assert!(git_cli_ignores(&fx, "vendor/X.java"));
+    assert!(git_cli_ignores(&fx, "ext/X.java"));
 
     let outcome = fx.check(base_mode("HEAD", true));
 
