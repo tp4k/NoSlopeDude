@@ -383,3 +383,33 @@ fn trim_unescaped_trailing_spaces(line: &[u8]) -> &[u8] {
     }
     last_space.map_or(line, |index| &line[..index])
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
+    use super::{fs, BaseIgnore, CommitSnapshot, Load, Repository};
+
+    #[test]
+    fn test_an_unopenable_candidate_gitignore_is_unavailable_not_absent() {
+        let dir = tempfile::TempDir::new().expect("create the temp dir");
+        let repo = Repository::init(dir.path()).expect("init the repository");
+        let base = CommitSnapshot {
+            entries: Vec::new(),
+        };
+        fs::create_dir(dir.path().join("p")).expect("create p");
+        let locked = dir.path().join("p/.gitignore");
+        fs::write(&locked, b"!X.java\n").expect("write the file");
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).expect("lock the file");
+        let readable_anyway = fs::File::open(&locked).is_ok();
+        let ignore = BaseIgnore::new(&repo, &base, dir.path().to_path_buf());
+
+        let load = ignore.read_candidate(b"p");
+
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o644)).expect("unlock the file");
+        if readable_anyway {
+            return;
+        }
+        assert!(matches!(load, Load::Unavailable));
+    }
+}
