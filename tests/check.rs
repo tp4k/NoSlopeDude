@@ -752,6 +752,114 @@ fn test_a_non_utf8_negation_is_widened_never_dropped() {
     assert_eq!(outcome.exit_status, EXIT_REGRESSION);
 }
 
+#[test]
+fn test_a_gitignore_line_outside_the_safe_subset_never_skips_a_file() {
+    let rules: &[u8] =
+        b"Foo{a,b}.java\nCls[[:upper:]].java\nOk[a-c]?.java\n**/deep/*.java\n\\#Hash.java\n";
+    let fx = fixture();
+    fx.commit(&[(".gitignore", rules)]);
+    fx.disk(".gitignore", rules);
+    for (path, name) in [
+        ("Fooa.java", "Fooa"),
+        ("Clsu].java", "Clsu"),
+        ("Okb1.java", "Okb"),
+        ("x/deep/Y.java", "Deep"),
+        ("#Hash.java", "Hash"),
+    ] {
+        fx.disk(path, violating(name).as_bytes());
+    }
+    assert!(!git_cli_ignores(&fx, "Fooa.java"));
+    assert!(!git_cli_ignores(&fx, "Clsu].java"));
+    assert!(git_cli_ignores(&fx, "Okb1.java"));
+    assert!(git_cli_ignores(&fx, "x/deep/Y.java"));
+    assert!(git_cli_ignores(&fx, "#Hash.java"));
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert_eq!(complexity_paths(&outcome), vec!["Clsu].java", "Fooa.java"]);
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
+#[test]
+fn test_a_negation_outside_the_safe_subset_still_reincludes_what_git_reincludes() {
+    let rules: &[u8] = b"build/*\n!build/Gen{a,b}\nlib/*\n";
+    let fx = fixture();
+    fx.commit(&[(".gitignore", rules)]);
+    fx.disk(".gitignore", rules);
+    fx.disk("build/Gen{a,b}/X.java", violating("Braced").as_bytes());
+    fx.disk("lib/Gena/X.java", violating("Lib").as_bytes());
+    assert!(!git_cli_ignores(&fx, "build/Gen{a,b}/X.java"));
+    assert!(git_cli_ignores(&fx, "lib/Gena/X.java"));
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert_eq!(complexity_paths(&outcome), vec!["build/Gen{a,b}/X.java"]);
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
+#[test]
+fn test_an_escaped_trailing_tab_in_a_negation_is_widened_without_its_backslash() {
+    let rules: &[u8] = b"gen*\n!gen\\\t\n";
+    let fx = fixture();
+    fx.commit(&[(".gitignore", rules)]);
+    fx.disk(".gitignore", rules);
+    fx.disk("gen\t/X.java", violating("TabDir").as_bytes());
+    fx.disk("generated/X.java", violating("Generated").as_bytes());
+    assert!(!git_cli_ignores(&fx, "gen\t/X.java"));
+    assert!(git_cli_ignores(&fx, "generated/X.java"));
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert_eq!(complexity_paths(&outcome), vec!["gen\t/X.java"]);
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+
+    let pair_rules: &[u8] = b"gen*\n!gen\\\\\t\n";
+    let pair = fixture();
+    pair.commit(&[(".gitignore", pair_rules)]);
+    pair.disk(".gitignore", pair_rules);
+    pair.disk("gen\\\t/X.java", violating("PairDir").as_bytes());
+    assert!(!git_cli_ignores(&pair, "gen\\\t/X.java"));
+
+    let outcome = pair.check(base_mode("HEAD", true));
+
+    assert_eq!(complexity_paths(&outcome), vec!["gen\\\t/X.java"]);
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
+#[test]
+fn test_an_invalid_byte_inside_a_negation_class_widens_the_whole_segment() {
+    let rules: &[u8] = b"bad*\n!bad[a-\xff]\nvendor/\n";
+    let fx = fixture();
+    fx.commit(&[(".gitignore", rules)]);
+    fx.disk(".gitignore", rules);
+    fx.disk("badz/X.java", violating("Badz").as_bytes());
+    fx.disk("vendor/X.java", violating("Vendor").as_bytes());
+    assert!(!git_cli_ignores(&fx, "badz/X.java"));
+    assert!(git_cli_ignores(&fx, "vendor/X.java"));
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert_eq!(complexity_paths(&outcome), vec!["badz/X.java"]);
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
+#[test]
+fn test_a_gitignore_line_is_cut_at_its_first_nul_as_git_cuts_it() {
+    let rules: &[u8] = b"*.java\n!X.java\0garbage\n";
+    let fx = fixture();
+    fx.commit(&[(".gitignore", rules)]);
+    fx.disk(".gitignore", rules);
+    fx.disk("X.java", violating("X").as_bytes());
+    fx.disk("Y.java", violating("Y").as_bytes());
+    assert!(!git_cli_ignores(&fx, "X.java"));
+    assert!(git_cli_ignores(&fx, "Y.java"));
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert_eq!(complexity_paths(&outcome), vec!["X.java"]);
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
 // ---------------------------------------------------------------------
 // Internal failures are diagnostics.
 // ---------------------------------------------------------------------

@@ -311,3 +311,56 @@ fn widen_invalid_bytes(line: &[u8]) -> String {
     }
     widened
 }
+
+#[cfg(test)]
+mod tests {
+    use super::representable;
+
+    fn text(line: &[u8]) -> Option<String> {
+        representable(line)
+    }
+
+    #[test]
+    fn test_representable_keeps_the_safe_subset_and_widens_the_rest() {
+        let kept: [&[u8]; 11] = [
+            b"*.java",
+            b"out/*",
+            b"!out/keep.ts",
+            b"/a/**/b",
+            b"**/x",
+            b"x/**",
+            b"Ok[a-c]?.java",
+            b"[!x]y",
+            b"\\#h",
+            b"\\!b",
+            b"a\\ ",
+        ];
+        for line in kept {
+            let expected = String::from_utf8(line.to_vec()).expect("utf-8");
+            assert_eq!(text(line), Some(expected), "{line:?}");
+        }
+        let dropped: [&[u8]; 6] = [
+            b"Foo{a,b}",
+            b"a[^b]",
+            b"a[[:upper:]]",
+            b"a[",
+            b"a**b",
+            b"a\\",
+        ];
+        for line in dropped {
+            assert_eq!(text(line), None, "{line:?}");
+        }
+        let widened: [(&[u8], &str); 7] = [
+            (b"!build/Gen{a,b}", "!build/*"),
+            (b"!/x/a{b}/", "!/x/*/"),
+            (b"!bad[a-\xff]", "!*"),
+            (b"!a[x/y]b", "!*"),
+            (b"!gen\\\t", "!gen?"),
+            (b"!gen\\\\\t", "!gen\\\\?"),
+            (b"!X.java\0junk", "!X.java"),
+        ];
+        for (line, expected) in widened {
+            assert_eq!(text(line).as_deref(), Some(expected), "{line:?}");
+        }
+    }
+}
