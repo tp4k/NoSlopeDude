@@ -178,7 +178,9 @@ impl IndexSnapshot {
 /// `open` keeps every untracked file, including ones a `.gitignore` matches
 /// (D6). `open_over_base_ignores` (`check --worktree`) leaves an untracked
 /// entry out only when the base snapshot's `.gitignore` files AND the
-/// worktree's own `.gitignore` files both ignore it; `.git/info/exclude`
+/// worktree's own `.gitignore` files both ignore it, with git's own
+/// wildmatch semantics; a `.gitignore` that cannot be used on one side makes
+/// that side ignore nothing at or below its directory. `.git/info/exclude`
 /// and `core.excludesFile` never apply.
 #[derive(Debug, Clone)]
 pub struct WorktreeSnapshot {

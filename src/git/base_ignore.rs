@@ -1,28 +1,34 @@
 //! The base-ignore filter for `check --worktree`: an untracked worktree
-//! entry is left out only when the base snapshot's `.gitignore` rules
-//! ignore it AND the candidate's own on-disk `.gitignore` files also ignore
-//! it. The candidate side can therefore only remove a skip, never add one.
+//! entry is left out only when the base snapshot's `.gitignore` rules ignore
+//! it AND the candidate's own on-disk `.gitignore` files also ignore it. The
+//! candidate side can therefore only remove a skip, never add one.
 //! `.git/info/exclude`, `core.excludesFile` and `core.ignoreCase` are never
-//! consulted; matching is case-sensitive.
+//! consulted; matching is case-sensitive and byte-wise (git's wildmatch with
+//! `WM_PATHNAME`, plus `dir.c`'s line parsing).
+//!
+//! A `.gitignore` that cannot be used on one side (over `SOURCE_CEILING_BYTES`,
+//! an on-disk read failure, or a line too intricate for the matcher's stack
+//! bound) makes that side ignore nothing at or below its directory: a failure
+//! may expose more files, never hide more than git would.
 
 use std::collections::HashMap;
 use std::fs;
-use std::io::Read as _;
-use std::path::{Path, PathBuf};
+use std::io::{ErrorKind, Read as _};
+use std::path::PathBuf;
 
 use git2::Repository;
-use ignore::gitignore::{Gitignore, GitignoreBuilder};
-use ignore::Match;
 
-use super::snapshot::{repo_path_to_fs, CommitSnapshot, SOURCE_CEILING_BYTES};
+use super::snapshot::{repo_path_to_fs, CommitSnapshot, EntryKind, SOURCE_CEILING_BYTES};
+use super::wildmatch::wildmatch;
 use super::GitError;
 
 const GITIGNORE_NAME: &[u8] = b".gitignore";
 const UTF8_BOM: [u8; 3] = [0xEF, 0xBB, 0xBF];
-/// `ignore`'s builder strips a leading `./` and, for a root of `.`, strips
-/// nothing else, so paths handed to `matched` stay relative to their own
-/// `.gitignore` directory.
-const MATCHER_ROOT: &str = ".";
+/// Bytes that end the literal prefix of a pattern (git's glob specials).
+const GLOB_SPECIALS: &[u8] = b"*?[\\";
+/// A line with more star runs than this makes its file unavailable: the
+/// matcher recurses once per run, so the bound keeps the stack bounded.
+const MAX_STAR_RUNS_PER_LINE: usize = 1_000;
 
 #[derive(Clone, Copy)]
 enum Side {
@@ -30,17 +36,47 @@ enum Side {
     Candidate,
 }
 
-/// Per-directory matchers for both sides, loaded lazily and cached.
+/// One usable line of a `.gitignore`.
+struct Rule {
+    negation: bool,
+    directory_only: bool,
+    /// No `/` after the trailing one is stripped: matched against the last
+    /// path component at any depth.
+    basename: bool,
+    /// The pattern without `!`, the trailing `/` and (for an anchored
+    /// pattern) the leading `/`.
+    pattern: Vec<u8>,
+    /// Length of the literal prefix that git compares before wildmatching
+    /// the rest of an anchored pattern (counted on the stripped pattern).
+    literal_prefix: usize,
+}
+
+/// What one directory's `.gitignore` offers on one side.
+enum Load {
+    /// No file, or a symlink or other non-regular entry (never followed).
+    Absent,
+    Rules(Vec<Rule>),
+    /// A file that exists but cannot be used.
+    Unavailable,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Decision {
+    Ignore,
+    Include,
+    NoRule,
+}
+
+/// Per-directory rules for both sides, loaded lazily and cached.
 pub(super) struct BaseIgnore<'a> {
     repo: &'a Repository,
     base: &'a CommitSnapshot,
     workdir: PathBuf,
     /// Directory (raw bytes, `""` for the root) to its `.gitignore` entry in
-    /// the base snapshot. `CommitSnapshot::read` yields nothing for a
-    /// non-regular entry, so a symlinked `.gitignore` contributes no rules.
+    /// the base snapshot.
     base_files: HashMap<Vec<u8>, usize>,
-    base_matchers: HashMap<Vec<u8>, Option<Gitignore>>,
-    candidate_matchers: HashMap<Vec<u8>, Option<Gitignore>>,
+    base_rules: HashMap<Vec<u8>, Load>,
+    candidate_rules: HashMap<Vec<u8>, Load>,
     /// Directory to "ignored on this side, ancestors included".
     base_dirs: HashMap<Vec<u8>, bool>,
     candidate_dirs: HashMap<Vec<u8>, bool>,
@@ -68,8 +104,8 @@ impl<'a> BaseIgnore<'a> {
             base,
             workdir,
             base_files,
-            base_matchers: HashMap::new(),
-            candidate_matchers: HashMap::new(),
+            base_rules: HashMap::new(),
+            candidate_rules: HashMap::new(),
             base_dirs: HashMap::new(),
             candidate_dirs: HashMap::new(),
         }
@@ -114,8 +150,10 @@ impl<'a> BaseIgnore<'a> {
         }
     }
 
-    /// The verdict for `node` alone (its ancestors are not asked): the
-    /// deepest `.gitignore` with a matching line decides; a whitelist line
+    /// The verdict for `node` alone (its ancestors are not asked). The
+    /// directories on its path are consulted root-first for an unavailable
+    /// `.gitignore`, which makes this side ignore nothing here; otherwise the
+    /// deepest `.gitignore` with a matching line decides and a whitelist line
     /// un-ignores. Every ancestor of `node` is a directory.
     fn node_ignored(
         &mut self,
@@ -123,65 +161,84 @@ impl<'a> BaseIgnore<'a> {
         node: &[u8],
         node_is_dir: bool,
     ) -> Result<bool, GitError> {
-        let mut dir_end = node.iter().rposition(|byte| *byte == b'/');
-        loop {
-            let (dir, relative) = match dir_end {
-                Some(slash) => (&node[..slash], &node[slash + 1..]),
+        let slashes: Vec<usize> = node
+            .iter()
+            .enumerate()
+            .filter_map(|(index, byte)| (*byte == b'/').then_some(index))
+            .collect();
+        let mut dir_ends: Vec<Option<usize>> = vec![None];
+        dir_ends.extend(slashes.into_iter().map(Some));
+        for end in &dir_ends {
+            let dir = end.map_or(&node[..0], |slash| &node[..slash]);
+            self.ensure_loaded(side, dir)?;
+            if matches!(self.rules(side).get(dir), Some(Load::Unavailable)) {
+                return Ok(false);
+            }
+        }
+        for end in dir_ends.iter().rev() {
+            let (dir, relative) = match end {
+                Some(slash) => (&node[..*slash], &node[slash + 1..]),
                 None => (&node[..0], node),
             };
-            match self.verdict(side, dir, relative, node_is_dir)? {
-                Match::Ignore(()) => return Ok(true),
-                Match::Whitelist(()) => return Ok(false),
-                Match::None => {}
-            }
-            let Some(slash) = dir_end else {
-                return Ok(false);
+            let Some(Load::Rules(rules)) = self.rules(side).get(dir) else {
+                continue;
             };
-            dir_end = node[..slash].iter().rposition(|byte| *byte == b'/');
+            match decide(rules, relative, node_is_dir) {
+                Decision::Ignore => return Ok(true),
+                Decision::Include => return Ok(false),
+                Decision::NoRule => {}
+            }
+        }
+        Ok(false)
+    }
+
+    fn rules(&self, side: Side) -> &HashMap<Vec<u8>, Load> {
+        match side {
+            Side::Base => &self.base_rules,
+            Side::Candidate => &self.candidate_rules,
         }
     }
 
-    /// What the `.gitignore` of `dir` says about `relative` (a path under
-    /// `dir`); the matcher is built and cached on first use.
-    fn verdict(
-        &mut self,
-        side: Side,
-        dir: &[u8],
-        relative: &[u8],
-        node_is_dir: bool,
-    ) -> Result<Match<()>, GitError> {
-        let cached = match side {
-            Side::Base => self.base_matchers.get(dir),
-            Side::Candidate => self.candidate_matchers.get(dir),
-        };
-        if let Some(matcher) = cached {
-            return Ok(decide(matcher.as_ref(), relative, node_is_dir));
+    /// Loads and caches the `.gitignore` of `dir` on `side`.
+    fn ensure_loaded(&mut self, side: Side, dir: &[u8]) -> Result<(), GitError> {
+        if self.rules(side).contains_key(dir) {
+            return Ok(());
         }
-        let bytes = match side {
+        let load = match side {
             Side::Base => self.read_base(dir)?,
             Side::Candidate => self.read_candidate(dir),
         };
-        let built = bytes.as_deref().and_then(build_matcher);
-        let decision = decide(built.as_ref(), relative, node_is_dir);
         match side {
-            Side::Base => self.base_matchers.insert(dir.to_vec(), built),
-            Side::Candidate => self.candidate_matchers.insert(dir.to_vec(), built),
+            Side::Base => self.base_rules.insert(dir.to_vec(), load),
+            Side::Candidate => self.candidate_rules.insert(dir.to_vec(), load),
         };
-        Ok(decision)
+        Ok(())
     }
 
-    /// The base `.gitignore` blob of `dir`; `None` when absent or over the
-    /// ceiling (no rules: fails toward checking more).
-    fn read_base(&self, dir: &[u8]) -> Result<Option<Vec<u8>>, GitError> {
+    /// The base `.gitignore` blob of `dir`: absent (or not a regular file),
+    /// parsed rules, or unavailable when over the ceiling. A blob that cannot
+    /// be read is an error.
+    fn read_base(&self, dir: &[u8]) -> Result<Load, GitError> {
         let Some(index) = self.base_files.get(dir) else {
-            return Ok(None);
+            return Ok(Load::Absent);
         };
-        self.base.read(self.repo, &self.base.entries[*index])
+        let entry = &self.base.entries[*index];
+        if !matches!(entry.kind, EntryKind::Regular | EntryKind::Executable) {
+            return Ok(Load::Absent);
+        }
+        if entry.size > SOURCE_CEILING_BYTES {
+            return Ok(Load::Unavailable);
+        }
+        Ok(match self.base.read(self.repo, entry)? {
+            Some(bytes) => load_rules(&bytes),
+            None => Load::Unavailable,
+        })
     }
 
     /// The on-disk `.gitignore` of `dir`: regular files only (never a
-    /// symlink), bounded by the ceiling; any failure means no rules.
-    fn read_candidate(&self, dir: &[u8]) -> Option<Vec<u8>> {
+    /// symlink), bounded by the ceiling; an open or read failure makes the
+    /// file unavailable.
+    fn read_candidate(&self, dir: &[u8]) -> Load {
         let mut relative = dir.to_vec();
         if !relative.is_empty() {
             relative.push(b'/');
@@ -190,82 +247,132 @@ impl<'a> BaseIgnore<'a> {
         let full_path = repo_path_to_fs(&self.workdir, &relative);
         match fs::symlink_metadata(&full_path) {
             Ok(metadata) if metadata.is_file() => {}
-            _ => return None,
+            Ok(_) => return Load::Absent,
+            Err(err) if err.kind() == ErrorKind::NotFound => return Load::Absent,
+            Err(_) => return Load::Unavailable,
         }
-        let file = fs::File::open(&full_path).ok()?;
+        let Ok(file) = fs::File::open(&full_path) else {
+            return Load::Unavailable;
+        };
         let mut buf = Vec::new();
-        file.take(SOURCE_CEILING_BYTES + 1)
+        if file
+            .take(SOURCE_CEILING_BYTES + 1)
             .read_to_end(&mut buf)
-            .ok()?;
-        (buf.len() as u64 <= SOURCE_CEILING_BYTES).then_some(buf)
+            .is_err()
+            || buf.len() as u64 > SOURCE_CEILING_BYTES
+        {
+            return Load::Unavailable;
+        }
+        load_rules(&buf)
     }
 }
 
-/// The match of `relative` against an optional matcher, as an owned verdict.
-fn decide(matcher: Option<&Gitignore>, relative: &[u8], node_is_dir: bool) -> Match<()> {
-    let Some(matcher) = matcher else {
-        return Match::None;
-    };
-    let relative = repo_path_to_fs(Path::new(""), relative);
-    match matcher.matched(&relative, node_is_dir) {
-        Match::Ignore(_) => Match::Ignore(()),
-        Match::Whitelist(_) => Match::Whitelist(()),
-        Match::None => Match::None,
+/// The last rule of `rules` that matches `relative` decides.
+fn decide(rules: &[Rule], relative: &[u8], is_dir: bool) -> Decision {
+    for rule in rules.iter().rev() {
+        if rule.matches(relative, is_dir) {
+            return if rule.negation {
+                Decision::Include
+            } else {
+                Decision::Ignore
+            };
+        }
+    }
+    Decision::NoRule
+}
+
+impl Rule {
+    fn matches(&self, relative: &[u8], is_dir: bool) -> bool {
+        if self.directory_only && !is_dir {
+            return false;
+        }
+        if self.basename {
+            let name = match relative.iter().rposition(|byte| *byte == b'/') {
+                Some(slash) => &relative[slash + 1..],
+                None => relative,
+            };
+            return wildmatch(&self.pattern, name);
+        }
+        let prefix = self.literal_prefix;
+        if prefix > relative.len() || relative[..prefix] != self.pattern[..prefix] {
+            return false;
+        }
+        wildmatch(&self.pattern[prefix..], &relative[prefix..])
     }
 }
 
-/// Bytes that can never be a single item of a simple bracket class.
-const CLASS_RESERVED: &[u8] = b"[]\\/-^";
+/// The rules of a `.gitignore`, or `Unavailable` when a line is too intricate.
+fn load_rules(bytes: &[u8]) -> Load {
+    match parse_rules(bytes) {
+        Some(rules) => Load::Rules(rules),
+        None => Load::Unavailable,
+    }
+}
 
-/// A matcher from `.gitignore` bytes. One leading UTF-8 BOM is stripped as
-/// git does, and each line loses a trailing CR and everything from its first
-/// NUL (git reads a line as a C string). Trailing unescaped spaces are
-/// trimmed as git trims them (U+0020 only).
-///
-/// Only a safe subset of git's pattern language reaches the `ignore`
-/// matcher, because its dialect differs from git's (braces, bracket classes).
-/// The subset is: literals, `*`, `?`, `**` as a whole segment, simple ASCII
-/// bracket classes, `\` escapes and `/`. A line outside it, or ending in
-/// non-space whitespace, never skips anything: an ignore line is dropped, and
-/// a negation is widened so it re-includes at least what git re-includes
-/// (trailing whitespace becomes `?`; any other cause turns each offending
-/// segment into `*`, or the whole body when a construct spans a `/`). A line
-/// the builder rejects is skipped, as git skips a bad pattern.
-fn build_matcher(bytes: &[u8]) -> Option<Gitignore> {
-    let mut builder = GitignoreBuilder::new(MATCHER_ROOT);
+/// Git's `.gitignore` parsing. One leading UTF-8 BOM is skipped; lines split
+/// on `\n`; one `\r` before the `\n` is dropped; a line is a C string, so it
+/// is cut at its first NUL; an empty line and a line starting with `#` add
+/// nothing; trailing unescaped spaces are trimmed (U+0020 only). `None` when a
+/// line has more star runs than `MAX_STAR_RUNS_PER_LINE`.
+fn parse_rules(bytes: &[u8]) -> Option<Vec<Rule>> {
     let bytes = bytes.strip_prefix(UTF8_BOM.as_slice()).unwrap_or(bytes);
     let mut lines: Vec<&[u8]> = bytes.split(|byte| *byte == b'\n').collect();
     if lines.last().is_some_and(|line| line.is_empty()) {
         lines.pop();
     }
+    let mut rules = Vec::new();
     for line in lines {
         let line = line.strip_suffix(b"\r").unwrap_or(line);
-        if let Some(pattern) = representable(line) {
-            let _ = builder.add_line(None, &pattern);
+        let line = line.split(|byte| *byte == 0).next().unwrap_or(line);
+        if line.is_empty() || line[0] == b'#' {
+            continue;
+        }
+        if let Some(rule) = parse_line(trim_unescaped_trailing_spaces(line))? {
+            rules.push(rule);
         }
     }
-    builder.build().ok()
+    Some(rules)
 }
 
-/// The text to hand to the builder for one `.gitignore` line, or `None` when
-/// the line must contribute no rule. The line is cut at its first NUL; a
-/// comment contributes nothing; a valid UTF-8 line inside the safe subset and
-/// not ending in non-space whitespace passes unchanged; anything else is
-/// dropped, or widened when it is a negation.
-fn representable(line: &[u8]) -> Option<String> {
-    let line = line.split(|byte| *byte == 0).next().unwrap_or(line);
-    if line.first() == Some(&b'#') {
+/// One trimmed line as a rule: `Some(None)` when it can never match, `None`
+/// when it is too intricate.
+fn parse_line(line: &[u8]) -> Option<Option<Rule>> {
+    let negation = line.first() == Some(&b'!');
+    let mut body = &line[usize::from(negation)..];
+    let directory_only = body.last() == Some(&b'/');
+    if directory_only {
+        body = &body[..body.len() - 1];
+    }
+    if body.is_empty() {
+        return Some(None);
+    }
+    if star_runs(body) > MAX_STAR_RUNS_PER_LINE {
         return None;
     }
-    let negation = line.first() == Some(&b'!');
-    let trimmed = trim_unescaped_trailing_spaces(line);
-    let body = &trimmed[usize::from(negation)..];
-    if let Ok(text) = std::str::from_utf8(trimmed) {
-        if !ends_in_other_whitespace(text) && in_subset(body) {
-            return Some(text.to_string());
-        }
+    let basename = !body.contains(&b'/');
+    let mut literal_prefix = body
+        .iter()
+        .position(|byte| GLOB_SPECIALS.contains(byte))
+        .unwrap_or(body.len());
+    if !basename && body[0] == b'/' {
+        body = &body[1..];
+        literal_prefix -= 1;
     }
-    negation.then(|| widen_negation(body))
+    Some(Some(Rule {
+        negation,
+        directory_only,
+        basename,
+        pattern: body.to_vec(),
+        literal_prefix,
+    }))
+}
+
+fn star_runs(pattern: &[u8]) -> usize {
+    pattern
+        .iter()
+        .enumerate()
+        .filter(|(index, byte)| **byte == b'*' && (*index == 0 || pattern[index - 1] != b'*'))
+        .count()
 }
 
 /// Git's `trim_trailing_spaces`: drop trailing U+0020 unless a backslash
@@ -290,267 +397,4 @@ fn trim_unescaped_trailing_spaces(line: &[u8]) -> &[u8] {
         index += 1;
     }
     last_space.map_or(line, |index| &line[..index])
-}
-
-/// Whitespace that git keeps but the `ignore` matcher would trim.
-fn is_other_whitespace(ch: char) -> bool {
-    ch.is_whitespace() && ch != ' '
-}
-
-fn ends_in_other_whitespace(text: &str) -> bool {
-    text.ends_with(is_other_whitespace)
-}
-
-/// The widened negation (with its `!`) for a body outside the safe subset.
-/// Trailing non-space whitespace alone becomes `?` per UTF-8 byte (globset's
-/// `?` is byte-wide), dropping the `\` that escaped the first such char.
-/// Any other cause widens each offending segment to `*`.
-fn widen_negation(body: &[u8]) -> String {
-    if let Ok(text) = std::str::from_utf8(body) {
-        let tail = text.trim_end_matches(is_other_whitespace).len();
-        if tail < text.len() {
-            let mut prefix = &text[..tail];
-            let run = prefix
-                .bytes()
-                .rev()
-                .take_while(|byte| *byte == b'\\')
-                .count();
-            if run % 2 == 1 {
-                prefix = &prefix[..prefix.len() - 1];
-            }
-            if in_subset(prefix.as_bytes()) {
-                let mut widened = format!("!{prefix}");
-                for ch in text[tail..].chars() {
-                    widened.extend(std::iter::repeat_n('?', ch.len_utf8()));
-                }
-                return widened;
-            }
-        }
-    }
-    let widened = widen_segments(body).unwrap_or_else(|| "*".to_string());
-    format!("!{widened}")
-}
-
-/// `body` with every segment outside the safe subset replaced by `*`, or
-/// `None` when a construct spans a `/`.
-fn widen_segments(body: &[u8]) -> Option<String> {
-    let segments = split_segments(body)?;
-    let last = segments.len() - 1;
-    let mut widened = Vec::new();
-    for (index, segment) in segments.into_iter().enumerate() {
-        if index > 0 {
-            widened.push(b'/');
-        }
-        let inside = std::str::from_utf8(segment).is_ok_and(|text| {
-            segment_in_subset(text) && !(index == last && ends_in_other_whitespace(text))
-        });
-        if inside {
-            widened.extend_from_slice(segment);
-        } else {
-            widened.push(b'*');
-        }
-    }
-    String::from_utf8(widened).ok()
-}
-
-/// Whether the whole body (after any `!`) lies inside the safe subset.
-fn in_subset(body: &[u8]) -> bool {
-    split_segments(body).is_some_and(|segments| {
-        segments
-            .into_iter()
-            .all(|segment| std::str::from_utf8(segment).is_ok_and(segment_in_subset))
-    })
-}
-
-/// The `/`-separated segments of `body`, or `None` when an escaped `/` or a
-/// `[` that opens no simple class (with a `/` after it) spans segments.
-fn split_segments(body: &[u8]) -> Option<Vec<&[u8]>> {
-    let mut segments = Vec::new();
-    let mut start = 0;
-    let mut index = 0;
-    while index < body.len() {
-        match body[index] {
-            b'\\' => {
-                if body.get(index + 1) == Some(&b'/') {
-                    return None;
-                }
-                index += 2;
-            }
-            b'/' => {
-                segments.push(&body[start..index]);
-                index += 1;
-                start = index;
-            }
-            b'[' => match class_end(body, index) {
-                Some(end) => index = end + 1,
-                None if body[index..].contains(&b'/') => return None,
-                None => index += 1,
-            },
-            _ => index += 1,
-        }
-    }
-    segments.push(&body[start..]);
-    Some(segments)
-}
-
-/// Whether one segment uses only the safe subset.
-fn segment_in_subset(segment: &str) -> bool {
-    let bytes = segment.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        match bytes[index] {
-            b'{' | b'}' | b']' => return false,
-            b'[' => match class_end(bytes, index) {
-                Some(end) => index = end + 1,
-                None => return false,
-            },
-            b'\\' => match segment[index + 1..].chars().next() {
-                Some(escaped) => index += 1 + escaped.len_utf8(),
-                None => return false,
-            },
-            b'*' => {
-                let run = bytes[index..]
-                    .iter()
-                    .take_while(|byte| **byte == b'*')
-                    .count();
-                if run > 2 || (run == 2 && segment != "**") {
-                    return false;
-                }
-                index += run;
-            }
-            _ => index += 1,
-        }
-    }
-    true
-}
-
-/// The index of the `]` closing the simple ASCII class opened at `open`: an
-/// optional `!`, then single chars or `a-b` ranges of non-reserved ASCII.
-fn class_end(bytes: &[u8], open: usize) -> Option<usize> {
-    let item = |index: usize| {
-        bytes
-            .get(index)
-            .copied()
-            .filter(|byte| byte.is_ascii() && !CLASS_RESERVED.contains(byte))
-    };
-    let mut index = open + 1;
-    if bytes.get(index) == Some(&b'!') {
-        index += 1;
-    }
-    let mut items = 0;
-    loop {
-        if bytes.get(index) == Some(&b']') {
-            return (items > 0).then_some(index);
-        }
-        let low = item(index)?;
-        if bytes.get(index + 1) == Some(&b'-') {
-            if low > item(index + 2)? {
-                return None;
-            }
-            index += 3;
-        } else {
-            index += 1;
-        }
-        items += 1;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::representable;
-
-    fn text(line: &[u8]) -> Option<String> {
-        representable(line)
-    }
-
-    #[test]
-    fn test_representable_keeps_the_safe_subset_and_widens_the_rest() {
-        let kept: [&[u8]; 11] = [
-            b"*.java",
-            b"out/*",
-            b"!out/keep.ts",
-            b"/a/**/b",
-            b"**/x",
-            b"x/**",
-            b"Ok[a-c]?.java",
-            b"[!x]y",
-            b"\\#h",
-            b"\\!b",
-            b"a\\ ",
-        ];
-        for line in kept {
-            let expected = String::from_utf8(line.to_vec()).expect("utf-8");
-            assert_eq!(text(line), Some(expected), "{line:?}");
-        }
-        let dropped: [&[u8]; 6] = [
-            b"Foo{a,b}",
-            b"a[^b]",
-            b"a[[:upper:]]",
-            b"a[",
-            b"a**b",
-            b"a\\",
-        ];
-        for line in dropped {
-            assert_eq!(text(line), None, "{line:?}");
-        }
-        let widened: [(&[u8], &str); 7] = [
-            (b"!build/Gen{a,b}", "!build/*"),
-            (b"!/x/a{b}/", "!/x/*/"),
-            (b"!bad[a-\xff]", "!*"),
-            (b"!a[x/y]b", "!*"),
-            (b"!gen\\\t", "!gen?"),
-            (b"!gen\\\\\t", "!gen\\\\?"),
-            (b"!X.java\0junk", "!X.java"),
-        ];
-        for (line, expected) in widened {
-            assert_eq!(text(line).as_deref(), Some(expected), "{line:?}");
-        }
-    }
-
-    #[test]
-    fn test_representable_edge_cases_of_the_safe_subset() {
-        let kept: [&[u8]; 7] = [
-            b"[a-a]",
-            b"[!a]",
-            b"[a-cx]",
-            b"**",
-            "\u{e9}*".as_bytes(),
-            b"a\\*",
-            "a\\\u{e9}".as_bytes(),
-        ];
-        for line in kept {
-            let expected = String::from_utf8(line.to_vec()).expect("utf-8");
-            assert_eq!(text(line), Some(expected), "{line:?}");
-        }
-        let dropped: [&[u8]; 14] = [
-            b"***",
-            b"**a",
-            b"a[]",
-            b"a[!]",
-            b"a[c-a]",
-            b"a[a-]",
-            b"a[-a]",
-            b"a[]a]",
-            b"a[\\]",
-            b"a[b/c]",
-            "a[\u{e9}]".as_bytes(),
-            "a[a-\u{e9}]".as_bytes(),
-            b"a]",
-            b"a\\/b",
-        ];
-        for line in dropped {
-            assert_eq!(text(line), None, "{line:?}");
-        }
-        let widened: [(&[u8], &str); 6] = [
-            (b"!a\\/b{c}", "!*"),
-            (b"!a[/b", "!*"),
-            (b"!a{b}\t", "!*"),
-            (b"!a{b}/c\t", "!*/*"),
-            (b"!x\t/a{b}", "!x\t/*"),
-            (b"!a]b/c", "!*/c"),
-        ];
-        for (line, expected) in widened {
-            assert_eq!(text(line).as_deref(), Some(expected), "{line:?}");
-        }
-    }
 }
