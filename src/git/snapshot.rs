@@ -180,8 +180,9 @@ impl IndexSnapshot {
 /// entry out only when the base snapshot's `.gitignore` files AND the
 /// worktree's own `.gitignore` files both ignore it, with git's own
 /// wildmatch semantics; a `.gitignore` that cannot be used on one side makes
-/// that side ignore nothing at or below its directory. `.git/info/exclude`
-/// and `core.excludesFile` never apply.
+/// that side ignore nothing at or below its directory. Neither of these two
+/// reads `.git/info/exclude` or `core.excludesFile`; `open_respecting_ignores`
+/// (`scan`, D22) uses the repository's own ignore rules, which do.
 #[derive(Debug, Clone)]
 pub struct WorktreeSnapshot {
     pub entries: Vec<Entry>,
