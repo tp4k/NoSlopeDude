@@ -607,6 +607,55 @@ fn test_a_symlinked_gitignore_contributes_no_rules_on_either_side() {
 }
 
 #[test]
+fn test_a_symlinked_nested_gitignore_is_absent_not_unavailable() {
+    let base_link = fixture();
+    let entries: Vec<(Vec<u8>, i32, Vec<u8>)> = vec![
+        (b".gitignore".to_vec(), 0o100644, b"*.java\n".to_vec()),
+        (b"p/.gitignore".to_vec(), 0o120000, b"rules.txt".to_vec()),
+    ];
+    common::commit_entries(&base_link.repo, &entries);
+    base_link.disk(".gitignore", b"*.java\n");
+    base_link.disk("p/.gitignore", b"\n");
+    base_link.disk("p/X.java", violating("X").as_bytes());
+    let outcome = base_link.check(base_mode("HEAD", true));
+    assert!(
+        complexity_paths(&outcome).is_empty(),
+        "{:?}",
+        outcome.diagnostics
+    );
+
+    let candidate_link = fixture();
+    candidate_link.commit(&[(".gitignore", b"*.java\n")]);
+    candidate_link.disk("p/rules.txt", b"\n");
+    std::os::unix::fs::symlink("rules.txt", candidate_link.dir.path().join("p/.gitignore"))
+        .expect("symlink p/.gitignore");
+    candidate_link.disk("p/X.java", violating("X").as_bytes());
+    let outcome = candidate_link.check(base_mode("HEAD", true));
+    assert!(
+        complexity_paths(&outcome).is_empty(),
+        "{:?}",
+        outcome.diagnostics
+    );
+}
+
+#[test]
+fn test_a_line_with_over_a_thousand_star_runs_makes_its_file_unavailable() {
+    let mut intricate = b"*a".repeat(1_001);
+    intricate.push(b'\n');
+    let fx = fixture();
+    fx.commit(&[
+        (".gitignore", b"*.java\n"),
+        ("p/.gitignore", intricate.as_slice()),
+    ]);
+    fx.disk("p/.gitignore", intricate.as_slice());
+    fx.disk("p/X.java", violating("X").as_bytes());
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert_eq!(complexity_paths(&outcome), vec!["p/X.java"]);
+}
+
+#[test]
 fn test_an_over_ceiling_gitignore_contributes_no_rules_on_either_side() {
     let mut oversized = b"big/\n".to_vec();
     oversized.resize(ceiling() + 1, b'#');

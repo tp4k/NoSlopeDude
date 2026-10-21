@@ -409,6 +409,21 @@ fn gate_cases() -> Vec<GateCase> {
     );
     add(root(b"x/**\n"), &["x"]);
     add(root(b"a/**/b\n"), &["a/b", "a/q/r/b", "a/qb"]);
+    // A lone trailing backslash never matches.
+    add(root(b"a\\\n"), &["a", "a\\"]);
+    // A `**` that follows a literal prefix is not a segment start.
+    let below: &'static [&'static str] = &["a/b/c", "a/b/cx"];
+    for rule in [
+        &b"a/b/*\n!a/b**\n"[..],
+        b"a/b/*\n!a/b**/\n",
+        b"a/b/*\n!a/b**c\n",
+        b"a/b/*\n!a/bx**\n",
+        b"a/b/*\n!a**\n",
+        b"a/b/*\n!a/b/**\n",
+        b"a/b/c\n!a/b**\n",
+    ] {
+        add(root(rule), below);
+    }
     // The large nested block next to a root `*.java`.
     let mut large = b"!X.java\n".to_vec();
     for index in 0..4_000 {
