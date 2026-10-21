@@ -646,7 +646,17 @@ fn git_cli_ignores(fx: &Fixture, path: &str) -> bool {
     let status = std::process::Command::new("git")
         .arg("-C")
         .arg(fx.dir.path())
-        .args(["check-ignore", "--no-index", "-q", "--", path])
+        .args([
+            "-c",
+            "core.excludesFile=/dev/null",
+            "-c",
+            "core.ignoreCase=false",
+            "check-ignore",
+            "--no-index",
+            "-q",
+            "--",
+            path,
+        ])
         .status()
         .expect("run git check-ignore");
     status.success()
@@ -738,7 +748,7 @@ fn test_a_negation_ending_in_nbsp_is_widened_by_its_byte_length() {
 }
 
 #[test]
-fn test_a_non_utf8_negation_is_widened_never_dropped() {
+fn test_a_non_utf8_negation_matches_bytes_as_git_does() {
     let rules: &[u8] = b"bad*\n!bad\xff\n";
     let fx = fixture();
     fx.commit(&[(".gitignore", rules)]);
@@ -748,8 +758,8 @@ fn test_a_non_utf8_negation_is_widened_never_dropped() {
 
     let outcome = fx.check(base_mode("HEAD", true));
 
-    assert_eq!(complexity_paths(&outcome), vec!["bad\u{FFFD}/X.java"]);
-    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    assert_eq!(outcome.exit_status, EXIT_PASS);
 }
 
 #[test]
@@ -858,6 +868,214 @@ fn test_a_gitignore_line_is_cut_at_its_first_nul_as_git_cuts_it() {
 
     assert_eq!(complexity_paths(&outcome), vec!["X.java"]);
     assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
+/// Commits `files` and mirrors every one but those in `disk_overrides` to the
+/// worktree; each override replaces (or, when `None`, removes) the on-disk copy.
+fn commit_with_disk(
+    fx: &Fixture,
+    files: &[(&str, &[u8])],
+    disk_overrides: &[(&str, Option<&[u8]>)],
+) {
+    fx.commit(files);
+    for (path, bytes) in disk_overrides {
+        match bytes {
+            Some(bytes) => fx.disk(path, bytes),
+            None => fs::remove_file(fx.dir.path().join(path)).expect("remove the disk copy"),
+        }
+    }
+}
+
+#[test]
+fn test_a_bracket_class_never_matches_a_slash() {
+    for rules in [
+        &b"p[!x]a.java\n"[..],
+        &b"p[.-0]a.java\n"[..],
+        &b"p[ -~]a.java\n"[..],
+    ] {
+        let fx = fixture();
+        fx.commit(&[(".gitignore", rules)]);
+        fx.disk(".gitignore", rules);
+        fx.disk("p/a.java", violating("Slashed").as_bytes());
+        fx.disk("pya.java", violating("Control").as_bytes());
+        assert!(!git_cli_ignores(&fx, "p/a.java"), "{rules:?}");
+        assert!(git_cli_ignores(&fx, "pya.java"), "{rules:?}");
+
+        let outcome = fx.check(base_mode("HEAD", true));
+
+        assert_eq!(complexity_paths(&outcome), vec!["p/a.java"], "{rules:?}");
+        assert_eq!(outcome.exit_status, EXIT_REGRESSION, "{rules:?}");
+    }
+}
+
+const LARGE_RULE_LINES: usize = 4_000;
+const LARGE_RULE_WILDCARDS: usize = 35;
+
+fn large_nested_rules() -> Vec<u8> {
+    let mut rules = b"!X.java\n".to_vec();
+    for index in 0..LARGE_RULE_LINES {
+        let wildcards = "?".repeat(LARGE_RULE_WILDCARDS);
+        rules.extend_from_slice(format!("a?{index}{wildcards}z\n").as_bytes());
+    }
+    assert!((rules.len() as u64) < SOURCE_CEILING_BYTES);
+    rules
+}
+
+#[test]
+fn test_a_large_nested_gitignore_keeps_its_negation() {
+    let nested = large_nested_rules();
+    let root: &[u8] = b"*.java\n";
+    let both = fixture();
+    commit_with_disk(
+        &both,
+        &[(".gitignore", root), ("p/.gitignore", &nested)],
+        &[],
+    );
+    let base_only = fixture();
+    commit_with_disk(
+        &base_only,
+        &[(".gitignore", root), ("p/.gitignore", &nested)],
+        &[("p/.gitignore", None)],
+    );
+    let candidate_only = fixture();
+    commit_with_disk(
+        &candidate_only,
+        &[(".gitignore", root)],
+        &[("p/.gitignore", Some(&nested))],
+    );
+    for (label, fx) in [
+        ("both", &both),
+        ("base only", &base_only),
+        ("candidate only", &candidate_only),
+    ] {
+        fx.disk("p/X.java", violating("X").as_bytes());
+        fx.disk("p/Y.java", violating("Y").as_bytes());
+
+        let outcome = fx.check(base_mode("HEAD", true));
+
+        assert_eq!(complexity_paths(&outcome), vec!["p/X.java"], "{label}");
+        assert_eq!(outcome.exit_status, EXIT_REGRESSION, "{label}");
+    }
+    assert!(!git_cli_ignores(&both, "p/X.java"));
+    assert!(git_cli_ignores(&both, "p/Y.java"));
+}
+
+#[test]
+fn test_git_pattern_syntax_beyond_the_old_subset_skips_what_git_skips() {
+    let rules: &[u8] = b"Cls[[:upper:]].java\nNeg[^Q].java\nFoo{a,b}.java\n";
+    let fx = fixture();
+    fx.commit(&[(".gitignore", rules)]);
+    fx.disk(".gitignore", rules);
+    for (path, name) in [
+        ("ClsQ.java", "ClsQ"),
+        ("Neg1.java", "Neg1"),
+        ("Foo{a,b}.java", "Braced"),
+        ("Cls1.java", "Cls1"),
+        ("NegQ.java", "NegQ"),
+        ("Fooa.java", "Fooa"),
+    ] {
+        fx.disk(path, violating(name).as_bytes());
+    }
+    for skipped in ["ClsQ.java", "Neg1.java", "Foo{a,b}.java"] {
+        assert!(git_cli_ignores(&fx, skipped), "{skipped}");
+    }
+    for kept in ["Cls1.java", "NegQ.java", "Fooa.java"] {
+        assert!(!git_cli_ignores(&fx, kept), "{kept}");
+    }
+
+    let outcome = fx.check(base_mode("HEAD", true));
+
+    assert_eq!(
+        complexity_paths(&outcome),
+        vec!["Cls1.java", "Fooa.java", "NegQ.java"]
+    );
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION);
+}
+
+fn over_ceiling(head: &[u8]) -> Vec<u8> {
+    let mut bytes = head.to_vec();
+    bytes.resize(ceiling() + 1, b'#');
+    bytes
+}
+
+/// Three fixtures where `p/.gitignore` is over the ceiling on the base side
+/// only, the candidate side only, and both; `valid` is the small copy the other
+/// side holds, and `tracked` the files committed besides `p/.gitignore`.
+fn nested_over_ceiling_variants<'a>(
+    tracked: &[(&str, &'a [u8])],
+    oversized: &'a [u8],
+    valid: &'a [u8],
+) -> Vec<(&'static str, Fixture)> {
+    let with_nested = |nested: &'a [u8]| {
+        let mut files = tracked.to_vec();
+        files.push(("p/.gitignore", nested));
+        files
+    };
+    let base_only = fixture();
+    commit_with_disk(
+        &base_only,
+        &with_nested(oversized),
+        &[("p/.gitignore", Some(valid))],
+    );
+    let candidate_only = fixture();
+    commit_with_disk(
+        &candidate_only,
+        &with_nested(valid),
+        &[("p/.gitignore", Some(oversized))],
+    );
+    let both = fixture();
+    commit_with_disk(&both, &with_nested(oversized), &[]);
+    vec![
+        ("base only", base_only),
+        ("candidate only", candidate_only),
+        ("both", both),
+    ]
+}
+
+#[test]
+fn test_an_over_ceiling_nested_gitignore_stops_its_side_ignoring_below_it() {
+    let oversized = over_ceiling(b"!X.java\n");
+    for (label, fx) in
+        nested_over_ceiling_variants(&[(".gitignore", b"*.java\n")], &oversized, b"!X.java\n")
+    {
+        fx.disk("p/X.java", violating("X").as_bytes());
+        fx.disk("p/Y.java", violating("Y").as_bytes());
+        fx.disk("Z.java", violating("Z").as_bytes());
+
+        let outcome = fx.check(base_mode("HEAD", true));
+
+        assert_eq!(
+            complexity_paths(&outcome),
+            vec!["p/X.java", "p/Y.java"],
+            "{label}"
+        );
+        assert_eq!(outcome.exit_status, EXIT_REGRESSION, "{label}");
+    }
+}
+
+#[test]
+fn test_an_unavailable_ancestor_gitignore_outranks_a_deeper_match() {
+    let oversized = over_ceiling(b"# oversized\n");
+    let tracked: [(&str, &[u8]); 2] =
+        [(".gitignore", b"*.java\n"), ("p/q/.gitignore", b"*.java\n")];
+    for (label, fx) in nested_over_ceiling_variants(&tracked, &oversized, b"# small\n") {
+        fx.disk("p/q/X.java", violating("X").as_bytes());
+
+        let outcome = fx.check(base_mode("HEAD", true));
+
+        assert_eq!(complexity_paths(&outcome), vec!["p/q/X.java"], "{label}");
+        assert_eq!(outcome.exit_status, EXIT_REGRESSION, "{label}");
+    }
+
+    let control = fixture();
+    control.commit(&tracked);
+    control.disk("p/q/X.java", violating("X").as_bytes());
+    assert!(git_cli_ignores(&control, "p/q/X.java"));
+
+    let outcome = control.check(base_mode("HEAD", true));
+
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    assert_eq!(outcome.exit_status, EXIT_PASS);
 }
 
 // ---------------------------------------------------------------------
