@@ -246,6 +246,7 @@ mod tests {
     const PATHOLOGICAL_DEADLINE: Duration = Duration::from_secs(1);
     const REPEATED_SEGMENT_COUNT: usize = 400;
     const LONG_TEXT_SEGMENTS: usize = 30;
+    const HUGE_SEGMENT_COUNT: usize = 1000;
 
     fn assert_rows(rows: &[Row]) {
         for (pattern, text, expected) in rows {
@@ -267,6 +268,18 @@ mod tests {
         let (sender, receiver) = mpsc::channel();
         std::thread::spawn(move || {
             let _ = sender.send(wildmatch(&pattern, &text));
+        });
+        let verdict = receiver.recv_timeout(PATHOLOGICAL_DEADLINE);
+        assert_eq!(verdict, Ok(false));
+    }
+
+    #[test]
+    fn test_a_thousand_double_star_segments_return_promptly() {
+        let mut pattern = b"**/".repeat(HUGE_SEGMENT_COUNT);
+        pattern.push(b'x');
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sender.send(wildmatch(&pattern, b"a/b/c/d/e/f.log"));
         });
         let verdict = receiver.recv_timeout(PATHOLOGICAL_DEADLINE);
         assert_eq!(verdict, Ok(false));
