@@ -102,13 +102,6 @@ fn star(pat: &[u8], p: usize, text: &[u8], t: usize) -> Outcome {
             Outcome::NoMatch
         };
     };
-    if !crosses_slash && next == SLASH {
-        // One star before a slash consumes exactly up to the next slash.
-        return match rest.iter().position(|byte| *byte == SLASH) {
-            Some(offset) => walk(pat, end, text, t + offset),
-            None => Outcome::NoMatch,
-        };
-    }
     let literal_next = !matches!(next, STAR | b'?' | b'[' | BACKSLASH);
     let mut cur = t;
     loop {
