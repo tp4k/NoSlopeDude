@@ -506,4 +506,51 @@ mod tests {
             assert_eq!(text(line).as_deref(), Some(expected), "{line:?}");
         }
     }
+
+    #[test]
+    fn test_representable_edge_cases_of_the_safe_subset() {
+        let kept: [&[u8]; 7] = [
+            b"[a-a]",
+            b"[!a]",
+            b"[a-cx]",
+            b"**",
+            "\u{e9}*".as_bytes(),
+            b"a\\*",
+            "a\\\u{e9}".as_bytes(),
+        ];
+        for line in kept {
+            let expected = String::from_utf8(line.to_vec()).expect("utf-8");
+            assert_eq!(text(line), Some(expected), "{line:?}");
+        }
+        let dropped: [&[u8]; 14] = [
+            b"***",
+            b"**a",
+            b"a[]",
+            b"a[!]",
+            b"a[c-a]",
+            b"a[a-]",
+            b"a[-a]",
+            b"a[]a]",
+            b"a[\\]",
+            b"a[b/c]",
+            "a[\u{e9}]".as_bytes(),
+            "a[a-\u{e9}]".as_bytes(),
+            b"a]",
+            b"a\\/b",
+        ];
+        for line in dropped {
+            assert_eq!(text(line), None, "{line:?}");
+        }
+        let widened: [(&[u8], &str); 6] = [
+            (b"!a\\/b{c}", "!*"),
+            (b"!a[/b", "!*"),
+            (b"!a{b}\t", "!*"),
+            (b"!a{b}/c\t", "!*/*"),
+            (b"!x\t/a{b}", "!x\t/*"),
+            (b"!a]b/c", "!*/c"),
+        ];
+        for (line, expected) in widened {
+            assert_eq!(text(line).as_deref(), Some(expected), "{line:?}");
+        }
+    }
 }
