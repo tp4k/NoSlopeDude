@@ -10,6 +10,7 @@ pub mod mergebase;
 pub mod path;
 pub mod snapshot;
 pub mod snapshot_id;
+mod wildmatch;
 
 /// The one diagnostic code this workstream raises: "merge base or required
 /// snapshot unavailable" (`nsd-plan-final.md` *Diagnostics*). The full
