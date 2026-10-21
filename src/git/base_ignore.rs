@@ -214,13 +214,23 @@ fn decide(matcher: Option<&Gitignore>, relative: &[u8], node_is_dir: bool) -> Ma
     }
 }
 
+/// Bytes that can never be a single item of a simple bracket class.
+const CLASS_RESERVED: &[u8] = b"[]\\/-^";
+
 /// A matcher from `.gitignore` bytes. One leading UTF-8 BOM is stripped as
-/// git does, and each line loses a trailing CR and its trailing unescaped
-/// spaces (git trims only U+0020). A line the `ignore` matcher cannot match
-/// byte-exactly (invalid UTF-8, or trailing non-space whitespace that the
-/// matcher would trim) never skips anything: an ignore line is dropped and a
-/// negation is widened to re-include a superset. A line the builder rejects
-/// is skipped, as git skips a bad pattern.
+/// git does, and each line loses a trailing CR and everything from its first
+/// NUL (git reads a line as a C string). Trailing unescaped spaces are
+/// trimmed as git trims them (U+0020 only).
+///
+/// Only a safe subset of git's pattern language reaches the `ignore`
+/// matcher, because its dialect differs from git's (braces, bracket classes).
+/// The subset is: literals, `*`, `?`, `**` as a whole segment, simple ASCII
+/// bracket classes, `\` escapes and `/`. A line outside it, or ending in
+/// non-space whitespace, never skips anything: an ignore line is dropped, and
+/// a negation is widened so it re-includes at least what git re-includes
+/// (trailing whitespace becomes `?`; any other cause turns each offending
+/// segment into `*`, or the whole body when a construct spans a `/`). A line
+/// the builder rejects is skipped, as git skips a bad pattern.
 fn build_matcher(bytes: &[u8]) -> Option<Gitignore> {
     let mut builder = GitignoreBuilder::new(MATCHER_ROOT);
     let bytes = bytes.strip_prefix(UTF8_BOM.as_slice()).unwrap_or(bytes);
@@ -238,78 +248,211 @@ fn build_matcher(bytes: &[u8]) -> Option<Gitignore> {
 }
 
 /// The text to hand to the builder for one `.gitignore` line, or `None` when
-/// the line must contribute no rule.
+/// the line must contribute no rule. The line is cut at its first NUL; a
+/// comment contributes nothing; a valid UTF-8 line inside the safe subset and
+/// not ending in non-space whitespace passes unchanged; anything else is
+/// dropped, or widened when it is a negation.
 fn representable(line: &[u8]) -> Option<String> {
-    let negation = line.first() == Some(&b'!');
-    let text = match std::str::from_utf8(line) {
-        Ok(text) => text.to_string(),
-        Err(_) if negation => widen_invalid_bytes(line),
-        Err(_) => return None,
-    };
-    if text.starts_with('#') {
-        return Some(text);
-    }
-    let trimmed = trim_unescaped_trailing_spaces(&text);
-    let tail = trimmed
-        .trim_end_matches(|ch: char| ch.is_whitespace() && ch != ' ')
-        .len();
-    if tail == trimmed.len() {
-        return Some(trimmed.to_string());
-    }
-    if !negation {
+    let line = line.split(|byte| *byte == 0).next().unwrap_or(line);
+    if line.first() == Some(&b'#') {
         return None;
     }
-    let mut widened = trimmed[..tail].to_string();
-    for ch in trimmed[tail..].chars() {
-        widened.extend(std::iter::repeat_n('?', ch.len_utf8()));
+    let negation = line.first() == Some(&b'!');
+    let trimmed = trim_unescaped_trailing_spaces(line);
+    let body = &trimmed[usize::from(negation)..];
+    if let Ok(text) = std::str::from_utf8(trimmed) {
+        if !ends_in_other_whitespace(text) && in_subset(body) {
+            return Some(text.to_string());
+        }
     }
-    Some(widened)
+    negation.then(|| widen_negation(body))
 }
 
 /// Git's `trim_trailing_spaces`: drop trailing U+0020 unless a backslash
 /// escapes the space.
-fn trim_unescaped_trailing_spaces(text: &str) -> &str {
+fn trim_unescaped_trailing_spaces(line: &[u8]) -> &[u8] {
     let mut last_space = None;
-    let mut chars = text.char_indices();
-    while let Some((index, ch)) = chars.next() {
-        match ch {
-            ' ' => {
+    let mut index = 0;
+    while index < line.len() {
+        match line[index] {
+            b' ' => {
                 last_space.get_or_insert(index);
             }
-            '\\' => {
-                if chars.next().is_none() {
-                    return text;
+            b'\\' => {
+                if index + 1 >= line.len() {
+                    return line;
                 }
                 last_space = None;
+                index += 1;
             }
             _ => last_space = None,
         }
+        index += 1;
     }
-    last_space.map_or(text, |index| &text[..index])
+    last_space.map_or(line, |index| &line[..index])
 }
 
-/// A negation line with each maximal run of invalid UTF-8 replaced by `*`,
-/// which matches a superset of the bytes it replaces.
-fn widen_invalid_bytes(line: &[u8]) -> String {
-    let mut widened = String::new();
-    let mut rest = line;
-    while !rest.is_empty() {
-        match std::str::from_utf8(rest) {
-            Ok(text) => {
-                widened.push_str(text);
-                break;
+/// Whitespace that git keeps but the `ignore` matcher would trim.
+fn is_other_whitespace(ch: char) -> bool {
+    ch.is_whitespace() && ch != ' '
+}
+
+fn ends_in_other_whitespace(text: &str) -> bool {
+    text.ends_with(is_other_whitespace)
+}
+
+/// The widened negation (with its `!`) for a body outside the safe subset.
+/// Trailing non-space whitespace alone becomes `?` per UTF-8 byte (globset's
+/// `?` is byte-wide), dropping the `\` that escaped the first such char.
+/// Any other cause widens each offending segment to `*`.
+fn widen_negation(body: &[u8]) -> String {
+    if let Ok(text) = std::str::from_utf8(body) {
+        let tail = text.trim_end_matches(is_other_whitespace).len();
+        if tail < text.len() {
+            let mut prefix = &text[..tail];
+            let run = prefix
+                .bytes()
+                .rev()
+                .take_while(|byte| *byte == b'\\')
+                .count();
+            if run % 2 == 1 {
+                prefix = &prefix[..prefix.len() - 1];
             }
-            Err(error) => {
-                let (valid, invalid) = rest.split_at(error.valid_up_to());
-                widened.push_str(&String::from_utf8_lossy(valid));
-                if !widened.ends_with('*') {
-                    widened.push('*');
+            if in_subset(prefix.as_bytes()) {
+                let mut widened = format!("!{prefix}");
+                for ch in text[tail..].chars() {
+                    widened.extend(std::iter::repeat_n('?', ch.len_utf8()));
                 }
-                rest = &invalid[error.error_len().unwrap_or(invalid.len())..];
+                return widened;
             }
         }
     }
-    widened
+    let widened = widen_segments(body).unwrap_or_else(|| "*".to_string());
+    format!("!{widened}")
+}
+
+/// `body` with every segment outside the safe subset replaced by `*`, or
+/// `None` when a construct spans a `/`.
+fn widen_segments(body: &[u8]) -> Option<String> {
+    let segments = split_segments(body)?;
+    let last = segments.len() - 1;
+    let mut widened = Vec::new();
+    for (index, segment) in segments.into_iter().enumerate() {
+        if index > 0 {
+            widened.push(b'/');
+        }
+        let inside = std::str::from_utf8(segment).is_ok_and(|text| {
+            segment_in_subset(text) && !(index == last && ends_in_other_whitespace(text))
+        });
+        if inside {
+            widened.extend_from_slice(segment);
+        } else {
+            widened.push(b'*');
+        }
+    }
+    String::from_utf8(widened).ok()
+}
+
+/// Whether the whole body (after any `!`) lies inside the safe subset.
+fn in_subset(body: &[u8]) -> bool {
+    split_segments(body).is_some_and(|segments| {
+        segments
+            .into_iter()
+            .all(|segment| std::str::from_utf8(segment).is_ok_and(segment_in_subset))
+    })
+}
+
+/// The `/`-separated segments of `body`, or `None` when an escaped `/` or a
+/// `[` that opens no simple class (with a `/` after it) spans segments.
+fn split_segments(body: &[u8]) -> Option<Vec<&[u8]>> {
+    let mut segments = Vec::new();
+    let mut start = 0;
+    let mut index = 0;
+    while index < body.len() {
+        match body[index] {
+            b'\\' => {
+                if body.get(index + 1) == Some(&b'/') {
+                    return None;
+                }
+                index += 2;
+            }
+            b'/' => {
+                segments.push(&body[start..index]);
+                index += 1;
+                start = index;
+            }
+            b'[' => match class_end(body, index) {
+                Some(end) => index = end + 1,
+                None if body[index..].contains(&b'/') => return None,
+                None => index += 1,
+            },
+            _ => index += 1,
+        }
+    }
+    segments.push(&body[start..]);
+    Some(segments)
+}
+
+/// Whether one segment uses only the safe subset.
+fn segment_in_subset(segment: &str) -> bool {
+    let bytes = segment.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'{' | b'}' | b']' => return false,
+            b'[' => match class_end(bytes, index) {
+                Some(end) => index = end + 1,
+                None => return false,
+            },
+            b'\\' => match segment[index + 1..].chars().next() {
+                Some(escaped) => index += 1 + escaped.len_utf8(),
+                None => return false,
+            },
+            b'*' => {
+                let run = bytes[index..]
+                    .iter()
+                    .take_while(|byte| **byte == b'*')
+                    .count();
+                if run > 2 || (run == 2 && segment != "**") {
+                    return false;
+                }
+                index += run;
+            }
+            _ => index += 1,
+        }
+    }
+    true
+}
+
+/// The index of the `]` closing the simple ASCII class opened at `open`: an
+/// optional `!`, then single chars or `a-b` ranges of non-reserved ASCII.
+fn class_end(bytes: &[u8], open: usize) -> Option<usize> {
+    let item = |index: usize| {
+        bytes
+            .get(index)
+            .copied()
+            .filter(|byte| byte.is_ascii() && !CLASS_RESERVED.contains(byte))
+    };
+    let mut index = open + 1;
+    if bytes.get(index) == Some(&b'!') {
+        index += 1;
+    }
+    let mut items = 0;
+    loop {
+        if bytes.get(index) == Some(&b']') {
+            return (items > 0).then_some(index);
+        }
+        let low = item(index)?;
+        if bytes.get(index + 1) == Some(&b'-') {
+            if low > item(index + 2)? {
+                return None;
+            }
+            index += 3;
+        } else {
+            index += 1;
+        }
+        items += 1;
+    }
 }
 
 #[cfg(test)]
