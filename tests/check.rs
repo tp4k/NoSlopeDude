@@ -1103,6 +1103,63 @@ fn test_an_over_ceiling_nested_gitignore_stops_its_side_ignoring_below_it() {
 }
 
 #[test]
+fn test_an_unavailable_gitignore_under_an_inherited_directory_exclusion_still_exposes_files() {
+    let oversized = over_ceiling(b"# oversized\n");
+
+    let base_unusable = fixture();
+    commit_with_disk(
+        &base_unusable,
+        &[(".gitignore", b"p/\n"), ("p/.gitignore", &oversized)],
+        &[
+            (".gitignore", Some(b"*.java\n")),
+            ("p/.gitignore", Some(b"# small\n")),
+        ],
+    );
+    base_unusable.disk("p/X.java", violating("X").as_bytes());
+    base_unusable.disk("p/q/Y.java", violating("Y").as_bytes());
+    let outcome = base_unusable.check(base_mode("HEAD", true));
+    assert_eq!(
+        complexity_paths(&outcome),
+        vec!["p/X.java", "p/q/Y.java"],
+        "base side unusable"
+    );
+    assert_eq!(outcome.exit_status, EXIT_REGRESSION, "base side unusable");
+
+    let candidate_unusable = fixture();
+    commit_with_disk(
+        &candidate_unusable,
+        &[(".gitignore", b"*.java\n"), ("p/.gitignore", b"# small\n")],
+        &[
+            (".gitignore", Some(b"p/\n")),
+            ("p/.gitignore", Some(&oversized)),
+        ],
+    );
+    candidate_unusable.disk("p/X.java", violating("X").as_bytes());
+    let outcome = candidate_unusable.check(base_mode("HEAD", true));
+    assert_eq!(
+        complexity_paths(&outcome),
+        vec!["p/X.java"],
+        "candidate side unusable"
+    );
+    assert_eq!(
+        outcome.exit_status, EXIT_REGRESSION,
+        "candidate side unusable"
+    );
+
+    let control = fixture();
+    commit_with_disk(
+        &control,
+        &[(".gitignore", b"p/\n"), ("p/.gitignore", b"# small\n")],
+        &[(".gitignore", Some(b"*.java\n"))],
+    );
+    control.disk("p/X.java", violating("X").as_bytes());
+    assert!(git_cli_ignores(&control, "p/X.java"));
+    let outcome = control.check(base_mode("HEAD", true));
+    assert!(complexity_paths(&outcome).is_empty(), "control");
+    assert_eq!(outcome.exit_status, EXIT_PASS, "control");
+}
+
+#[test]
 fn test_a_gitignore_over_the_double_star_budget_stops_its_side_ignoring() {
     let mut chained = b"**/".repeat(600);
     chained.extend_from_slice(b"x\n");
