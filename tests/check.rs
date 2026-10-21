@@ -888,18 +888,18 @@ fn commit_with_disk(
 
 #[test]
 fn test_a_bracket_class_never_matches_a_slash() {
-    for rules in [
-        &b"p[!x]a.java\n"[..],
-        &b"p[.-0]a.java\n"[..],
-        &b"p[ -~]a.java\n"[..],
+    for (rules, control) in [
+        (&b"p[!x]a.java\n"[..], "pya.java"),
+        (&b"p[.-0]a.java\n"[..], "p.a.java"),
+        (&b"p[ -~]a.java\n"[..], "pya.java"),
     ] {
         let fx = fixture();
         fx.commit(&[(".gitignore", rules)]);
         fx.disk(".gitignore", rules);
         fx.disk("p/a.java", violating("Slashed").as_bytes());
-        fx.disk("pya.java", violating("Control").as_bytes());
+        fx.disk(control, violating("Control").as_bytes());
         assert!(!git_cli_ignores(&fx, "p/a.java"), "{rules:?}");
-        assert!(git_cli_ignores(&fx, "pya.java"), "{rules:?}");
+        assert!(git_cli_ignores(&fx, control), "{rules:?}");
 
         let outcome = fx.check(base_mode("HEAD", true));
 
