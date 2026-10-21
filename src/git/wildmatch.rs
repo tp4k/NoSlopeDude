@@ -219,6 +219,8 @@ mod tests {
     const PATHOLOGICAL_STAR_COUNT: usize = 64;
     const PATHOLOGICAL_TEXT_LEN: usize = 255;
     const PATHOLOGICAL_DEADLINE: Duration = Duration::from_secs(1);
+    const REPEATED_SEGMENT_COUNT: usize = 400;
+    const LONG_TEXT_SEGMENTS: usize = 30;
 
     fn assert_rows(rows: &[Row]) {
         for (pattern, text, expected) in rows {
@@ -243,6 +245,29 @@ mod tests {
         });
         let verdict = receiver.recv_timeout(PATHOLOGICAL_DEADLINE);
         assert_eq!(verdict, Ok(false));
+    }
+
+    #[test]
+    fn test_repeated_double_star_segments_return_promptly() {
+        let mut pattern = b"**/".repeat(REPEATED_SEGMENT_COUNT);
+        pattern.push(b'x');
+        let mut long_text = b"a/".repeat(LONG_TEXT_SEGMENTS);
+        long_text.push(b'y');
+        let rows: [(Vec<u8>, bool); 3] = [
+            (b"a/b/c/d/e/f.log".to_vec(), false),
+            (long_text, false),
+            (b"a/b/x".to_vec(), true),
+        ];
+        for (text, expected) in rows {
+            let pattern = pattern.clone();
+            let shown = String::from_utf8_lossy(&text).into_owned();
+            let (sender, receiver) = mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = sender.send(wildmatch(&pattern, &text));
+            });
+            let verdict = receiver.recv_timeout(PATHOLOGICAL_DEADLINE);
+            assert_eq!(verdict, Ok(expected), "text {shown:?}");
+        }
     }
 
     #[test]
