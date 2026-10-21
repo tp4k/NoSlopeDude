@@ -8,8 +8,9 @@
 //!
 //! A `.gitignore` that cannot be used on one side (over `SOURCE_CEILING_BYTES`,
 //! an on-disk read failure, or a line too intricate for the matcher's stack
-//! bound) makes that side ignore nothing at or below its directory: a failure
-//! may expose more files, never hide more than git would.
+//! bound) makes that side ignore nothing at or below its directory, even under
+//! an inherited directory exclusion: a failure may expose more files, never
+//! hide more than git would.
 
 use std::collections::HashMap;
 use std::fs;
@@ -120,18 +121,39 @@ impl<'a> BaseIgnore<'a> {
 
     /// Git's top-down rule: a path is ignored when any ancestor directory is
     /// ignored (a child cannot be re-included) or the path itself is. The
-    /// walk is top-down, so each parent's verdict is memoized per side.
+    /// walk is top-down, so each parent's verdict is memoized per side. An
+    /// unavailable `.gitignore` in any directory from the root through the
+    /// path's parent makes this side ignore nothing for the path, even under
+    /// an inherited directory exclusion; the path's own directory is still
+    /// decided by its parent's rules.
     fn ignores(&mut self, side: Side, path: &[u8], is_dir: bool) -> Result<bool, GitError> {
-        let ignored = match path.iter().rposition(|byte| *byte == b'/') {
-            Some(slash) => {
-                self.dir_ignored(side, &path[..slash])? || self.node_ignored(side, path, is_dir)?
+        let ignored = if self.ancestor_unavailable(side, path)? {
+            false
+        } else {
+            match path.iter().rposition(|byte| *byte == b'/') {
+                Some(slash) => {
+                    self.dir_ignored(side, &path[..slash])?
+                        || self.node_ignored(side, path, is_dir)?
+                }
+                None => self.node_ignored(side, path, is_dir)?,
             }
-            None => self.node_ignored(side, path, is_dir)?,
         };
         if is_dir {
             self.dir_memo(side).insert(path.to_vec(), ignored);
         }
         Ok(ignored)
+    }
+
+    /// Whether a directory on `node`'s ancestor chain (the root through its
+    /// parent) holds an unavailable `.gitignore` on `side`, checked root-first.
+    fn ancestor_unavailable(&mut self, side: Side, node: &[u8]) -> Result<bool, GitError> {
+        for dir in ancestor_dirs(node) {
+            self.ensure_loaded(side, dir)?;
+            if matches!(self.rules(side).get(dir), Some(Load::Unavailable)) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Whether directory `dir` is ignored on `side`, ancestors included.
@@ -149,37 +171,24 @@ impl<'a> BaseIgnore<'a> {
         }
     }
 
-    /// The verdict for `node` alone (its ancestors are not asked). The
-    /// directories on its path are consulted root-first for an unavailable
-    /// `.gitignore`, which makes this side ignore nothing here; otherwise the
-    /// deepest `.gitignore` with a matching line decides and a whitelist line
-    /// un-ignores. Every ancestor of `node` is a directory.
+    /// The verdict for `node` alone (its ancestors are not asked), once
+    /// `ancestor_unavailable` has found every `.gitignore` on its chain usable:
+    /// the deepest `.gitignore` with a matching line decides and a whitelist
+    /// line un-ignores. Every ancestor of `node` is a directory.
     fn node_ignored(
         &mut self,
         side: Side,
         node: &[u8],
         node_is_dir: bool,
     ) -> Result<bool, GitError> {
-        let slashes: Vec<usize> = node
-            .iter()
-            .enumerate()
-            .filter_map(|(index, byte)| (*byte == b'/').then_some(index))
-            .collect();
-        let mut dir_ends: Vec<Option<usize>> = vec![None];
-        dir_ends.extend(slashes.into_iter().map(Some));
-        for end in &dir_ends {
-            let dir = end.map_or(&node[..0], |slash| &node[..slash]);
-            self.ensure_loaded(side, dir)?;
-            if matches!(self.rules(side).get(dir), Some(Load::Unavailable)) {
-                return Ok(false);
-            }
-        }
-        for end in dir_ends.iter().rev() {
-            let (dir, relative) = match end {
-                Some(slash) => (&node[..*slash], &node[slash + 1..]),
-                None => (&node[..0], node),
+        let dirs = ancestor_dirs(node);
+        for dir in dirs.iter().rev() {
+            let relative = if dir.is_empty() {
+                node
+            } else {
+                &node[dir.len() + 1..]
             };
-            let Some(Load::Rules(rules)) = self.rules(side).get(dir) else {
+            let Some(Load::Rules(rules)) = self.rules(side).get(*dir) else {
                 continue;
             };
             match decide(rules, relative, node_is_dir) {
@@ -264,6 +273,18 @@ impl<'a> BaseIgnore<'a> {
         }
         load_rules(&buf)
     }
+}
+
+/// The directories of `node`'s ancestor chain, root first (`""` is the root).
+fn ancestor_dirs(node: &[u8]) -> Vec<&[u8]> {
+    let mut dirs: Vec<&[u8]> = vec![&node[..0]];
+    dirs.extend(
+        node.iter()
+            .enumerate()
+            .filter(|(_, byte)| **byte == b'/')
+            .map(|(slash, _)| &node[..slash]),
+    );
+    dirs
 }
 
 /// The last rule of `rules` that matches `relative` decides.
