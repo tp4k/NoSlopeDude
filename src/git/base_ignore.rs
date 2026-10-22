@@ -20,7 +20,7 @@ use std::path::PathBuf;
 use git2::Repository;
 
 use super::snapshot::{repo_path_to_fs, CommitSnapshot, EntryKind, SOURCE_CEILING_BYTES};
-use super::wildmatch::{special_runs, wildmatch};
+use super::wildmatch::{special_runs, wildmatch_with_runs};
 use super::GitError;
 
 const GITIGNORE_NAME: &[u8] = b".gitignore";
@@ -49,6 +49,8 @@ struct Rule {
     /// The pattern without `!`, the trailing `/` and (for an anchored
     /// pattern) the leading `/`.
     pattern: Vec<u8>,
+    /// `special_runs(pattern)`, counted once at load.
+    double_star_runs: usize,
 }
 
 /// What one directory's `.gitignore` offers on one side.
@@ -80,6 +82,10 @@ pub(super) struct BaseIgnore<'a> {
     /// Directory to "ignored on this side, ancestors included".
     base_dirs: HashMap<Vec<u8>, bool>,
     candidate_dirs: HashMap<Vec<u8>, bool>,
+    /// Directory to "it or a directory above it holds an unavailable
+    /// `.gitignore` on this side".
+    base_unavailable: HashMap<Vec<u8>, bool>,
+    candidate_unavailable: HashMap<Vec<u8>, bool>,
 }
 
 impl<'a> BaseIgnore<'a> {
@@ -108,6 +114,8 @@ impl<'a> BaseIgnore<'a> {
             candidate_rules: HashMap::new(),
             base_dirs: HashMap::new(),
             candidate_dirs: HashMap::new(),
+            base_unavailable: HashMap::new(),
+            candidate_unavailable: HashMap::new(),
         }
     }
 
@@ -145,15 +153,41 @@ impl<'a> BaseIgnore<'a> {
     }
 
     /// Whether a directory on `node`'s ancestor chain (the root through its
-    /// parent) holds an unavailable `.gitignore` on `side`, checked root-first.
+    /// parent) holds an unavailable `.gitignore` on `side`.
     fn ancestor_unavailable(&mut self, side: Side, node: &[u8]) -> Result<bool, GitError> {
-        for dir in ancestor_dirs(node) {
-            self.ensure_loaded(side, dir)?;
-            if matches!(self.rules(side).get(dir), Some(Load::Unavailable)) {
-                return Ok(true);
-            }
+        let parent = match node.iter().rposition(|byte| *byte == b'/') {
+            Some(slash) => &node[..slash],
+            None => &node[..0],
+        };
+        self.unavailable_at_or_above(side, parent)
+    }
+
+    /// Whether `dir` or a directory above it holds an unavailable
+    /// `.gitignore` on `side`, memoized per directory. The chain is loaded
+    /// root-first and nothing below the first unavailable file is loaded.
+    fn unavailable_at_or_above(&mut self, side: Side, dir: &[u8]) -> Result<bool, GitError> {
+        if let Some(known) = self.unavailable_memo(side).get(dir) {
+            return Ok(*known);
         }
-        Ok(false)
+        let above = if dir.is_empty() {
+            false
+        } else {
+            self.ancestor_unavailable(side, dir)?
+        };
+        let unavailable = above || {
+            self.ensure_loaded(side, dir)?;
+            matches!(self.rules(side).get(dir), Some(Load::Unavailable))
+        };
+        self.unavailable_memo(side)
+            .insert(dir.to_vec(), unavailable);
+        Ok(unavailable)
+    }
+
+    fn unavailable_memo(&mut self, side: Side) -> &mut HashMap<Vec<u8>, bool> {
+        match side {
+            Side::Base => &mut self.base_unavailable,
+            Side::Candidate => &mut self.candidate_unavailable,
+        }
     }
 
     /// Whether directory `dir` is ignored on `side`, ancestors included.
@@ -181,14 +215,13 @@ impl<'a> BaseIgnore<'a> {
         node: &[u8],
         node_is_dir: bool,
     ) -> Result<bool, GitError> {
-        let dirs = ancestor_dirs(node);
-        for dir in dirs.iter().rev() {
+        for dir in ancestor_dirs_deepest_first(node) {
             let relative = if dir.is_empty() {
                 node
             } else {
                 &node[dir.len() + 1..]
             };
-            let Some(Load::Rules(rules)) = self.rules(side).get(*dir) else {
+            let Some(Load::Rules(rules)) = self.rules(side).get(dir) else {
                 continue;
             };
             match decide(rules, relative, node_is_dir) {
@@ -275,16 +308,15 @@ impl<'a> BaseIgnore<'a> {
     }
 }
 
-/// The directories of `node`'s ancestor chain, root first (`""` is the root).
-fn ancestor_dirs(node: &[u8]) -> Vec<&[u8]> {
-    let mut dirs: Vec<&[u8]> = vec![&node[..0]];
-    dirs.extend(
-        node.iter()
-            .enumerate()
-            .filter(|(_, byte)| **byte == b'/')
-            .map(|(slash, _)| &node[..slash]),
-    );
-    dirs
+/// The directories of `node`'s ancestor chain, deepest first (`""`, the
+/// root, comes last).
+fn ancestor_dirs_deepest_first(node: &[u8]) -> impl Iterator<Item = &[u8]> {
+    node.iter()
+        .enumerate()
+        .rev()
+        .filter(|(_, byte)| **byte == b'/')
+        .map(|(slash, _)| &node[..slash])
+        .chain(std::iter::once(&node[..0]))
 }
 
 /// The last rule of `rules` that matches `relative` decides.
@@ -311,9 +343,9 @@ impl Rule {
                 Some(slash) => &relative[slash + 1..],
                 None => relative,
             };
-            return wildmatch(&self.pattern, name);
+            return wildmatch_with_runs(&self.pattern, name, self.double_star_runs);
         }
-        wildmatch(&self.pattern, relative)
+        wildmatch_with_runs(&self.pattern, relative, self.double_star_runs)
     }
 }
 
@@ -347,7 +379,7 @@ fn parse_rules(bytes: &[u8]) -> Option<Vec<Rule>> {
             continue;
         }
         if let Some(rule) = parse_line(trim_unescaped_trailing_spaces(line))? {
-            extra_double_star_runs += special_runs(&rule.pattern).saturating_sub(1);
+            extra_double_star_runs += rule.double_star_runs.saturating_sub(1);
             if extra_double_star_runs > MAX_EXTRA_DOUBLE_STAR_RUNS_PER_FILE {
                 return None;
             }
@@ -381,6 +413,7 @@ fn parse_line(line: &[u8]) -> Option<Option<Rule>> {
         directory_only,
         basename,
         pattern: body.to_vec(),
+        double_star_runs: special_runs(body),
     }))
 }
 

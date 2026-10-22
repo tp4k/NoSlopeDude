@@ -15,9 +15,12 @@ const STAR: u8 = b'*';
 const BACKSLASH: u8 = b'\\';
 
 /// Verdicts of `walk` calls made by a special `**` run, keyed by pattern and
-/// text position. Created on first use, so a pattern without such a run
-/// allocates nothing.
-type Memo = Option<HashMap<(usize, usize), Outcome>>;
+/// text position. Kept only for a pattern with two or more such runs (one
+/// run is linear without it), and created on first use.
+struct Memo {
+    enabled: bool,
+    table: Option<HashMap<(usize, usize), Outcome>>,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Outcome {
@@ -29,17 +32,31 @@ enum Outcome {
 
 /// Whether `pattern` matches the whole of `text` under git's pathname
 /// wildmatch rules. Neither side is decoded: both are raw bytes.
+#[cfg(test)]
 pub(super) fn wildmatch(pattern: &[u8], text: &[u8]) -> bool {
-    walk(pattern, 0, text, 0, &mut None) == Outcome::Match
+    wildmatch_with_runs(pattern, text, special_runs(pattern))
+}
+
+/// `wildmatch` for a caller that already knows `special_runs(pattern)`.
+pub(super) fn wildmatch_with_runs(pattern: &[u8], text: &[u8], runs: usize) -> bool {
+    let mut memo = Memo {
+        enabled: runs >= 2,
+        table: None,
+    };
+    walk(pattern, 0, text, 0, &mut memo) == Outcome::Match
 }
 
 /// `walk(pat, p, text, t)`, computed once per `(p, t)` for the caller.
 fn walk_memoized(pat: &[u8], p: usize, text: &[u8], t: usize, memo: &mut Memo) -> Outcome {
-    if let Some(known) = memo.as_ref().and_then(|table| table.get(&(p, t))) {
+    if !memo.enabled {
+        return walk(pat, p, text, t, memo);
+    }
+    if let Some(known) = memo.table.as_ref().and_then(|table| table.get(&(p, t))) {
         return *known;
     }
     let outcome = walk(pat, p, text, t, memo);
-    memo.get_or_insert_with(HashMap::new)
+    memo.table
+        .get_or_insert_with(HashMap::new)
         .insert((p, t), outcome);
     outcome
 }
