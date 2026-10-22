@@ -619,6 +619,7 @@ fn test_a_symlinked_gitignore_contributes_no_rules_on_either_side() {
     assert_eq!(complexity_paths(&outcome), vec!["Linked.java"]);
 }
 
+#[cfg(unix)]
 #[test]
 fn test_a_symlinked_nested_gitignore_is_absent_not_unavailable() {
     let base_link = fixture();
