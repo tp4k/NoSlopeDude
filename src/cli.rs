@@ -28,6 +28,8 @@ pub enum Format {
     Json,
     /// One escaped line per violation, capped by `output.max_agent_diagnostics`.
     Agent,
+    /// One `::notice` workflow command per diagnostic, capped by `output.max_github_diagnostics`.
+    Github,
 }
 
 #[derive(Debug, Parser, Clone, PartialEq, Eq)]
@@ -52,6 +54,10 @@ pub struct CheckArgs {
     /// Output format of the diagnostics.
     #[arg(long, value_enum, default_value_t = Format::Terminal)]
     pub format: Format,
+
+    /// Also write the canonical JSON document (what `--format json` prints) to this file.
+    #[arg(long, value_name = "PATH")]
+    pub json_out: Option<PathBuf>,
 
     /// Do not fail the run on new suppression directives (`NSD-S101` only).
     #[arg(long)]

@@ -42,8 +42,8 @@ A scanned folder's own `.gitignore` is always respected, even when the folder is
 ## `check`
 
 ```
-nsd check --staged      [--config <path>] [--format terminal|json|agent] [--allow-new-suppressions]
-nsd check --base <ref> [--worktree] [--config <path>] [--format terminal|json|agent] [--allow-new-suppressions]
+nsd check --staged      [--config <path>] [--format terminal|json|agent|github] [--json-out <path>] [--allow-new-suppressions]
+nsd check --base <ref> [--worktree] [--config <path>] [--format terminal|json|agent|github] [--json-out <path>] [--allow-new-suppressions]
 ```
 
 Compares a candidate change with its base under the base's own policy and prints one line per diagnostic, capped (see *Output caps*), to stdout. Run it at the root of the repository.
@@ -52,7 +52,8 @@ Compares a candidate change with its base under the base's own policy and prints
 - `--base <ref>` checks `HEAD` against `merge-base(HEAD, <ref>)`; with `--worktree` the candidate is the working tree instead of `HEAD`.
 - With `--worktree`, an untracked file is left out (and an untracked directory is not read) only when both of these ignore it: the `.gitignore` files of the merge-base snapshot, read at every directory level with git's precedence and negation (a deeper file wins, a later line wins, `!` re-includes, and a file under an ignored directory cannot be re-included), and the worktree's own on-disk `.gitignore` files. A candidate `.gitignore` edit can therefore only expose files, never hide them: adding `foo/` hides nothing, and deleting a base line checks the files it ignored. Tracked files always stay, even under an ignored directory. `.git/info/exclude`, `core.excludesFile` and `core.ignoreCase` are never read, matching is case-sensitive and byte-wise, and a symlinked `.gitignore` contributes no rules (git does not follow it either). Patterns and lines follow git's own wildmatch with `WM_PATHNAME` and `.gitignore` line parsing (a leading UTF-8 BOM, one `\r` before the newline and everything from the first NUL are dropped; trailing unescaped spaces are trimmed; `!`, `\!`, `\#`, a trailing `/`, `**`, bracket classes and POSIX `[:name:]` classes behave as in git), and a test compares the verdict with `git check-ignore --no-index` over a pattern corpus. A `.gitignore` that cannot be used on one side (over 1 MiB, containing a line with more than 1000 runs of `*` characters (escaped and bracketed ones count too), or holding more than 1000 special (whole-segment) `**` runs beyond each line's first) makes that side ignore nothing at or below its directory, so neither its own negations, its ancestors' rules nor a deeper `.gitignore` can skip a file there, even when an ancestor directory is excluded on that side; the directory holding the unusable file is still decided by its parent's rules, and a directory both sides ignore is still not read, so an unusable `.gitignore` inside it has no effect. An untracked on-disk `.gitignore` that the check cannot read stops the check with `NSD-G101` and exit 2, naming the file, and no file is skipped. Apart from the rules not read above, these are the only cases where one side's verdict differs from git's own `.gitignore` matching. `--staged`, `--base` without `--worktree`, and `scan` are unchanged.
 - `--staged` and `--base` are mutually exclusive, one is required, and `--worktree` requires `--base`. A usage error exits `2` and prints nothing to stdout.
-- `--format <terminal|json|agent>` picks the output, `terminal` by default. `json` prints one canonical JSON document instead of the lines below (see `docs/report-format.md` *Check JSON*) and is never capped; the exit code is the same for all three. `agent` prints the lines below for violations only (see *Output caps*).
+- `--format <terminal|json|agent|github>` picks the output, `terminal` by default. `json` prints one canonical JSON document instead of the lines below (see `docs/report-format.md` *Check JSON*) and is never capped; the exit code is the same for all four. `agent` prints the lines below for violations only (see *Output caps*). `github` prints GitHub Actions workflow commands instead (see *GitHub annotations*).
+- `--json-out <path>` also writes the canonical JSON document, byte for byte what `--format json` prints, to `<path>`, whatever `--format` prints on stdout, so one run can both annotate and keep a machine-readable report. A relative path is resolved from the working directory. The file is written before stdout. When it cannot be written the run prints `error: cannot write --json-out: …` to stderr and nothing to stdout, and exits with the verdict's status plus the error bit: `2` for a run that would have passed, `3` for one with a denied regression (see *Exit codes*). A successful write never changes the exit code.
 - `--allow-new-suppressions` makes `NSD-S101` exit-neutral for this invocation only: the diagnostic still prints in `terminal` and appears in `json`, and `agent` leaves it out because it is no longer a violation. It affects `NSD-S101` alone, so `E101`, `E102`, `V101`, `V102` and a denied `S102` keep their exit contribution. `nsd.yml` has no key for it (any unknown key is `NSD-C102`), so only the command line can turn it on.
 - `--config <path>` replaces the repository policy with a trusted file. A path that resolves inside the checkout is refused with `NSD-C102` and exit `2`, and is never read. Inside means the absolute path as given, or its directory resolved, or its symlinks resolved, or the way the OS opens it (so `..` after a symlink counts), lies under the checkout root (`.git/` included), or an existing directory above any of those is the checkout root under another name (same device and inode). That covers an alias of the root or of one of its ancestors, such as `/System/Volumes/Data/…` on macOS, a bind mount of the root, or a case variant on a case-insensitive volume. A missing file is judged the same way. Two cases are not refused: a hard link outside the checkout to a file inside it, and a bind mount of a checkout subdirectory at a path outside it. Use a file outside the checkout. The same-device-and-inode test runs on unix only; elsewhere only the path forms are compared.
 
@@ -73,10 +74,11 @@ Non-UTF-8 path bytes print as `%XX`, and control characters and Unicode bidi con
 
 ### Output caps
 
-The caps come from the trusted configuration's `output` section: the base snapshot's `nsd.yml`, or `--config`. A candidate `nsd.yml` never changes its own caps. With no configuration resolved (including a refused `--config` and `NSD-G101`) the defaults apply: 50 for `terminal` (`max_terminal_diagnostics`) and 30 for `agent` (`max_agent_diagnostics`).
+The caps come from the trusted configuration's `output` section: the base snapshot's `nsd.yml`, or `--config`. A candidate `nsd.yml` never changes its own caps. With no configuration resolved (including a refused `--config` and `NSD-G101`) the defaults apply: 50 for `terminal` (`max_terminal_diagnostics`), 30 for `agent` (`max_agent_diagnostics`) and 10 for `github` (`max_github_diagnostics`; GitHub keeps at most 10 annotations of each type per step).
 
 - `terminal` lists the first N diagnostics in the order of the complete result. When any were dropped it ends with one extra line, `omitted diagnostics: <count>`, the count in decimal. With nothing omitted there is no extra line.
 - `agent` lists only violations: diagnostics with a non-zero exit contribution under the trusted policy (`warn`, `off` and informational ones such as `NSD-C101` are left out). It keeps the first N of them and, when any were dropped, ends with `omitted violations: <count>`, counting violations only.
+- `github` lists every diagnostic, violations first (a non-zero exit contribution under the trusted policy, so a code set to `off` sorts with the rest), each group in the order of the complete result. It keeps the first N and, when any were dropped, ends with `omitted diagnostics: <dropped> of <total>`, a plain log line rather than an annotation.
 - A cap of `0` lists no diagnostic line, only the omitted line when there is anything to omit.
 - Neither extra line starts with `NSD-`. The same result always renders the same bytes.
 - The exit code is always computed from the complete, uncapped result, so an omitted diagnostic still sets it.
@@ -87,6 +89,31 @@ The caps come from the trusted configuration's `output` section: the base snapsh
 - `1` — a denied regression.
 - `2` — an analysis, configuration or snapshot error, including running outside a Git repository (`NSD-G101`).
 - `3` — both.
+
+A `--json-out` file that cannot be written adds the `2` bit to the verdict's status (see `--json-out`).
+
+### GitHub annotations
+
+`--format github` prints one line per listed diagnostic, `::notice <properties>::<message>`. Every diagnostic is a `notice`, whatever its exit contribution. The properties are joined with `,` in this order, each left out when the diagnostic has no such value:
+
+- `title=nsd <code>`
+- `file=<repo-relative path>` (`nsd.yml` for `NSD-C101` and a candidate `NSD-C102`)
+- `line=<start line>`, the directive line for `NSD-S101`/`NSD-S102`
+- `endLine=<end line>`, equal to `line` when the diagnostic has a single line
+
+| Codes | Message |
+|---|---|
+| `NSD-E101`, `NSD-E102`, `NSD-G102` | `<callable>`, then ` \| CC <base> -> <candidate>, SLOC <base> -> <candidate>` when it has a base match and the JSON report's `entities` hold it (same path, start line and name), or ` \| base CC <n>, SLOC <n>` when only the base is known |
+| `NSD-V101` | `<rule id>` |
+| `NSD-S101`, `NSD-S102` | `<rule id>`, or `suppression directive` when the directive names no valid rule |
+| `NSD-A101` | `damaged span; see the nsd JSON report` |
+| `NSD-A102` | `<reason>` |
+| `NSD-V102` | `clone of <span> (+<n> lines)`, naming the match |
+| `NSD-C101` | `nsd.yml changed` |
+| candidate `NSD-C102` | `nsd.yml is invalid` |
+| `NSD-G101`, a refused `--config` `NSD-C102` | the free-text message |
+
+Values are encoded the way the Actions runner decodes them, so nothing a pull request puts into a path, a name or a message can end the line, start another workflow command or add a property. In the message `%` becomes `%25` first, then CR `%0D` and LF `%0A`, and every other control character or Unicode bidi control prints as `\u{..}`. A property value is encoded the same way, and then `:` becomes `%3A` and `,` becomes `%2C`.
 
 ## Pre-commit and CI
 
@@ -126,6 +153,12 @@ For a machine-readable result, whose `summaries` carry the repository ratios (sc
 nsd check --base origin/main --format json
 ```
 
+On GitHub Actions, annotate the pull request and keep the JSON report from the same run:
+
+```sh
+nsd check --base origin/main --format github --json-out nsd.json
+```
+
 Exit `0` passes the job, `1` and `3` fail it for a denied regression, and `2` and `3` fail it for an analysis or configuration error (see *Exit codes*).
 
 The repository itself runs `.github/workflows/self-check.yml` on macOS and Linux, which builds `nsd`, runs its tests and runs `nsd check --base`; through the Rust lowering it gates `nsd`'s own source, while the Java/JS/TS test fixtures stay excluded by the root `nsd.yml`.
@@ -144,3 +177,9 @@ tar -xzf "$ASSET" nsd
 ```
 
 Do not verify against a `.sha256` downloaded from the same release: a replaced asset can come with a replaced checksum file, while a pinned value makes it fail the job.
+
+From `v0.1.3` on, the `publish` job also attests the tarball's build provenance, and the `build` job's *Package* step prints the checksum to its log. To check that a downloaded tarball was built by this repository's release workflow, run:
+
+```sh
+gh attestation verify nsd-x86_64-unknown-linux-musl.tar.gz --repo tp4k/NoSlopeDude
+```
