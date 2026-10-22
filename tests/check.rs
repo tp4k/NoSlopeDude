@@ -366,6 +366,18 @@ impl Drop for Unlock {
     }
 }
 
+/// Whether a mode-0o000 lock was bypassed, as it is for root. Such a run
+/// cannot check what the lock is there for, so under CI (`CI` set) it fails
+/// instead of passing without checking anything.
+#[cfg(unix)]
+fn lock_bypassed(still_readable: bool) -> bool {
+    assert!(
+        !still_readable || std::env::var_os("CI").is_none(),
+        "a mode-0o000 lock does not hold (running as root?), so this test checks nothing; run CI as a non-root user"
+    );
+    still_readable
+}
+
 #[cfg(unix)]
 #[test]
 fn test_worktree_skips_untracked_files_the_base_gitignore_ignores() {
@@ -384,6 +396,7 @@ fn test_worktree_skips_untracked_files_the_base_gitignore_ignores() {
     fs::create_dir_all(&locked).expect("create the locked directory");
     let _unlock = Unlock(locked.clone());
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).expect("lock the directory");
+    lock_bypassed(fs::read_dir(&locked).is_ok());
 
     let outcome = fx.check(base_mode("HEAD", true));
 
@@ -1197,7 +1210,7 @@ fn test_an_unreadable_untracked_gitignore_fails_closed_with_g101_naming_it() {
     fx.disk("Z.java", violating("Z").as_bytes());
     let locked = fx.dir.path().join("p/.gitignore");
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).expect("lock the file");
-    if fs::File::open(&locked).is_ok() {
+    if lock_bypassed(fs::File::open(&locked).is_ok()) {
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o644)).expect("unlock the file");
         return;
     }

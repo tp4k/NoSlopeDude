@@ -511,6 +511,12 @@ mod tests {
 
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o644)).expect("unlock the file");
         if readable_anyway {
+            // Root bypasses the lock, so the check cannot run; under CI that
+            // fails rather than passing without checking anything.
+            assert!(
+                std::env::var_os("CI").is_none(),
+                "a mode-0o000 lock does not hold (running as root?), so this test checks nothing; run CI as a non-root user"
+            );
             return;
         }
         assert!(matches!(load, Load::Unavailable));
