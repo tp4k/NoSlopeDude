@@ -103,7 +103,7 @@ A `--json-out` file that cannot be written adds the `2` bit to the verdict's sta
 
 | Codes | Message |
 |---|---|
-| `NSD-E101`, `NSD-E102`, `NSD-G102` | `<callable>`, then ` \| CC <base> -> <candidate>, SLOC <base> -> <candidate>` when it has a base match and the JSON report's `entities` hold it (same path, start line and name), or ` \| base CC <n>, SLOC <n>` when only the base is known |
+| `NSD-E101`, `NSD-E102`, `NSD-G102` | `<callable>` as the JSON report names it (a computed name is `<computed>@<line>`), then ` \| CC <base> -> <candidate>, SLOC <base> -> <candidate>` when it has a base match and the JSON report's `entities` hold it (same path, start line and name), or ` \| base CC <n>, SLOC <n>` when only the base is known |
 | `NSD-V101` | `<rule id>` |
 | `NSD-S101`, `NSD-S102` | `<rule id>`, or `suppression directive` when the directive names no valid rule |
 | `NSD-A101` | `damaged span; see the nsd JSON report` |

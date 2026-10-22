@@ -7,6 +7,7 @@ use crate::check::{CheckDetails, CheckDiagnostic};
 use crate::config::{PolicyConfig, CODE_CONFIG_CHANGED};
 use crate::policy::diagnostics::PolicyDiagnostic;
 use crate::policy::exit::contribution;
+use crate::report::published_name;
 
 use super::{needs_escape, CANDIDATE_CONFIG_FILE, OMITTED_DIAGNOSTICS_LABEL};
 
@@ -125,7 +126,10 @@ fn locate_and_describe(
                 found.candidate_start_line,
                 found.candidate_end_line,
             ),
-            joined(&[&found.candidate_name, &complexity_change(found, details)]),
+            joined(&[
+                &published_name(&found.candidate_name, found.candidate_start_line),
+                &complexity_change(found, details),
+            ]),
         ),
         CheckDiagnostic::Finding(found) => (
             Location::span(

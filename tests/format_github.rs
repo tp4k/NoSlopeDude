@@ -17,6 +17,7 @@ use nsd::policy::diagnostics::{
     CODE_PARSE_DAMAGE, CODE_UNMATCHED_FINDING,
 };
 use nsd::policy::Diagnostic as ConfigNote;
+use nsd::report::published_name;
 
 const G101: &str = "NSD-G101";
 const DEFAULT_CAP: u32 = 10;
@@ -422,6 +423,23 @@ fn test_e102_joins_the_matching_candidate_entity() {
 }
 
 #[test]
+fn test_computed_callable_shows_its_published_name_and_still_joins() {
+    let raw = "[\"secret literal\"]";
+    let diagnostic = complexity(
+        CODE_COMPLEXITY_INCREASED,
+        "src/A.ts",
+        raw,
+        3,
+        Some(base_callable(11, 20)),
+    );
+    let found = details(vec![entity("src/A.ts", raw, 3, 14, 21)]);
+
+    let command = single(diagnostic, Some(&found));
+
+    assert_eq!(command.data, "<computed>@3 | CC 11 -> 14, SLOC 20 -> 21");
+}
+
+#[test]
 fn test_e102_without_a_matching_entity_falls_back_to_the_base() {
     let diagnostic = || {
         complexity(
@@ -613,7 +631,10 @@ fn test_hostile_paths_and_names_stay_one_annotation_each() {
                     "{line}"
                 );
                 assert_eq!(property(&command, "line"), Some("3"), "{line}");
-                assert_eq!(command.data, as_displayed(&found.candidate_name));
+                assert_eq!(
+                    command.data,
+                    published_name(&found.candidate_name, found.candidate_start_line)
+                );
             }
             CheckDiagnostic::Failure { message, .. } => {
                 assert_eq!(found, ["title"], "{line}");
