@@ -689,26 +689,7 @@ fn walk_worktree(
         })?;
 
         if file_type.is_dir() {
-            if tracked_submodules.contains(&relative) {
-                continue; // A tracked submodule directory: already handled by the overlay step.
-            }
-            if ignore_rules.skips(&child_bytes, true)? {
-                continue; // D22: pruned without reading the directory.
-            }
-            let child_fs_path = repo_path_to_fs(workdir, &child_bytes);
-            if has_git_marker(&child_fs_path) {
-                by_path.insert(
-                    relative.clone(),
-                    Entry {
-                        path: relative,
-                        kind: EntryKind::NestedCheckout,
-                        oid: None,
-                        size: 0,
-                    },
-                );
-                continue; // D7: surfaced, not descended.
-            }
-            walk_worktree(
+            visit_worktree_dir(
                 workdir,
                 &child_bytes,
                 tracked,
@@ -768,6 +749,44 @@ fn walk_worktree(
         );
     }
     Ok(())
+}
+
+/// One worktree directory met by `walk_worktree` at `dir`: a tracked
+/// submodule is skipped (the overlay step handles it), an ignored one is
+/// pruned without being read (D22), a nested checkout is surfaced but not
+/// descended (D7), and any other is walked.
+fn visit_worktree_dir(
+    workdir: &Path,
+    dir: &[u8],
+    tracked: &BTreeSet<RepoPath>,
+    tracked_submodules: &BTreeSet<RepoPath>,
+    ignore_rules: &mut IgnoreFilter<'_>,
+    by_path: &mut BTreeMap<RepoPath, Entry>,
+) -> Result<(), GitError> {
+    let relative = RepoPath::from_bytes(dir.to_vec());
+    if tracked_submodules.contains(&relative) || ignore_rules.skips(dir, true)? {
+        return Ok(());
+    }
+    if has_git_marker(&repo_path_to_fs(workdir, dir)) {
+        by_path.insert(
+            relative.clone(),
+            Entry {
+                path: relative,
+                kind: EntryKind::NestedCheckout,
+                oid: None,
+                size: 0,
+            },
+        );
+        return Ok(());
+    }
+    walk_worktree(
+        workdir,
+        dir,
+        tracked,
+        tracked_submodules,
+        ignore_rules,
+        by_path,
+    )
 }
 
 /// Which ignore rules drop an untracked worktree entry.

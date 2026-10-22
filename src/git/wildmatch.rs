@@ -64,39 +64,16 @@ fn walk_memoized(pat: &[u8], p: usize, text: &[u8], t: usize, memo: &mut Memo) -
 /// Matches `pat[p..]` against `text[t..]`; `p == 0` is the pattern start.
 fn walk(pat: &[u8], mut p: usize, text: &[u8], mut t: usize, memo: &mut Memo) -> Outcome {
     while p < pat.len() {
-        let pattern_byte = pat[p];
-        if t >= text.len() && pattern_byte != STAR {
+        if pat[p] == STAR {
+            return star(pat, p, text, t, memo);
+        }
+        if t >= text.len() {
             return Outcome::AbortAll;
         }
-        match pattern_byte {
-            STAR => return star(pat, p, text, t, memo),
-            b'?' => {
-                if text[t] == SLASH {
-                    return Outcome::NoMatch;
-                }
-            }
-            b'[' => match bracket(pat, p, text[t]) {
-                None => return Outcome::AbortAll,
-                Some((close, matched)) => {
-                    if !matched || text[t] == SLASH {
-                        return Outcome::NoMatch;
-                    }
-                    p = close;
-                }
-            },
-            BACKSLASH => {
-                p += 1;
-                if pat.get(p) != Some(&text[t]) {
-                    return Outcome::NoMatch;
-                }
-            }
-            literal => {
-                if literal != text[t] {
-                    return Outcome::NoMatch;
-                }
-            }
+        match single(pat, p, text[t]) {
+            Ok(last) => p = last + 1,
+            Err(outcome) => return outcome,
         }
-        p += 1;
         t += 1;
     }
     if t < text.len() {
@@ -104,6 +81,29 @@ fn walk(pat: &[u8], mut p: usize, text: &[u8], mut t: usize, memo: &mut Memo) ->
     } else {
         Outcome::Match
     }
+}
+
+/// The one-byte item at `pat[p]` (not a star) against `byte`: the index of
+/// the item's last pattern byte, or the outcome that ends the walk.
+fn single(pat: &[u8], p: usize, byte: u8) -> Result<usize, Outcome> {
+    let (last, matched) = match pat[p] {
+        b'?' => (p, byte != SLASH),
+        b'[' => bracket_single(pat, p, byte)?,
+        BACKSLASH => (p + 1, pat.get(p + 1) == Some(&byte)),
+        literal => (p, literal == byte),
+    };
+    if matched {
+        Ok(last)
+    } else {
+        Err(Outcome::NoMatch)
+    }
+}
+
+/// A bracket expression as a one-byte item: a malformed one aborts the
+/// whole match, and none ever matches a `/`.
+fn bracket_single(pat: &[u8], open: usize, byte: u8) -> Result<(usize, bool), Outcome> {
+    let (close, matched) = bracket(pat, open, byte).ok_or(Outcome::AbortAll)?;
+    Ok((close, matched && byte != SLASH))
 }
 
 /// Whether the star run `pat[start..end]` is a whole-segment `**`: two or
@@ -139,31 +139,43 @@ pub(super) fn special_runs(pat: &[u8]) -> usize {
 
 /// The star run starting at `pat[p]`, matched against `text[t..]`.
 fn star(pat: &[u8], p: usize, text: &[u8], t: usize, memo: &mut Memo) -> Outcome {
-    let mut end = p + 1;
-    let mut crosses_slash = false;
-    if pat.get(end) == Some(&STAR) {
-        while pat.get(end) == Some(&STAR) {
-            end += 1;
-        }
-        if is_special_run(pat, p, end) {
-            // `**/` may match no directory at all, but only before a
-            // literal `/`, not before an escaped one.
-            if pat.get(end) == Some(&SLASH)
-                && walk_memoized(pat, end + 1, text, t, memo) == Outcome::Match
-            {
-                return Outcome::Match;
-            }
-            crosses_slash = true;
-        }
+    let end = p + pat[p..].iter().take_while(|b| **b == STAR).count();
+    let crosses_slash = is_special_run(pat, p, end);
+    // `**/` may match no directory at all, but only before a literal `/`,
+    // not before an escaped one.
+    if crosses_slash
+        && pat.get(end) == Some(&SLASH)
+        && walk_memoized(pat, end + 1, text, t, memo) == Outcome::Match
+    {
+        return Outcome::Match;
     }
-    let rest = &text[t..];
-    let Some(&next) = pat.get(end) else {
-        return if crosses_slash || !rest.contains(&SLASH) {
-            Outcome::Match
-        } else {
-            Outcome::NoMatch
-        };
-    };
+    if end == pat.len() {
+        return trailing_star(crosses_slash, &text[t..]);
+    }
+    align_after_star(pat, end, text, t, crosses_slash, memo)
+}
+
+/// A star run that ends the pattern: it takes the rest of the text, which
+/// may hold a `/` only when the run is a whole-segment `**`.
+fn trailing_star(crosses_slash: bool, rest: &[u8]) -> Outcome {
+    if crosses_slash || !rest.contains(&SLASH) {
+        Outcome::Match
+    } else {
+        Outcome::NoMatch
+    }
+}
+
+/// Tries `pat[end..]` at each text position from `t` on, as the star run
+/// before `pat[end]` takes ever more of the text.
+fn align_after_star(
+    pat: &[u8],
+    end: usize,
+    text: &[u8],
+    t: usize,
+    crosses_slash: bool,
+    memo: &mut Memo,
+) -> Outcome {
+    let next = pat[end];
     let literal_next = !matches!(next, STAR | b'?' | b'[' | BACKSLASH);
     let mut cur = t;
     loop {
@@ -171,14 +183,9 @@ fn star(pat: &[u8], p: usize, text: &[u8], t: usize, memo: &mut Memo) -> Outcome
             return Outcome::AbortAll;
         }
         if literal_next {
-            while cur < text.len() && (crosses_slash || text[cur] != SLASH) && text[cur] != next {
-                cur += 1;
-            }
-            if cur >= text.len() {
-                return Outcome::AbortAll;
-            }
-            if text[cur] != next {
-                return Outcome::AbortToDoubleStar;
+            match skip_to_literal(text, cur, next, crosses_slash) {
+                Ok(found) => cur = found,
+                Err(outcome) => return outcome,
             }
         }
         let outcome = if crosses_slash {
@@ -186,16 +193,42 @@ fn star(pat: &[u8], p: usize, text: &[u8], t: usize, memo: &mut Memo) -> Outcome
         } else {
             walk(pat, end, text, cur, memo)
         };
-        match outcome {
-            Outcome::NoMatch => {
-                if !crosses_slash && text[cur] == SLASH {
-                    return Outcome::AbortToDoubleStar;
-                }
-            }
-            Outcome::AbortToDoubleStar if crosses_slash => {}
-            decided => return decided,
+        if let Some(decided) = after_alignment(outcome, crosses_slash, text[cur]) {
+            return decided;
         }
         cur += 1;
+    }
+}
+
+/// The fast path for a literal after the star run: the first position from
+/// `cur` holding `next`, or the outcome when the run cannot reach one (the
+/// text ran out, or a single `*` met a `/` first).
+fn skip_to_literal(
+    text: &[u8],
+    mut cur: usize,
+    next: u8,
+    crosses_slash: bool,
+) -> Result<usize, Outcome> {
+    while cur < text.len() && (crosses_slash || text[cur] != SLASH) && text[cur] != next {
+        cur += 1;
+    }
+    if cur >= text.len() {
+        Err(Outcome::AbortAll)
+    } else if text[cur] != next {
+        Err(Outcome::AbortToDoubleStar)
+    } else {
+        Ok(cur)
+    }
+}
+
+/// What one alignment's `outcome` means for the star run: `None` to let
+/// the run take the byte `taken` and try again, else the run's outcome.
+fn after_alignment(outcome: Outcome, crosses_slash: bool, taken: u8) -> Option<Outcome> {
+    match outcome {
+        Outcome::NoMatch if !crosses_slash && taken == SLASH => Some(Outcome::AbortToDoubleStar),
+        Outcome::NoMatch => None,
+        Outcome::AbortToDoubleStar if crosses_slash => None,
+        decided => Some(decided),
     }
 }
 
@@ -220,59 +253,94 @@ fn bracket(pat: &[u8], open: usize, byte: u8) -> Option<(usize, bool)> {
             return Some((i, found != negated));
         }
         first = false;
-        let range_high = pat.get(i + 1).copied().filter(|next| *next != b']');
-        if item == BACKSLASH {
-            i += 1;
-            let escaped = *pat.get(i)?;
-            found |= escaped == byte;
-            previous = escaped;
-        } else if item == b'-' && previous != 0 && range_high.is_some() {
-            i += 1;
-            let mut high = pat[i];
-            if high == BACKSLASH {
-                i += 1;
-                high = *pat.get(i)?;
-            }
-            found |= previous <= byte && byte <= high;
-            previous = 0;
-        } else if item == b'[' && pat.get(i + 1) == Some(&b':') {
-            let name_start = i + 2;
-            let close = name_start + pat[name_start..].iter().position(|b| *b == b']')?;
-            if close > name_start && pat[close - 1] == b':' {
-                found |= class_contains(&pat[name_start..close - 1], byte)?;
-                previous = 0;
-                i = close;
-            } else {
-                found |= byte == b'[';
-                previous = b'[';
-            }
-        } else {
-            found |= item == byte;
-            previous = item;
-        }
-        i += 1;
+        let (last, selected, low) = bracket_item(pat, i, byte, previous)?;
+        found |= selected;
+        previous = low;
+        i = last + 1;
     }
 }
 
-/// Whether the POSIX class `name` holds `byte` (ASCII only, git's own
-/// `isspace`: tab, newline, carriage return and space); `None` for an
-/// unknown class name.
+/// One item of a bracket expression at `pat[i]`, tested against `byte`:
+/// the index of its last pattern byte, whether it selects `byte`, and the
+/// `previous` it leaves for a following range.
+fn bracket_item(pat: &[u8], i: usize, byte: u8, previous: u8) -> Option<(usize, bool, u8)> {
+    let item = pat[i];
+    let range_high = pat.get(i + 1).is_some_and(|next| *next != b']');
+    if item == BACKSLASH {
+        let escaped = *pat.get(i + 1)?;
+        Some((i + 1, escaped == byte, escaped))
+    } else if item == b'-' && previous != 0 && range_high {
+        bracket_range(pat, i + 1, previous, byte)
+    } else if item == b'[' && pat.get(i + 1) == Some(&b':') {
+        bracket_class(pat, i, byte)
+    } else {
+        Some((i, item == byte, item))
+    }
+}
+
+/// The `low-high` range whose high end starts at `pat[i]` (possibly
+/// escaped), tested against `byte`.
+fn bracket_range(pat: &[u8], mut i: usize, low: u8, byte: u8) -> Option<(usize, bool, u8)> {
+    let mut high = pat[i];
+    if high == BACKSLASH {
+        i += 1;
+        high = *pat.get(i)?;
+    }
+    Some((i, low <= byte && byte <= high, 0))
+}
+
+/// A `[:name:]` class opened at `pat[i]`, tested against `byte`; without a
+/// closing `:]` the `[` is a plain item.
+fn bracket_class(pat: &[u8], i: usize, byte: u8) -> Option<(usize, bool, u8)> {
+    let name_start = i + 2;
+    let close = name_start + pat[name_start..].iter().position(|b| *b == b']')?;
+    if close > name_start && pat[close - 1] == b':' {
+        let selected = class_contains(&pat[name_start..close - 1], byte)?;
+        Some((close, selected, 0))
+    } else {
+        Some((i, byte == b'[', b'['))
+    }
+}
+
+/// Whether a POSIX class holds a byte.
+type ClassTest = fn(&u8) -> bool;
+
+/// The POSIX classes a bracket expression may name, ASCII only, with git's
+/// own `isspace`: tab, newline, carriage return and space.
+const POSIX_CLASSES: [(&[u8], ClassTest); 12] = [
+    (b"alnum", u8::is_ascii_alphanumeric),
+    (b"alpha", u8::is_ascii_alphabetic),
+    (b"blank", is_blank),
+    (b"cntrl", u8::is_ascii_control),
+    (b"digit", u8::is_ascii_digit),
+    (b"graph", u8::is_ascii_graphic),
+    (b"lower", u8::is_ascii_lowercase),
+    (b"print", is_print),
+    (b"punct", u8::is_ascii_punctuation),
+    (b"space", is_space),
+    (b"upper", u8::is_ascii_uppercase),
+    (b"xdigit", u8::is_ascii_hexdigit),
+];
+
+/// Whether the POSIX class `name` holds `byte`; `None` for an unknown
+/// class name.
 fn class_contains(name: &[u8], byte: u8) -> Option<bool> {
-    Some(match name {
-        b"alnum" => byte.is_ascii_alphanumeric(),
-        b"alpha" => byte.is_ascii_alphabetic(),
-        b"blank" => byte == b' ' || byte == b'\t',
-        b"cntrl" => byte.is_ascii_control(),
-        b"digit" => byte.is_ascii_digit(),
-        b"graph" => byte.is_ascii_graphic(),
-        b"lower" => byte.is_ascii_lowercase(),
-        b"print" => byte.is_ascii_graphic() || byte == b' ',
-        b"punct" => byte.is_ascii_punctuation(),
-        b"space" => matches!(byte, b' ' | b'\t' | b'\n' | b'\r'),
-        b"upper" => byte.is_ascii_uppercase(),
-        b"xdigit" => byte.is_ascii_hexdigit(),
-        _ => return None,
-    })
+    POSIX_CLASSES
+        .iter()
+        .find(|(class, _)| *class == name)
+        .map(|(_, holds)| holds(&byte))
+}
+
+fn is_blank(byte: &u8) -> bool {
+    matches!(byte, b' ' | b'\t')
+}
+
+fn is_print(byte: &u8) -> bool {
+    byte.is_ascii_graphic() || *byte == b' '
+}
+
+fn is_space(byte: &u8) -> bool {
+    matches!(byte, b' ' | b'\t' | b'\n' | b'\r')
 }
 
 #[cfg(test)]

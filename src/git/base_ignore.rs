@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io::{ErrorKind, Read as _};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use git2::Repository;
 
@@ -286,11 +286,8 @@ impl<'a> BaseIgnore<'a> {
         }
         relative.extend_from_slice(GITIGNORE_NAME);
         let full_path = repo_path_to_fs(&self.workdir, &relative);
-        match fs::symlink_metadata(&full_path) {
-            Ok(metadata) if metadata.is_file() => {}
-            Ok(_) => return Load::Absent,
-            Err(err) if err.kind() == ErrorKind::NotFound => return Load::Absent,
-            Err(_) => return Load::Unavailable,
+        if let Some(load) = load_of_non_file(&full_path) {
+            return load;
         }
         let Ok(file) = fs::File::open(&full_path) else {
             return Load::Unavailable;
@@ -305,6 +302,18 @@ impl<'a> BaseIgnore<'a> {
             return Load::Unavailable;
         }
         load_rules(&buf)
+    }
+}
+
+/// The load of a candidate `.gitignore` path that is not a regular file: a
+/// missing path or any other kind (a symlink included) is absent, and any
+/// other stat failure makes it unavailable. `None` for a regular file.
+fn load_of_non_file(path: &Path) -> Option<Load> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() => None,
+        Ok(_) => Some(Load::Absent),
+        Err(err) if err.kind() == ErrorKind::NotFound => Some(Load::Absent),
+        Err(_) => Some(Load::Unavailable),
     }
 }
 
