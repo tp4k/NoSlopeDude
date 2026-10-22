@@ -12,7 +12,9 @@ use git2::Repository;
 use nsd::check::{run_check, CheckDetails, CheckDiagnostic, CheckMode, CheckRequest};
 use nsd::cli::{CheckArgs, Cli, Command, Format, ScanArgs};
 use nsd::config::{Config, OutputConfig, PolicyConfig, CODE_INVALID_CONFIG};
-use nsd::format::{escape_terminal, render_agent, render_check_json, render_terminal};
+use nsd::format::{
+    escape_terminal, render_agent, render_check_json, render_github, render_terminal,
+};
 use nsd::model::{ScanSettings, DEFAULT_MIN_CLONE_LINES};
 use nsd::pipeline;
 use nsd::policy::exit::exit_status;
@@ -20,6 +22,10 @@ use nsd::report;
 
 /// A check that could not run to a verdict exits with the error status.
 const CHECK_ERROR_EXIT: u8 = 2;
+
+/// The error bit a check ORs into its verdict when it reached one but could
+/// not write `--json-out`, so a denied regression still shows (exit 3).
+const JSON_OUT_ERROR_BIT: u8 = 2;
 
 /// What the trusted configuration (the defaults when none resolved) decides
 /// about the listing.
@@ -156,7 +162,7 @@ fn run_check_command(args: &CheckArgs) -> u8 {
 
 fn check_command(args: &CheckArgs) -> anyhow::Result<u8> {
     let repository = std::env::current_dir().context("cannot read the current directory")?;
-    let (diagnostics, status, details, trusted) = match &args.config {
+    let verdict = match &args.config {
         Some(config) if config_is_inside_checkout(&repository, config)? => {
             refused_config(args.allow_new_suppressions)
         }
@@ -177,56 +183,124 @@ fn check_command(args: &CheckArgs) -> anyhow::Result<u8> {
             for warning in &outcome.warnings {
                 eprintln!("warning: {}", escape_terminal(warning));
             }
-            let trusted = Trusted {
-                policy: outcome.policy,
-                output: outcome.output,
-            };
-            (
-                outcome.diagnostics,
-                outcome.exit_status,
-                outcome.details,
-                trusted,
-            )
+            Verdict {
+                diagnostics: outcome.diagnostics,
+                status: outcome.exit_status,
+                details: outcome.details,
+                trusted: Trusted {
+                    policy: outcome.policy,
+                    output: outcome.output,
+                },
+            }
         }
     };
-    let rendered = match args.format {
-        Format::Terminal => render_terminal(&diagnostics, trusted.output.max_terminal_diagnostics),
-        Format::Agent => render_agent(
-            &diagnostics,
-            &trusted.policy,
-            args.allow_new_suppressions,
-            trusted.output.max_agent_diagnostics,
-        ),
-        Format::Json => {
-            let repository_forms = repository_paths(&repository);
-            let config_forms: Vec<PathBuf> = args
-                .config
-                .iter()
-                .flat_map(|config| [config.clone(), repository.join(config)])
-                .collect();
-            let repository_refs: Vec<&Path> =
-                repository_forms.iter().map(PathBuf::as_path).collect();
-            let config_refs: Vec<&Path> = config_forms.iter().map(PathBuf::as_path).collect();
-            render_check_json(
-                &diagnostics,
-                status,
-                details.as_ref(),
-                &repository_refs,
-                &config_refs,
-            )
+    print_check(args, &repository, &verdict)
+}
+
+/// What one check decided, and the trusted settings that list it.
+struct Verdict {
+    diagnostics: Vec<CheckDiagnostic>,
+    status: u8,
+    details: Option<CheckDetails>,
+    trusted: Trusted,
+}
+
+/// Writes `--json-out`, whose path CI may point into a PR's checkout. On unix
+/// the open is `O_NOFOLLOW | O_NONBLOCK`: a symlink at the final component
+/// fails the open (`ELOOP`), so a PR cannot aim the report at another file,
+/// and a FIFO opens without blocking. The handle must be a regular file
+/// before it is truncated. Other platforms get the `is_file` check only.
+fn write_json_out(path: &Path, json: &str) -> std::io::Result<()> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let mut file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::other(
+            "not a regular file (a symlink is not followed)",
+        ));
+    }
+    file.set_len(0)?;
+    file.write_all(json.as_bytes())
+}
+
+/// Writes `--json-out` when given, then the `--format` listing to stdout.
+/// A `--json-out` that cannot be written prints nothing to stdout and adds
+/// the error bit to the verdict's status.
+fn print_check(args: &CheckArgs, repository: &Path, verdict: &Verdict) -> anyhow::Result<u8> {
+    let json = || check_json(repository, args.config.as_deref(), verdict);
+    if let Some(path) = &args.json_out {
+        if let Err(error) = write_json_out(path, &json()).context("cannot write --json-out") {
+            eprintln!("error: {}", escape_terminal(&format!("{error:#}")));
+            return Ok(verdict.status | JSON_OUT_ERROR_BIT);
         }
-    };
+    }
+    let rendered = render_format(args.format, args.allow_new_suppressions, verdict, json);
     std::io::stdout()
         .write_all(rendered.as_bytes())
         .context("cannot write the diagnostics")?;
-    Ok(status)
+    Ok(verdict.status)
+}
+
+/// What `--format` prints: `json` renders the canonical document, every
+/// other format its capped listing.
+fn render_format(
+    format: Format,
+    allow_new_suppressions: bool,
+    verdict: &Verdict,
+    json: impl FnOnce() -> String,
+) -> String {
+    let Verdict {
+        diagnostics,
+        details,
+        trusted,
+        ..
+    } = verdict;
+    match format {
+        Format::Terminal => render_terminal(diagnostics, trusted.output.max_terminal_diagnostics),
+        Format::Agent => render_agent(
+            diagnostics,
+            &trusted.policy,
+            allow_new_suppressions,
+            trusted.output.max_agent_diagnostics,
+        ),
+        Format::Github => render_github(
+            diagnostics,
+            details.as_ref(),
+            &trusted.policy,
+            allow_new_suppressions,
+            trusted.output.max_github_diagnostics,
+        ),
+        Format::Json => json(),
+    }
+}
+
+/// The canonical check document, with every spelling of the checkout and of
+/// `--config` a failure message could name.
+fn check_json(repository: &Path, config: Option<&Path>, verdict: &Verdict) -> String {
+    let repository_forms = repository_paths(repository);
+    let config_forms: Vec<PathBuf> = config
+        .iter()
+        .flat_map(|config| [config.to_path_buf(), repository.join(config)])
+        .collect();
+    let repository_refs: Vec<&Path> = repository_forms.iter().map(PathBuf::as_path).collect();
+    let config_refs: Vec<&Path> = config_forms.iter().map(PathBuf::as_path).collect();
+    render_check_json(
+        &verdict.diagnostics,
+        verdict.status,
+        verdict.details.as_ref(),
+        &repository_refs,
+        &config_refs,
+    )
 }
 
 /// The refusal names no path: the one given may be absolute, and the listing
 /// never prints the checkout's location.
-fn refused_config(
-    allow_new_suppressions: bool,
-) -> (Vec<CheckDiagnostic>, u8, Option<CheckDetails>, Trusted) {
+fn refused_config(allow_new_suppressions: bool) -> Verdict {
     let diagnostics = vec![CheckDiagnostic::Failure {
         code: CODE_INVALID_CONFIG,
         message: "trusted config is inside the candidate checkout".to_string(),
@@ -237,7 +311,12 @@ fn refused_config(
         &policy,
         allow_new_suppressions,
     );
-    (diagnostics, status, None, Trusted { policy, output })
+    Verdict {
+        diagnostics,
+        status,
+        details: None,
+        trusted: Trusted { policy, output },
+    }
 }
 
 /// Every spelling of the checkout a failure message could name: the working

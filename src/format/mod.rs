@@ -2,12 +2,14 @@
 //! `escape_terminal`, because names, paths and messages come from a PR.
 
 mod agent;
+mod github;
 mod json;
 
 use crate::check::CheckDiagnostic;
 use crate::git::path::RepoPath;
 
 pub use agent::render_agent;
+pub use github::{escape_github_data, escape_github_property, render_github};
 pub use json::{
     canonical_document, canonical_document_pretty, float, render_check_json, render_json,
     SCAN_RESULT_SCOPE, SCHEMA_VERSION,

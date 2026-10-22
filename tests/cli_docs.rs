@@ -301,6 +301,7 @@ const STATIC_ASSERTION: &str = "grep -q 'statically linked\\|static-pie linked'"
 const SMOKE_CHECK: &str = "\"$BIN\" check --base HEAD\n";
 const PACKAGE_COMMAND: &str = "sha256sum";
 const UPLOAD_ACTION: &str = "actions/upload-artifact@";
+const ATTEST_ACTION: &str = "actions/attest-build-provenance@";
 
 fn release_workflow() -> (String, Value) {
     let text = fs::read_to_string(RELEASE_WORKFLOW).expect("read the release workflow");
@@ -385,11 +386,14 @@ fn test_release_workflow_gives_the_write_token_only_to_the_publish_job() {
     let publish = workflow["jobs"]["publish"]["permissions"]
         .as_mapping()
         .expect("publish permissions");
-    assert_eq!(publish.len(), 1);
-    assert_eq!(
-        workflow["jobs"]["publish"]["permissions"]["contents"].as_str(),
-        Some("write")
-    );
+    assert_eq!(publish.len(), 3);
+    for scope in ["contents", "id-token", "attestations"] {
+        assert_eq!(
+            workflow["jobs"]["publish"]["permissions"][scope].as_str(),
+            Some("write"),
+            "publish needs `{scope}: write`"
+        );
+    }
     let steps = job_steps(&workflow, "publish");
     assert!(
         steps.iter().all(|step| step["uses"]
@@ -401,6 +405,29 @@ fn test_release_workflow_gives_the_write_token_only_to_the_publish_job() {
     assert_eq!(
         checkout["with"]["persist-credentials"].as_bool(),
         Some(false)
+    );
+}
+
+#[test]
+fn test_release_publish_attests_the_tarball_before_uploading_it() {
+    let (_, workflow) = release_workflow();
+    let steps = job_steps(&workflow, "publish");
+
+    let attest = uses_index(steps, ATTEST_ACTION);
+    let publish = step_index(steps, PUBLISH_COMMAND);
+    assert!(
+        attest < publish,
+        "the attestation exists before the release does"
+    );
+    assert_eq!(
+        steps[attest]["with"]["subject-path"].as_str(),
+        Some("${{ env.ASSET }}.tar.gz")
+    );
+    let build = job_steps(&workflow, "build");
+    assert!(
+        run_text(&build[step_index(build, PACKAGE_COMMAND)])
+            .contains("cat \"$ASSET.tar.gz.sha256\""),
+        "the package step prints the checksum to the log"
     );
 }
 

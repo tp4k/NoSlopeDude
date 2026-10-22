@@ -58,6 +58,22 @@ fn spec_example_parses() {
 }
 
 #[test]
+fn max_github_diagnostics_defaults_to_ten_and_accepts_any_u32() {
+    let config = Config::parse(b"version: 1\n").expect("a bare version is valid");
+    assert_eq!(config.output.max_github_diagnostics, 10);
+    let config = Config::parse(b"version: 1\noutput:\n  max_github_diagnostics: 0\n")
+        .expect("zero is a valid cap");
+    assert_eq!(config.output.max_github_diagnostics, 0);
+    let config = Config::parse(b"version: 1\noutput:\n  max_github_diagnostics: 50\n")
+        .expect("a positive cap is valid");
+    assert_eq!(config.output.max_github_diagnostics, 50);
+    assert_is_c102(
+        Config::parse(b"version: 1\noutput:\n  max_github_diagnostics: -1\n"),
+        "max_github_diagnostics",
+    );
+}
+
+#[test]
 fn omitted_sections_take_defaults() {
     let config = Config::parse(b"version: 1\n").expect("a bare version is valid");
     assert_eq!(config.include, None);
@@ -362,6 +378,10 @@ fn null_values_are_c102() {
     assert_is_c102(
         Config::parse(b"version: 1\noutput:\n  max_agent_diagnostics: null\n"),
         "max_agent_diagnostics",
+    );
+    assert_is_c102(
+        Config::parse(b"version: 1\noutput:\n  max_github_diagnostics: null\n"),
+        "max_github_diagnostics",
     );
 }
 

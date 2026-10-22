@@ -1212,3 +1212,165 @@ fn test_render_escapes_bidi_controls_in_candidate_names() {
     let rendered = render_terminal(&diagnostics, TERMINAL_CAP);
     assert!(rendered.contains(kept), "{rendered:?}");
 }
+
+const FORMATS: [&str; 4] = ["terminal", "json", "agent", "github"];
+
+#[test]
+fn test_check_format_github_lists_violations_first_as_notices() {
+    let fx = config_edit_and_regression("version: 1\n");
+
+    let output = fx.nsd(&["check", "--staged", "--format", "github"]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_REGRESSION));
+    let listing = stdout(&output);
+    let lines: Vec<&str> = listing.lines().collect();
+    assert_eq!(lines.len(), 2, "{listing}");
+    assert!(
+        lines[0].starts_with("::notice title=nsd NSD-E101,file=Foo.java,line="),
+        "{listing}"
+    );
+    assert_eq!(
+        lines[1],
+        "::notice title=nsd NSD-C101,file=nsd.yml::nsd.yml changed"
+    );
+}
+
+#[test]
+fn test_trusted_config_caps_the_github_listing() {
+    let fx = config_edit_and_regression("version: 1\noutput:\n  max_github_diagnostics: 1\n");
+
+    let output = fx.nsd(&["check", "--staged", "--format", "github"]);
+
+    let listing = stdout(&output);
+    let lines: Vec<&str> = listing.lines().collect();
+    assert_eq!(lines.len(), 2, "{listing}");
+    assert!(lines[0].contains("NSD-E101"), "{listing}");
+    assert_eq!(lines[1], "omitted diagnostics: 1 of 2");
+}
+
+#[test]
+fn test_json_out_holds_the_json_format_bytes() {
+    let fx = config_edit_and_regression("version: 1\n");
+    let outside = TempDir::new().expect("create a directory outside the checkout");
+    let json_path = outside.path().join("nsd.json");
+    let github_path = outside.path().join("github.json");
+
+    let json = fx.nsd(&[
+        "check",
+        "--staged",
+        "--format",
+        "json",
+        "--json-out",
+        path_str(&json_path),
+    ]);
+    let github = fx.nsd(&[
+        "check",
+        "--staged",
+        "--format",
+        "github",
+        "--json-out",
+        path_str(&github_path),
+    ]);
+
+    assert_eq!(exit_code(&json), Some(EXIT_REGRESSION));
+    assert_eq!(fs::read(&json_path).expect("read --json-out"), json.stdout);
+    assert_eq!(exit_code(&github), Some(EXIT_REGRESSION));
+    assert_eq!(
+        fs::read(&github_path).expect("read --json-out"),
+        json.stdout
+    );
+    assert!(
+        stdout(&github)
+            .lines()
+            .all(|line| line.starts_with("::notice ")),
+        "{}",
+        stdout(&github)
+    );
+}
+
+#[test]
+fn test_unwritable_json_out_fails_loudly_and_keeps_the_verdict() {
+    let fx = Fixture::staged_regression();
+    let outside = TempDir::new().expect("create a directory outside the checkout");
+    let missing = outside.path().join("missing").join("nsd.json");
+
+    let output = fx.nsd(&[
+        "check",
+        "--staged",
+        "--format",
+        "github",
+        "--json-out",
+        path_str(&missing),
+    ]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_BOTH));
+    assert_eq!(stdout(&output), "");
+    let errors = String::from_utf8_lossy(&output.stderr);
+    assert!(errors.contains("cannot write --json-out"), "{errors}");
+
+    let passing = fixture();
+    passing.commit(&[("Foo.java", java_class("Foo", LOW_CC_IFS).as_bytes())]);
+    let output = passing.nsd(&["check", "--staged", "--json-out", path_str(&missing)]);
+    assert_eq!(exit_code(&output), Some(EXIT_ERROR));
+}
+
+#[test]
+fn test_json_out_refuses_a_symlink_and_leaves_its_target_alone() {
+    let fx = Fixture::staged_regression();
+    let outside = TempDir::new().expect("create a directory outside the checkout");
+    let target = outside.path().join("victim");
+    fs::write(&target, "untouched\n").expect("write the symlink target");
+    let link = fx.dir.path().join("nsd.json");
+    symlink(&target, &link).expect("plant the symlink");
+
+    let output = fx.nsd(&["check", "--staged", "--json-out", path_str(&link)]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_BOTH));
+    assert_eq!(stdout(&output), "");
+    let errors = String::from_utf8_lossy(&output.stderr);
+    assert!(errors.contains("cannot write --json-out"), "{errors}");
+    assert_eq!(
+        fs::read_to_string(&target).expect("read the target"),
+        "untouched\n"
+    );
+}
+
+#[test]
+fn test_json_out_replaces_a_longer_regular_file() {
+    let fx = Fixture::staged_regression();
+    let outside = TempDir::new().expect("create a directory outside the checkout");
+    let json_out = outside.path().join("nsd.json");
+    fs::write(&json_out, "x".repeat(1 << 20)).expect("write a stale report");
+
+    let plain = fx.nsd(&["check", "--staged", "--format", "json"]);
+    fx.nsd(&["check", "--staged", "--json-out", path_str(&json_out)]);
+
+    assert_eq!(fs::read(&json_out).expect("read the report"), plain.stdout);
+}
+
+#[test]
+fn test_exit_status_is_the_same_for_every_format_and_json_out() {
+    let outside = TempDir::new().expect("create a directory outside the checkout");
+    let json_out = outside.path().join("nsd.json");
+    let scenarios = [
+        (config_edit_and_regression("version: 1\n"), EXIT_REGRESSION),
+        (config_edit_and_regression(WARN_E101), EXIT_PASS),
+    ];
+
+    for (fx, expected) in &scenarios {
+        for format in FORMATS {
+            let plain = fx.nsd(&["check", "--staged", "--format", format]);
+            let with_file = fx.nsd(&[
+                "check",
+                "--staged",
+                "--format",
+                format,
+                "--json-out",
+                path_str(&json_out),
+            ]);
+
+            assert_eq!(exit_code(&plain), Some(*expected), "{format}");
+            assert_eq!(exit_code(&with_file), Some(*expected), "{format}");
+        }
+    }
+}

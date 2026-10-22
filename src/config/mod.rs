@@ -41,6 +41,9 @@ const SUPPORTED_VERSION: u32 = 1;
 const DEFAULT_MAX_TERMINAL_DIAGNOSTICS: u32 = 50;
 /// Default `output.max_agent_diagnostics` (`nsd-plan-final.md` M6-M7).
 const DEFAULT_MAX_AGENT_DIAGNOSTICS: u32 = 30;
+/// Default `output.max_github_diagnostics`: GitHub keeps at most 10
+/// annotations of each type per step.
+const DEFAULT_MAX_GITHUB_DIAGNOSTICS: u32 = 10;
 
 /// Root passed to `OverrideBuilder` (D15): `Override::matched` strips a
 /// common prefix, or else assumes the matched path lives in the same
@@ -148,6 +151,9 @@ impl Config {
                 max_agent_diagnostics: raw_output
                     .max_agent_diagnostics
                     .unwrap_or(DEFAULT_MAX_AGENT_DIAGNOSTICS),
+                max_github_diagnostics: raw_output
+                    .max_github_diagnostics
+                    .unwrap_or(DEFAULT_MAX_GITHUB_DIAGNOSTICS),
             },
             None => OutputConfig::defaults(),
         };
@@ -281,12 +287,14 @@ impl PolicyConfig {
     }
 }
 
-/// `output.max_terminal_diagnostics`/`output.max_agent_diagnostics` (D16):
-/// any non-negative integer fitting `u32`.
+/// `output.max_terminal_diagnostics`/`output.max_agent_diagnostics`/
+/// `output.max_github_diagnostics` (D16): any non-negative integer fitting
+/// `u32`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OutputConfig {
     pub max_terminal_diagnostics: u32,
     pub max_agent_diagnostics: u32,
+    pub max_github_diagnostics: u32,
 }
 
 impl OutputConfig {
@@ -294,6 +302,7 @@ impl OutputConfig {
         OutputConfig {
             max_terminal_diagnostics: DEFAULT_MAX_TERMINAL_DIAGNOSTICS,
             max_agent_diagnostics: DEFAULT_MAX_AGENT_DIAGNOSTICS,
+            max_github_diagnostics: DEFAULT_MAX_GITHUB_DIAGNOSTICS,
         }
     }
 }
@@ -810,6 +819,8 @@ struct RawOutput {
     max_terminal_diagnostics: Option<u32>,
     #[serde(default, deserialize_with = "deserialize_present_scalar")]
     max_agent_diagnostics: Option<u32>,
+    #[serde(default, deserialize_with = "deserialize_present_scalar")]
+    max_github_diagnostics: Option<u32>,
 }
 
 #[cfg(all(test, unix))]
