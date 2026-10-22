@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use git2::{ErrorCode, Odb, Oid, Repository, Tree};
 
+use super::base_ignore::BaseIgnore;
 use super::path::RepoPath;
 use super::{wrap_git_error, GitError, CODE_SNAPSHOT_UNAVAILABLE};
 
@@ -173,8 +174,15 @@ impl IndexSnapshot {
 }
 
 /// A snapshot of the worktree: the index (D5) overlaid with on-disk
-/// modifications, on-disk deletions removed, and untracked files added
-/// (D6: including ones the worktree's own `.gitignore` matches).
+/// modifications, on-disk deletions removed, and untracked files added.
+/// `open` keeps every untracked file, including ones a `.gitignore` matches
+/// (D6). `open_over_base_ignores` (`check --worktree`) leaves an untracked
+/// entry out only when the base snapshot's `.gitignore` files AND the
+/// worktree's own `.gitignore` files both ignore it, with git's own
+/// wildmatch semantics; a `.gitignore` that cannot be used on one side makes
+/// that side ignore nothing at or below its directory. Neither of these two
+/// reads `.git/info/exclude` or `core.excludesFile`; `open_respecting_ignores`
+/// (`scan`, D22) uses the repository's own ignore rules, which do.
 #[derive(Debug, Clone)]
 pub struct WorktreeSnapshot {
     pub entries: Vec<Entry>,
@@ -186,19 +194,36 @@ const GIT_DIR_NAME: &str = ".git";
 
 impl WorktreeSnapshot {
     pub fn open(repo: &Repository) -> Result<WorktreeSnapshot, GitError> {
-        Self::open_with(repo, None)
+        Self::open_with(repo, IgnoreFilter::Off)
+    }
+
+    /// Like `open`, but an untracked entry is left out (and an untracked
+    /// directory pruned unread) only when the `.gitignore` files of `base`
+    /// (every directory level, git's precedence and negation) AND the
+    /// worktree's own on-disk `.gitignore` files both ignore it: a
+    /// candidate edit can only expose files, never hide them. Tracked
+    /// entries always stay.
+    pub fn open_over_base_ignores(
+        repo: &Repository,
+        base: &CommitSnapshot,
+    ) -> Result<WorktreeSnapshot, GitError> {
+        let workdir = worktree_dir(repo)?;
+        Self::open_with(
+            repo,
+            IgnoreFilter::Base(Box::new(BaseIgnore::new(repo, base, workdir))),
+        )
     }
 
     /// Like `open`, but untracked entries the repository's ignore rules
     /// match are left out and an ignored untracked directory is pruned
     /// without being read (D22). Tracked entries always stay.
     pub fn open_respecting_ignores(repo: &Repository) -> Result<WorktreeSnapshot, GitError> {
-        Self::open_with(repo, Some(repo))
+        Self::open_with(repo, IgnoreFilter::Repository(repo))
     }
 
     fn open_with(
         repo: &Repository,
-        ignore_rules: Option<&Repository>,
+        mut ignore_rules: IgnoreFilter<'_>,
     ) -> Result<WorktreeSnapshot, GitError> {
         let workdir = worktree_dir(repo)?;
 
@@ -242,7 +267,7 @@ impl WorktreeSnapshot {
             &[],
             &tracked,
             &tracked_submodules,
-            ignore_rules,
+            &mut ignore_rules,
             &mut by_path,
         )?;
 
@@ -607,8 +632,8 @@ pub(crate) fn has_git_marker(dir: &Path) -> bool {
     fs::symlink_metadata(dir.join(GIT_DIR_NAME)).is_ok()
 }
 
-/// Adds every untracked worktree entry under `prefix` to `by_path` (D6:
-/// ignoring the candidate's own `.gitignore`), skipping the `tracked` paths
+/// Adds every untracked worktree entry under `prefix` to `by_path` (D6: all
+/// of them unless `ignore_rules` says otherwise), skipping the `tracked` paths
 /// already handled by the index overlay and any path with a `.git`
 /// component (built-in exclusion, D7 defence in depth). A directory is
 /// skipped only when it is a `tracked_submodules` path; a directory that
@@ -620,7 +645,7 @@ fn walk_worktree(
     prefix: &[u8],
     tracked: &BTreeSet<RepoPath>,
     tracked_submodules: &BTreeSet<RepoPath>,
-    ignore_rules: Option<&Repository>,
+    ignore_rules: &mut IgnoreFilter<'_>,
     by_path: &mut BTreeMap<RepoPath, Entry>,
 ) -> Result<(), GitError> {
     let dir_path = repo_path_to_fs(workdir, prefix);
@@ -664,26 +689,7 @@ fn walk_worktree(
         })?;
 
         if file_type.is_dir() {
-            if tracked_submodules.contains(&relative) {
-                continue; // A tracked submodule directory: already handled by the overlay step.
-            }
-            if is_ignored(ignore_rules, &child_bytes, true)? {
-                continue; // D22: pruned without reading the directory.
-            }
-            let child_fs_path = repo_path_to_fs(workdir, &child_bytes);
-            if has_git_marker(&child_fs_path) {
-                by_path.insert(
-                    relative.clone(),
-                    Entry {
-                        path: relative,
-                        kind: EntryKind::NestedCheckout,
-                        oid: None,
-                        size: 0,
-                    },
-                );
-                continue; // D7: surfaced, not descended.
-            }
-            walk_worktree(
+            visit_worktree_dir(
                 workdir,
                 &child_bytes,
                 tracked,
@@ -697,7 +703,7 @@ fn walk_worktree(
         if tracked.contains(&relative) {
             continue; // Already handled by the overlay step.
         }
-        if is_ignored(ignore_rules, &child_bytes, false)? {
+        if ignore_rules.skips(&child_bytes, false)? {
             continue; // D22: an ignored untracked file.
         }
         if file_type.is_symlink() {
@@ -745,23 +751,70 @@ fn walk_worktree(
     Ok(())
 }
 
-/// Whether `ignore_rules` (when present) ignores the untracked worktree path
-/// `path`. A directory is asked with a trailing slash so a `dir/` pattern
-/// matches it.
-fn is_ignored(
-    ignore_rules: Option<&Repository>,
-    path: &[u8],
-    is_dir: bool,
-) -> Result<bool, GitError> {
-    let Some(repo) = ignore_rules else {
-        return Ok(false);
-    };
-    let mut query = path.to_vec();
-    if is_dir {
-        query.push(b'/');
+/// One worktree directory met by `walk_worktree` at `dir`: a tracked
+/// submodule is skipped (the overlay step handles it), an ignored one is
+/// pruned without being read (D22), a nested checkout is surfaced but not
+/// descended (D7), and any other is walked.
+fn visit_worktree_dir(
+    workdir: &Path,
+    dir: &[u8],
+    tracked: &BTreeSet<RepoPath>,
+    tracked_submodules: &BTreeSet<RepoPath>,
+    ignore_rules: &mut IgnoreFilter<'_>,
+    by_path: &mut BTreeMap<RepoPath, Entry>,
+) -> Result<(), GitError> {
+    let relative = RepoPath::from_bytes(dir.to_vec());
+    if tracked_submodules.contains(&relative) || ignore_rules.skips(dir, true)? {
+        return Ok(());
     }
-    repo.is_path_ignored(repo_path_to_fs(Path::new(""), &query))
-        .map_err(|err| wrap_git_error("cannot evaluate the ignore rules", &err))
+    if has_git_marker(&repo_path_to_fs(workdir, dir)) {
+        by_path.insert(
+            relative.clone(),
+            Entry {
+                path: relative,
+                kind: EntryKind::NestedCheckout,
+                oid: None,
+                size: 0,
+            },
+        );
+        return Ok(());
+    }
+    walk_worktree(
+        workdir,
+        dir,
+        tracked,
+        tracked_submodules,
+        ignore_rules,
+        by_path,
+    )
+}
+
+/// Which ignore rules drop an untracked worktree entry.
+enum IgnoreFilter<'a> {
+    Off,
+    /// The repository's own rules (`scan`, D22).
+    Repository(&'a Repository),
+    /// Base-tree `.gitignore` AND candidate `.gitignore` (`check --worktree`).
+    Base(Box<BaseIgnore<'a>>),
+}
+
+impl IgnoreFilter<'_> {
+    /// Whether the untracked worktree path `path` is left out. A directory is
+    /// asked with a trailing slash so a `dir/` pattern matches it.
+    fn skips(&mut self, path: &[u8], is_dir: bool) -> Result<bool, GitError> {
+        match self {
+            IgnoreFilter::Off => Ok(false),
+            IgnoreFilter::Repository(repo) => {
+                let mut query = path.to_vec();
+                if is_dir {
+                    query.push(b'/');
+                }
+                repo.is_path_ignored(repo_path_to_fs(Path::new(""), &query))
+                    .map_err(|err| wrap_git_error("cannot evaluate the ignore rules", &err))
+            }
+            IgnoreFilter::Base(base) => base.skips(path, is_dir),
+        }
+    }
 }
 
 #[cfg(unix)]

@@ -233,7 +233,7 @@ fn open_sides(
             let base_oid = merge_base(repo, reference)?;
             let base = CommitSnapshot::at(repo, base_oid)?;
             if *worktree {
-                let overlay = WorktreeSnapshot::open(repo)?;
+                let overlay = WorktreeSnapshot::open_over_base_ignores(repo, &base)?;
                 let changes = diff_commit_to_worktree(repo, Some(base_oid), &overlay)?;
                 Ok((base, Snapshot::Worktree(overlay), changes))
             } else {
