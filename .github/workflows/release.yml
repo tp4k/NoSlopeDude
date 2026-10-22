@@ -4,7 +4,8 @@
 # Cargo.toml. Every pull request and every push to main runs the `build` job,
 # so a change that breaks the musl build fails before it is tagged. Only the
 # `publish` job holds a write token, it runs only for a tag, and it runs no
-# code from the checkout: it uploads the artifact the `build` job produced.
+# code from the checkout: it attests and uploads the artifact the `build` job
+# produced, so `gh attestation verify` can tie the tarball to this workflow.
 name: release
 
 on:
@@ -55,6 +56,7 @@ jobs:
           cp "target/$TARGET/release/nsd" LICENSE dist/
           tar -C dist -czf "$ASSET.tar.gz" nsd LICENSE
           sha256sum "$ASSET.tar.gz" > "$ASSET.tar.gz.sha256"
+          cat "$ASSET.tar.gz.sha256"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-asset
@@ -69,12 +71,17 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     env:
       ASSET: nsd-x86_64-unknown-linux-musl
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-asset
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ env.ASSET }}.tar.gz
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
