@@ -205,13 +205,36 @@ struct Verdict {
     trusted: Trusted,
 }
 
+/// Writes `--json-out`, whose path CI may point into a PR's checkout. On unix
+/// the open is `O_NOFOLLOW | O_NONBLOCK`: a symlink at the final component
+/// fails the open (`ELOOP`), so a PR cannot aim the report at another file,
+/// and a FIFO opens without blocking. The handle must be a regular file
+/// before it is truncated. Other platforms get the `is_file` check only.
+fn write_json_out(path: &Path, json: &str) -> std::io::Result<()> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let mut file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::other(
+            "not a regular file (a symlink is not followed)",
+        ));
+    }
+    file.set_len(0)?;
+    file.write_all(json.as_bytes())
+}
+
 /// Writes `--json-out` when given, then the `--format` listing to stdout.
 /// A `--json-out` that cannot be written prints nothing to stdout and adds
 /// the error bit to the verdict's status.
 fn print_check(args: &CheckArgs, repository: &Path, verdict: &Verdict) -> anyhow::Result<u8> {
     let json = || check_json(repository, args.config.as_deref(), verdict);
     if let Some(path) = &args.json_out {
-        if let Err(error) = std::fs::write(path, json()).context("cannot write --json-out") {
+        if let Err(error) = write_json_out(path, &json()).context("cannot write --json-out") {
             eprintln!("error: {}", escape_terminal(&format!("{error:#}")));
             return Ok(verdict.status | JSON_OUT_ERROR_BIT);
         }

@@ -189,26 +189,27 @@ fn locate_and_describe(
 }
 
 /// The base-to-candidate metrics of a paired callable, or the base's alone
-/// when no changed candidate entity has the diagnostic's path, start line and
-/// name; empty when there is no base.
+/// unless exactly one changed candidate entity has the diagnostic's path,
+/// start line and name (Java overloads on one line share all three); empty
+/// when there is no base.
 fn complexity_change(found: &PolicyDiagnostic, details: Option<&CheckDetails>) -> String {
     let Some(base) = &found.base else {
         return String::new();
     };
     let path = found.candidate_path.render();
-    let candidate = details.and_then(|details| {
-        details.entities.iter().find(|entity| {
+    let mut matches = details.into_iter().flat_map(|details| {
+        details.entities.iter().filter(|entity| {
             entity.path == path
                 && entity.start_line == found.candidate_start_line
                 && entity.name == found.candidate_name
         })
     });
-    match candidate {
-        Some(entity) => format!(
+    match (matches.next(), matches.next()) {
+        (Some(entity), None) => format!(
             "CC {} -> {}, SLOC {} -> {}",
             base.cc, entity.cc, base.sloc, entity.sloc
         ),
-        None => format!("base CC {}, SLOC {}", base.cc, base.sloc),
+        _ => format!("base CC {}, SLOC {}", base.cc, base.sloc),
     }
 }
 

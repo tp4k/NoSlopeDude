@@ -1315,6 +1315,40 @@ fn test_unwritable_json_out_fails_loudly_and_keeps_the_verdict() {
 }
 
 #[test]
+fn test_json_out_refuses_a_symlink_and_leaves_its_target_alone() {
+    let fx = Fixture::staged_regression();
+    let outside = TempDir::new().expect("create a directory outside the checkout");
+    let target = outside.path().join("victim");
+    fs::write(&target, "untouched\n").expect("write the symlink target");
+    let link = fx.dir.path().join("nsd.json");
+    symlink(&target, &link).expect("plant the symlink");
+
+    let output = fx.nsd(&["check", "--staged", "--json-out", path_str(&link)]);
+
+    assert_eq!(exit_code(&output), Some(EXIT_BOTH));
+    assert_eq!(stdout(&output), "");
+    let errors = String::from_utf8_lossy(&output.stderr);
+    assert!(errors.contains("cannot write --json-out"), "{errors}");
+    assert_eq!(
+        fs::read_to_string(&target).expect("read the target"),
+        "untouched\n"
+    );
+}
+
+#[test]
+fn test_json_out_replaces_a_longer_regular_file() {
+    let fx = Fixture::staged_regression();
+    let outside = TempDir::new().expect("create a directory outside the checkout");
+    let json_out = outside.path().join("nsd.json");
+    fs::write(&json_out, "x".repeat(1 << 20)).expect("write a stale report");
+
+    let plain = fx.nsd(&["check", "--staged", "--format", "json"]);
+    fx.nsd(&["check", "--staged", "--json-out", path_str(&json_out)]);
+
+    assert_eq!(fs::read(&json_out).expect("read the report"), plain.stdout);
+}
+
+#[test]
 fn test_exit_status_is_the_same_for_every_format_and_json_out() {
     let outside = TempDir::new().expect("create a directory outside the checkout");
     let json_out = outside.path().join("nsd.json");

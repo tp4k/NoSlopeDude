@@ -452,10 +452,18 @@ fn test_e102_without_a_matching_entity_falls_back_to_the_base() {
     };
     let other_path = details(vec![entity("src/B.java", "run", 3, 14, 21)]);
     let other_line = details(vec![entity("src/A.java", "run", 4, 14, 21)]);
+    let same_line_overloads = details(vec![
+        entity("src/A.java", "run", 3, 14, 21),
+        entity("src/A.java", "run", 3, 30, 40),
+    ]);
     let fallback = "run | base CC 11, SLOC 20";
 
     assert_eq!(single(diagnostic(), Some(&other_path)).data, fallback);
     assert_eq!(single(diagnostic(), Some(&other_line)).data, fallback);
+    assert_eq!(
+        single(diagnostic(), Some(&same_line_overloads)).data,
+        fallback
+    );
     assert_eq!(single(diagnostic(), None).data, fallback);
 }
 
