@@ -10,6 +10,18 @@ nsd scan . --output nsd-report     # explore the codebase in HTML and JSON
 
 The [SlopCodeBench paper](https://arxiv.org/abs/2603.24755) measures how code quality degrades as coding agents repeatedly extend a project. It motivates two of `nsd`'s signals: **erosion**, the share of complexity mass in callables above cyclomatic complexity 10, and **verbosity**, the share of executable lines occupied by clones or rule findings. `nsd` turns those snapshot signals into a change gate: it asks *did this change make the structure worse?* A legacy codebase can adopt the gate without first cleaning up every old finding.
 
+## How it helps
+
+Imagine a repository that already has 40 complex functions. A snapshot score tells you there is debt, but failing every commit on that score would stop unrelated work. Run `nsd scan . --output nsd-report` to see where the debt is. Then use `nsd check --staged` while coding and `nsd check --base origin/main` in CI. A change that leaves those 40 functions alone passes; a newly complex function or a new duplicated block gets a source-level diagnostic before it adds to the cleanup queue.
+
+That gives teams a practical path to improvement:
+
+1. **See the current shape.** The HTML report shows complex callables, clone groups, rule findings, and files that could not be analyzed.
+2. **Catch regressions where they start.** The Git comparison attributes a new finding to the staged change or branch instead of blaming the author for old code.
+3. **Keep the gate honest.** The base revision's policy judges the change, so a PR cannot disable its own checks by editing `nsd.yml`. Analysis errors also fail the check rather than silently passing.
+
+This is useful when coding agents produce many changes quickly: reviewers can focus on the specific new structural problems, while the existing backlog remains visible in the scan report.
+
 ## Get started
 
 Build from this repository:
@@ -34,7 +46,7 @@ A [prebuilt static Linux binary](https://github.com/tp4k/NoSlopeDude/releases) i
 
 For each callable, `mass = cyclomatic complexity × √(executable SLOC)`. Erosion is the fraction of total mass in callables with complexity above 10. Verbosity counts distinct executable lines covered by redundant clone occurrences or rule findings, divided by scanned executable lines. These ratios help explain a scan; **the check gates specific new regressions, not a whole-repository ratio**.
 
-For example, if an existing method has complexity 14, `nsd check` does not fail merely because it exists. A newly added method crossing complexity 10 raises `NSD-E101`; making that already complex method worse can raise `NSD-E102`. New rule findings raise `NSD-V101`, and new qualifying duplicate blocks raise `NSD-V102`. Diagnostics point to the affected source. See the [diagnostic contract](nsd-plan-final.md#diagnostics) for precise boundaries and error cases.
+For example, if an existing method has complexity 14, `nsd check` does not fail merely because it exists. A newly added method crossing complexity 10 raises `NSD-E101`; making that already complex method worse can raise `NSD-E102`. New rule findings raise `NSD-V101`, and new qualifying duplicate blocks raise `NSD-V102`. Diagnostics point to the affected source; the [CLI reference](docs/cli.md#check) explains their output.
 
 ## Choose the right command
 
@@ -87,8 +99,8 @@ policy:
   NSD-S102: warn
 ```
 
-For `check`, the **base snapshot's** policy judges the candidate. A change to `nsd.yml` is reported, but cannot turn off its own gate; its settings apply to later changes. An external `--config` is an explicit trusted override. `scan` reads only `measurement.min_clone_lines` from its target root's `nsd.yml`; its `--min-clone-lines` flag overrides that value. See the [configuration contract](nsd-plan-final.md#cli-and-configuration) for all supported keys.
+For `check`, the **base snapshot's** policy judges the candidate. A change to `nsd.yml` is reported, but cannot turn off its own gate; its settings apply to later changes. An external `--config` is an explicit trusted override. `scan` reads only `measurement.min_clone_lines` from its target root's `nsd.yml`; its `--min-clone-lines` flag overrides that value.
 
-## Where this came from
+## Research
 
-`nsd` builds on the measurement ideas in [*SlopCodeBench: Benchmarking How Coding Agents Degrade Over Long-Horizon Iterative Tasks*](https://arxiv.org/abs/2603.24755), rather than claiming that its rules reproduce the paper's entire benchmark. Its measurement engine was selectively imported from the read-only `agent_slope` archive at commit `912ec7a1ca2b9e5dd1ffa976a51f98d7d00d6704`, then extended with Git snapshots, a normalized IR, regression diagnostics, and trusted policy. The [authoritative v1 plan](nsd-plan-final.md), [implementation plan](nsd-plan-implementation.md), and [implementation status](docs/implementation-status.md) record the detailed design and evidence. Licensed under [MIT](LICENSE).
+`nsd` draws its erosion and verbosity ideas from [*SlopCodeBench: Benchmarking How Coding Agents Degrade Over Long-Horizon Iterative Tasks*](https://arxiv.org/abs/2603.24755). Its change gate is a separate application of those measurements.
