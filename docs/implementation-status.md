@@ -11,9 +11,10 @@ Every agent that finishes a piece of work updates its rows here in the same
 round; see *How to update this file* at the bottom and the matching rule in
 [`AGENTS.md`](../AGENTS.md).
 
-Last updated: 2026-10-29 (README work, PV-10, on `docs/readme-product-guide@15e6908`;
-prior PV-8 and PV-9 evidence verified against `main@65c287b` and the
-published `v0.1.3` release).
+Last updated: 2026-10-29 (README follow-up, PV-11, on
+`docs/readme-how-it-helps@24c9114`; PV-10 merged in PR #24; prior PV-8 and
+PV-9 evidence verified against `main@65c287b` and the published `v0.1.3`
+release).
 
 ## Legend
 
@@ -187,6 +188,7 @@ the research paper, examples, and flags.
 | ID | Deliverable | Status |
 |---|---|---|
 | PV-10 | Rewrite `README.md` as a product and usage guide with the SlopCodeBench arXiv link, scan/check examples, flags, policy trust, and provenance | `[x]` — `docs/readme-product-guide@15e6908`; `cargo test --locked --test cli_docs` 16 passed, README local-link check and `git diff --check` pass. |
+| PV-11 | Explain how the gate helps a team keep shipping with existing debt, and remove archive provenance and plan links from the README (user request 2026-10-29) | `[x]` — `docs/readme-how-it-helps@24c9114`; `cargo test --locked --test cli_docs` 16 passed, README link and removed-reference check and `git diff --check` pass. |
 
 ## Standing gates and known debt
 
