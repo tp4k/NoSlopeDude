@@ -1,5 +1,4 @@
-//! Integration tests for M1-7's line-independent callable identity
-//! (`nsd-plan-final.md` *M1-M2*, `docs/implementation-status.md` row M1-7).
+//! Integration tests for line-independent callable identity.
 //!
 //! Every source here is inline (`parse_inline`, mirroring
 //! `tests/ir_lowering.rs`'s own helper of the same name), never a file under
@@ -71,9 +70,7 @@ fn callable_at_line(ir_file: &IrFile, start_line: u32) -> &IrCallable {
 /// M1-7's own regression: inserting a named callable and blank lines above
 /// an anonymous callable must move its display name (still line-embedded)
 /// but leave its `CallableIdentity` and body fingerprint untouched --
-/// the exact case `<anonymous>@<line>` alone gets wrong (`nsd-plan-final.md`
-/// *M1-M2*: "the current form makes every insertion above an anonymous
-/// callable look like delete+add").
+/// the case a line-based `<anonymous>@<line>` identity would misclassify.
 #[test]
 fn test_insertion_above_an_anonymous_callable_keeps_its_identity() {
     let java_before = "\

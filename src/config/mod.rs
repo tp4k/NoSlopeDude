@@ -25,7 +25,7 @@ use crate::model::DEFAULT_MIN_CLONE_LINES;
 pub const CODE_INVALID_CONFIG: &str = "NSD-C102";
 
 /// The informational diagnostic a changed candidate `nsd.yml` carries
-/// (M2-2, `nsd-plan-final.md` *Diagnostics*): its raw bytes differ from
+/// when its raw bytes differ from
 /// the base's, whether added, removed or modified.
 pub const CODE_CONFIG_CHANGED: &str = "NSD-C101";
 
@@ -37,9 +37,9 @@ const CONFIG_FILE_NAME: &str = "nsd.yml";
 /// The only supported `nsd.yml` schema version (D12).
 const SUPPORTED_VERSION: u32 = 1;
 
-/// Default `output.max_terminal_diagnostics` (`nsd-plan-final.md` M6-M7).
+/// Default `output.max_terminal_diagnostics`.
 const DEFAULT_MAX_TERMINAL_DIAGNOSTICS: u32 = 50;
-/// Default `output.max_agent_diagnostics` (`nsd-plan-final.md` M6-M7).
+/// Default `output.max_agent_diagnostics`.
 const DEFAULT_MAX_AGENT_DIAGNOSTICS: u32 = 30;
 /// Default `output.max_github_diagnostics`: GitHub keeps at most 10
 /// annotations of each type per step.

@@ -1,10 +1,6 @@
-//! Base-policy trust resolution (M2-2, `nsd-plan-implementation.md`
-//! step 3): the effective `Config` always comes from a trusted `--config`
-//! file or the **base** snapshot, never from the candidate under
-//! inspection — "candidate config is validated and reported through
-//! `C101` but cannot affect its own check" (`nsd-plan-implementation.md:76`).
-//! Exit-code mapping for the diagnostics this module reports is M5-3's job,
-//! not this one's.
+//! Base-policy trust resolution: the effective `Config` comes from a
+//! trusted `--config` file or the base snapshot. Candidate configuration is
+//! validated and reported through C101 but cannot affect its own check.
 
 pub mod clones;
 pub mod complexity;

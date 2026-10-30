@@ -1,7 +1,7 @@
 //! Git-backed discovery (WS-4): classifies every entry of a WS-1 snapshot
 //! as included (with language, OID, size and the `too_large`/
 //! `non_utf8_path` flags) or skipped with an explicit reason, independent
-//! of any candidate `.gitignore` (`nsd-plan-final.md` *M1-M2*). Immutable
+//! of any candidate `.gitignore`. Immutable
 //! built-in exclusions (dependency/build/generated/minified/WebJar paths
 //! and any `.git` path component) cannot be re-added by `include`; D18:
 //! this module emits classifications, not diagnostics — turning

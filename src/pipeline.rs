@@ -19,8 +19,7 @@ pub struct PipelineOutput {
     pub clones: ClonesResult,
     pub rules: RulesResult,
     pub report: Report,
-    /// M0b: the IR built per successfully parsed file (`nsd-plan-final.md`
-    /// M0b item 5). WS-9 (C1): this is the one lowering `run` below
+    /// The IR built per successfully parsed file. WS-9 (C1): this is the one lowering `run` below
     /// performs -- `metrics`, `clones` and `rules` above are each computed
     /// from this same `Vec<IrFile>`, index-aligned with the pipeline's own
     /// `parsed_files`, instead of each lowering independently.

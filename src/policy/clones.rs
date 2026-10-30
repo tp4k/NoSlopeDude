@@ -1,5 +1,4 @@
-//! M4-2: V102, the clone-regression policy (`nsd-plan-final.md`
-//! *Diagnostics*, A3).
+//! V102: the clone-regression policy.
 //!
 //! An occurrence is a D15 candidate run. A changed candidate occurrence with
 //! an added executable line, inside a maximal candidate-side clone group, is

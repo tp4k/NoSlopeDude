@@ -1,5 +1,4 @@
-//! M5-4: one uncached `check` run over snapshots (`nsd-plan-final.md` *CLI
-//! and configuration*). Every internal failure is a diagnostic in the
+//! One uncached `check` run over snapshots. Every internal failure is a diagnostic in the
 //! outcome, never an `Err`, so the exit status is always 2-class for them.
 
 mod details;
