@@ -1,6 +1,4 @@
-//! Integration tests for M2-3's callable matching
-//! (`nsd-plan-final.md` *Stable data model*, `docs/implementation-status.md`
-//! row M2-3): tiers 1-3 in order, plus ambiguity.
+//! Integration tests for callable matching: tiers 1-3 in order, plus ambiguity.
 //!
 //! Every source here is inline (`parse_inline`) or an in-memory `git2`
 //! repository (`tests/common::{init_repo,commit_entries}`), never a file

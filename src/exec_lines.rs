@@ -2,8 +2,7 @@
 //! (redundant-line counting) and rules (flagged-line sets) all need the
 //! same answer to "does this leaf's line count as executable source" —
 //! previously three hand-maintained, textually identical copies, now one
-//! definition. This is also the function M0b's IR lowers to as its single
-//! `executable` rule (`nsd-plan-final.md` M0a step 2).
+//! definition. The language lowerings use it as their shared `executable` rule.
 
 use tree_sitter::Node;
 

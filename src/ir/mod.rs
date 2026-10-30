@@ -1,13 +1,10 @@
-//! M0b: the normalized IR (`nsd-plan-final.md`, *Architecture* -> *The D-IR
-//! pipeline*). A single node type shared by both grammars, carrying exactly
-//! what the *What the IR must carry* table names: a byte-and-line `Span`
+//! Normalized IR shared by the language lowerings. It carries a byte-and-line `Span`
 //! back to the original source, an `executable` flag (D11), a uniform
 //! `DecisionKind` (no per-grammar strings), typed damage spans, and the
 //! three structural predicates the six rules need (terminator-ness, block
 //! membership, catch-body membership). `src/lower/` is the only producer of
-//! `IrNode` values; this module carries no grammar-string matching itself
-//! (`node.kind()` literals live in `src/lower/java.rs` / `src/lower/jsts.rs`
-//! only) so a lowering-isolation check can hold it to that.
+//! `IrNode` values; grammar-string matching stays in `src/lower/`, so a
+//! lowering-isolation check can hold this module to that boundary.
 
 use tree_sitter::Node;
 
@@ -95,8 +92,7 @@ pub enum DecisionKind {
     Or,
 }
 
-/// The two known damage classes from `nsd-plan-final.md`'s *The 16 parse
-/// failures* table that survive under orchard, plus a catch-all for an
+/// Known parse-damage classes plus a catch-all for an
 /// `ERROR`/`MISSING` node the lowering does not recognize as one of them.
 /// Typed, not just "there was an error somewhere" (*Architecture* -> salvage
 /// row). `JavaVarargsAnnotation` (M0c-9/M0c-10) is removed here: orchard's
@@ -117,7 +113,7 @@ pub struct DamageSpan {
 }
 
 /// The six rules' terminator-ness classification, narrowed from a single
-/// bool to the four kinds `nsd-plan-final.md`'s D22/D7 table names, so the
+/// bool to four kinds, so the
 /// two narrower subsets below (`is_unreachable_terminator`,
 /// `is_return_or_throw`) are expressible without a grammar string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

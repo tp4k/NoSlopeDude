@@ -3,7 +3,7 @@
 //! renamed, type-changed), plus one line-mapping function between a base
 //! and a candidate byte buffer. "Centralize line mapping as one shared
 //! primitive for parse errors, findings, suppressions, callables and clone
-//! attribution" (`nsd-plan-final.md` *M1-M2*).
+//! attribution."
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
@@ -29,8 +29,7 @@ const MODE_SYMLINK: u32 = 0o120000;
 const MODE_SUBMODULE: u32 = 0o160000;
 
 /// D8: the one value passed to libgit2's find-similar options. Renames are
-/// detected for regular files only (A6); `nsd-plan-final.md` *Amendments*
-/// A6 and `nsd-plan-implementation.md` *Policy and analysis behavior*.
+/// detected for regular files only.
 pub const RENAME_THRESHOLD: u16 = 50;
 
 /// libgit2 scores an exact-OID match at 100 without reading any content

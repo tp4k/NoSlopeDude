@@ -1,5 +1,4 @@
-//! Integration tests for M3-4's A101 parse-damage policy
-//! (`nsd-plan-final.md` *Diagnostics*). Every scenario commits real sources
+//! Integration tests for the A101 parse-damage policy. Every scenario commits real sources
 //! to a scratch repository and goes through the real diff and analysis.
 
 mod common;

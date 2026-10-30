@@ -1,5 +1,4 @@
-//! WS-3's cross-language weight-parity suite (`nsd-plan-final.md`, *IR
-//! conformance*): a corpus of matched constructs, written once in Java and
+//! Cross-language weight-parity suite: a corpus of matched constructs, written once in Java and
 //! once in TS, must report identical `cc` and identical `sloc` per
 //! construct -- the suite that makes `overall.erosion` defensible as a
 //! single number across both language families.
@@ -35,8 +34,7 @@ fn find_callable<'a>(callables: &'a [Callable], name: &str) -> &'a Callable {
         .unwrap_or_else(|| panic!("expected a callable named {name}, got {callables:?}"))
 }
 
-/// The eight matched decision constructs `nsd-plan-final.md`'s *IR
-/// conformance* section names, one per callable, shared by both fixture
+/// Eight matched decision constructs, one per callable, shared by both fixture
 /// files under `tests/fixtures/parity/`.
 const MATCHED_CONSTRUCTS: &[&str] = &[
     "ifConstruct",

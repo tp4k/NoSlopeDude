@@ -6,8 +6,7 @@ use nsd::config::{Config, ConfigError, Severity, CODE_INVALID_CONFIG};
 use nsd::git::snapshot::CommitSnapshot;
 use nsd::model::DEFAULT_MIN_CLONE_LINES;
 
-/// The verbatim example from `nsd-plan-implementation.md`'s *Public
-/// contracts* section.
+/// A representative root `nsd.yml` configuration.
 const SPEC_EXAMPLE: &str = "\
 version: 1
 include: [src/**]       # omitted means every supported source path

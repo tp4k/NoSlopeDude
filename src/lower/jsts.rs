@@ -236,8 +236,7 @@ pub(super) fn is_clone_statement(
     }
 }
 
-/// The two known JS/TS damage classes (`nsd-plan-final.md`'s *The 16 parse
-/// failures*): a TS `using` declaration used as a bare parameter name
+/// The two known JS/TS damage classes: a TS `using` declaration used as a bare parameter name
 /// produces an `ERROR` node directly inside `formal_parameters` whose own
 /// first child's kind is literally the `using` keyword token; an
 /// unterminated `&` inside a JSX attribute string produces an `ERROR` node

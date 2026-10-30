@@ -1,5 +1,4 @@
-//! Integration tests for M3-3's S101/S102 suppressions (`nsd-plan-final.md`
-//! *Diagnostics*, *Stable data model*, A9). Every scenario commits real
+//! Integration tests for S101/S102 suppressions. Every scenario commits real
 //! sources to a scratch repository and goes through the real diff, analysis,
 //! callable matcher and finding matcher.
 

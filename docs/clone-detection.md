@@ -150,10 +150,8 @@ that token's internal formatting still fingerprint identically.
 
 ## V102: clone regressions (M4-2)
 
-`src/policy/clones.rs::evaluate_clones` raises `NSD-V102` over a diff. The
-rules are `nsd-plan-final.md` *Diagnostics* and amendment A3, and
-`nsd-plan-implementation.md` *Policy and analysis behavior*; this section
-only names the terms.
+`src/policy/clones.rs::evaluate_clones` raises `NSD-V102` over a diff. This
+section defines the terms it uses.
 
 - An *occurrence* is one D15 candidate run, with its D11 `source_lines`.
   On the candidate side only members of a maximal group (D14 grouping, D15

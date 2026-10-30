@@ -1,5 +1,5 @@
 //! M2-3: matches callables across two snapshots by the spec's three tiers, in
-//! order (`nsd-plan-final.md` *Stable data model*): (1) same path, equal
+//! order: (1) same path, equal
 //! `CallableIdentity`; (2) a `git::diff::Change::Renamed` pair, equal
 //! identity; (3) an exactly-1:1 leftover body fingerprint. A prerequisite for
 //! E101/E102 (M3) -- nothing here classifies a diff, emits a diagnostic, or
@@ -64,7 +64,7 @@ pub enum MatchTier {
 
 /// How a same-key or tier-3 pair was formed: by equal body fingerprint, or
 /// by the order-preserving positional fallback among a same-key group's
-/// leftovers (`nsd-plan-final.md` *Stable data model*).
+/// leftovers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MatchPairing {
     FingerprintExact,

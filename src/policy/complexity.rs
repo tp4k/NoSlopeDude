@@ -1,6 +1,5 @@
 //! M3-1: E101/E102 classification of matched callables, and G102 for a
-//! callable-match ambiguity that could change a verdict (`nsd-plan-final.md`
-//! *Diagnostics*, *Stable data model*).
+//! callable-match ambiguity that could change a verdict.
 //!
 //! A candidate's verdict depends on its paired base callable (or on none).
 //! Where the matcher could not pick one base callable -- a tier-3 fingerprint
@@ -22,8 +21,7 @@ use crate::policy::diagnostics::{
     CODE_MATCH_AMBIGUITY,
 };
 
-/// The immutable policy CC threshold (`nsd-plan-final.md` *CLI and
-/// configuration*); unrelated to the D13 erosion-mass cut.
+/// The immutable policy CC threshold; unrelated to the erosion-mass cut.
 const POLICY_CC_THRESHOLD: u32 = 10;
 /// E102's SLOC growth allowance is `max(SLOC_GROWTH_FLOOR,
 /// floor(base_sloc / SLOC_GROWTH_DIVISOR))`.

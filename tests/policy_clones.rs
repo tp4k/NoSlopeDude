@@ -1,5 +1,4 @@
-//! Integration tests for M4-2's V102 clone-regression policy
-//! (`nsd-plan-final.md` *Diagnostics*, A3). Every scenario commits real
+//! Integration tests for the V102 clone-regression policy. Every scenario commits real
 //! sources to a scratch repository and goes through the real diff and
 //! analysis.
 
