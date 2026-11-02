@@ -25,7 +25,9 @@
 #                                             and _MALFORMED modes
 #                                             (`cargo test --test neutrality`);
 #                                             skips the pre-IR worktree/diff
-#                                             logic entirely.
+#                                             logic entirely. Follow
+#                                             docs/neutrality-baselines.md
+#                                             before capturing.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
