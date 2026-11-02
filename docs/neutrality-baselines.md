@@ -9,8 +9,9 @@
   fixtures only.
 
 The clean corpus is defined by membership, not by a file list. Adding or
-deleting any fixture therefore changes `clean.report.json`, even when no
-measurement changed.
+deleting a fixture the scan measures or skips therefore changes
+`clean.report.json`, even when no measurement changed; a file the scan
+never discovers (e.g. a `.txt`) leaves it unchanged.
 
 `bash scripts/neutrality_gate.sh --capture` rewrites **both** baselines from
 whatever is on disk under `tests/fixtures/`, committed or not. It has no
@@ -29,7 +30,8 @@ this procedure:
    `bash scripts/neutrality_gate.sh --capture`.
 4. **Explain the diff.** Every pointer `git diff tests/golden/neutrality`
    shows must follow from the fixture change: that file's own `/callables`,
-   `/findings` and `/duplicates` entries, skip counts if it is skipped, the
+   `/findings` and `/duplicates` entries, its `/skipped_files` row and the
+   `/skipped` count if it is skipped, the
    `/scores/*` aggregates it feeds and any `/top25` rows it displaces. A
    change to an unrelated fixture's entries means something else moved —
    stop. `malformed.report.json` must not change unless a malformed fixture
