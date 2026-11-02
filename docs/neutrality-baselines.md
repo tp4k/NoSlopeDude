@@ -17,25 +17,30 @@ whatever is on disk under `tests/fixtures/`, committed or not. It has no
 review step of its own. Never hand-edit the JSON; move a baseline only with
 this procedure:
 
-1. **Start clean.** `git status --short tests/fixtures` must print nothing
-   except the fixture change you mean to capture. An unrelated, uncommitted
-   fixture edit would otherwise be baked into the baseline, indistinguishable
-   from the intended change.
-2. **Prove unchanged fixtures did not move.** Scan the clean corpus without
-   the added or changed fixtures and compare it byte-for-byte with the
-   currently committed `clean.report.json`; it must be identical. For a
-   deletion, scan the corpus *before* deleting (still including the file);
-   it must also be identical. Stop on any difference — it is a measurement
-   change, not a corpus change, and needs its own explanation.
-3. **Capture.** Run `bash scripts/neutrality_gate.sh --capture`.
-4. **Bound the diff.** `git diff tests/golden/neutrality` may show only
-   what the corpus change predicts: the affected `/scores/*` aggregates and,
-   if the added or removed file's callables rank in the top 25, the
-   displaced `/top25` rows. `malformed.report.json` must not change unless a
-   malformed fixture changed.
+1. **Start clean.** `git status --short tests/fixtures` must print nothing.
+   An unrelated, uncommitted fixture edit would otherwise be baked into the
+   baseline, indistinguishable from the intended change.
+2. **Prove the code reproduces the committed baselines.** Before adding,
+   editing or deleting any fixture — with `tests/fixtures/` at its committed
+   state — run `cargo test --test neutrality`; it must pass. A failure here
+   is a measurement change, not a corpus change, and needs its own
+   explanation before any capture.
+3. **Capture.** Make the fixture change, then run
+   `bash scripts/neutrality_gate.sh --capture`.
+4. **Explain the diff.** Every pointer `git diff tests/golden/neutrality`
+   shows must follow from the fixture change: that file's own `/callables`,
+   `/findings` and `/duplicates` entries, skip counts if it is skipped, the
+   `/scores/*` aggregates it feeds and any `/top25` rows it displaces. A
+   change to an unrelated fixture's entries means something else moved —
+   stop. `malformed.report.json` must not change unless a malformed fixture
+   changed.
 
 The script's default mode (no arguments) compares `HEAD` with the pinned
 pre-IR commit `PRE_IR_SHA`. It is **no longer a release gate**: the M0c Java
 grammar swap and later measurement changes diverge from that commit by
 design, so it reports a divergence on every current tree. Do not re-pin
 `PRE_IR_SHA` to make it pass; step 2 above is the drift check.
+
+`--capture` runs the neutrality tests on one thread: another test in the
+same binary reads both baselines, and running it in parallel with the
+capture tests let it read a half-rewritten file and fail the capture.
