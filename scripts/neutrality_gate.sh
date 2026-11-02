@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # WS-2: the operator-run half of the measurement-neutrality gate
-# (nsd-plan-final.md, M0b item 8). Builds two `nsd` binaries -- the pinned
+# Builds two `nsd` binaries -- the pinned
 # pre-IR reference commit, in a detached worktree, and the current HEAD --
 # scans the same copied fixture corpus with each, and diffs their
 # `report.json` output. Because both scans target the same corpus

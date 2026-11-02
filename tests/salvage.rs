@@ -1,5 +1,4 @@
-//! WS-6: error-span salvage and the `SkipReason` split
-//! (`nsd-plan-final.md`, *Architecture* -> salvage row). `parse::parse_one`
+//! Error-span salvage and the `SkipReason` split. `parse::parse_one`
 //! no longer drops a whole file on `tree.root_node().has_error()`; IR-level
 //! typed damage spans (`src/lower/mod.rs::lower_file`) drive fail-closed
 //! exclusion at entity (callable) granularity instead. These tests exercise

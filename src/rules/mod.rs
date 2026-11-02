@@ -1,7 +1,7 @@
 //! Stage 4 (WS-4): wasteful-code rules and the adapted verbosity score
 //! (D22, D23). Six conservative, syntax-only rules — documented with their
 //! conservative-by-design rationale in `docs/wasteful-rules.md` — run over
-//! the IR (`nsd-plan-final.md` M0b item 6): terminator-ness, block
+//! the IR: terminator-ness, block
 //! membership and catch-body membership are IR structural queries here, not
 //! grammar-string matches.
 

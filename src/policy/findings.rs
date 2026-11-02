@@ -1,5 +1,4 @@
-//! M3-2: diff-aware finding matching and V101 (`nsd-plan-final.md`
-//! *Stable data model*, *Diagnostics*).
+//! Diff-aware finding matching and V101.
 //!
 //! A finding's key is (rule ID, context, normalized-syntax digest). The
 //! context is the matched callable pair when the finding's innermost

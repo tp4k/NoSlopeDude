@@ -1,6 +1,6 @@
 //! Base-policy trust resolution (M2-2): the effective `Config` always
 //! comes from a trusted `--config` file or the **base** snapshot, never
-//! from the candidate under inspection (`nsd-plan-implementation.md:76`).
+//! from the candidate under inspection.
 
 mod common;
 

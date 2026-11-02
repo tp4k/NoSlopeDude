@@ -449,7 +449,7 @@ fn test_unparseable_file_is_skipped_and_marks_incomplete() {
         language: LanguageFamily::JsTs,
     }];
     let (parsed, failures) = parse::parse_all(&root, &files);
-    // WS-6 declared delta: salvage (`nsd-plan-final.md`'s salvage row) means
+    // Salvage means
     // a syntax-error file still produces a `ParsedFile` alongside its
     // `ParseFailure` -- it is no longer dropped wholesale, only its damaged
     // entities are excluded downstream. `failures` still carries the
@@ -477,7 +477,7 @@ fn test_unparseable_file_is_skipped_and_marks_incomplete() {
 /// `cc >= 10` disagree on it: not eroded under `>`, eroded under `>=`.
 /// No `else` so `JAVA-REDUNDANT-ELSE-AFTER-RETURN` never fires — a rule
 /// finding on this fixture would widen the neutrality-recapture diff past
-/// the `/scores/*` bound `docs/ir-neutrality.md` requires. Lives in its own
+/// the `/scores/*` comparison bound. Lives in its own
 /// `tests/fixtures/erosion_boundary/` root, not `tests/fixtures/metrics/`,
 /// since that root's own erosion is separately pinned at `0.6`
 /// (`test_erosion_scan_matches_hand_computation`) by a fixed set of

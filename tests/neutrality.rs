@@ -1,18 +1,11 @@
-//! WS-2: the measurement-neutrality gate `nsd-plan-final.md` M0b item 8
-//! requires -- scans a fixed, copied fixture corpus with fixed settings and
-//! asserts the rendered `report.json` is byte-identical to a committed
-//! pre-IR baseline, captured now while the tree is still pre-IR.
+//! Measurement-neutrality gate: scans a fixed, copied fixture corpus and
+//! compares the rendered `report.json` with committed baselines.
 //!
 //! This suite never shells out to git, needs no worktree, no network and no
 //! private archive: `scripts/neutrality_gate.sh` (the operator-run
 //! re-capture/comparison tool) is the mechanism that reaches into git
-//! history, kept deliberately separate. Through M0b this suite also carried
-//! a private-archive-gated strict byte-identity leg against
-//! `java-fixture-01`; M0c-10 retired it (see `docs/ir-neutrality.md`,
-//! *The `java-fixture-01` strict leg*) because it asserted an invariant
-//! about holding the Java parser fixed, which that workstream's grammar
-//! swap deliberately breaks. The `java-fixture-01` corpus's separate lossy
-//! digest comparison (`tests/golden_digest.rs`) is unaffected.
+//! history, kept deliberately separate. The private `java-fixture-01` scan
+//! has its own digest comparison in `tests/golden_digest.rs`.
 
 use std::collections::HashSet;
 use std::fs;

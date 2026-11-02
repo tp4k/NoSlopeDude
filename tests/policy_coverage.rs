@@ -1,5 +1,4 @@
-//! Integration tests for M4-1's A102 required analysis coverage
-//! (`nsd-plan-final.md` *Required clone coverage*). Every scenario commits
+//! Integration tests for A102 required analysis coverage. Every scenario commits
 //! real sources to a scratch repository and goes through real discovery, diff
 //! and analysis.
 

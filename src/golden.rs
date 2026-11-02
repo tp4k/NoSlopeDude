@@ -276,8 +276,7 @@ fn number_after(raw: &str, pos: usize) -> Result<(f64, usize)> {
 /// The neutral label that replaces `scan.target`'s absolute checkout path.
 pub(crate) const LABEL: &str = "java-fixture-01";
 
-/// The fixture's language, verbatim from `nsd-plan-final.md`'s *Measured
-/// starting state* row for `java-fixture-01`.
+/// The archived `java-fixture-01` report's recorded language.
 pub(crate) const LANGUAGE: &str = "Java, with a small JS/TS component";
 
 /// Authorship is unknown for all three private fixtures; `AGENTS.md` says

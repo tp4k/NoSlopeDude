@@ -1,5 +1,4 @@
-//! M0b: the two lowerings (`nsd-plan-final.md` M0b item 5) -- plain
-//! functions over tree-sitter trees, no `Frontend` trait, no plugin system.
+//! Language lowerings are plain functions over tree-sitter trees.
 //! `src/lower/java.rs` and `src/lower/jsts.rs` hold every grammar-specific
 //! `node.kind()` match (decision classification, terminator kinds, block/
 //! catch-body structure, damage classification, clone-candidate statement
@@ -49,7 +48,7 @@ pub const RUST_LOWERING_VERSION: u32 = 1;
 /// `clones::normalized_statement_tokens` uses as its own private
 /// `TOKEN_SEPARATOR`. This lowering's `statement_token_stream` is an
 /// independent re-derivation of that function (the floor prototype
-/// `nsd-plan-final.md` M0b item 4 calls for), so the two must agree on this
+/// used by the clone-token floor test), so the two must agree on this
 /// exact value for the byte-for-byte comparison to mean anything; it cannot
 /// be imported since the original is private to `src/clones/mod.rs`.
 /// Test-only: nothing in `src/` reads a clone-candidate token stream yet
@@ -670,7 +669,7 @@ fn is_clone_statement(node: Node, language: LanguageFamily) -> bool {
 /// `node.kind()`, a named leaf's text preserved verbatim. Deliberately a
 /// fresh implementation of the same algorithm
 /// `clones::normalized_statement_tokens` uses, not a call to it: the floor
-/// prototype (`nsd-plan-final.md` M0b item 4) exists to prove this
+/// comparison exists to prove this
 /// independent derivation agrees with the pre-IR one, not to wrap it.
 /// Test-only -- see `STATEMENT_TOKEN_SEPARATOR`'s doc comment.
 #[cfg(test)]
@@ -1022,7 +1021,7 @@ mod tests {
         }
     }
 
-    /// The IR carries the clone floor (`nsd-plan-final.md` M0b item 4): for
+    /// The IR clone-token floor is checked for
     /// every damage-clear clone-candidate statement in every in-repo
     /// fixture -- including a fixture whose tree carries damage elsewhere,
     /// since WS-6 salvage means `clones::run` now sees exactly those
@@ -1289,7 +1288,7 @@ mod tests {
     }
 
     /// The clone-token floor's equality is discriminating, not vacuous
-    /// (`nsd-plan-final.md` M0b item 4): two fixtures whose two-statement
+    /// with two fixtures whose two-statement
     /// clone body agrees on the first statement and differs on the second
     /// produce token streams that agree at index zero and differ at index
     /// one. Calls `statement_token_stream` directly rather than reading

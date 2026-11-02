@@ -48,8 +48,7 @@ const EXPECTED_EXCERPT_COUNT: usize = 537;
 /// digest's own format, not a measurement of this particular fixture.
 const TOP25_TRIPLE_COUNT: usize = 25;
 
-/// Cross-checked against `nsd-plan-final.md:40` (*Measured starting
-/// state*). The js_ts erosion, the finding/rule-ID counts, the clone-group
+/// Cross-checked against the archived reference report. The js_ts erosion, the finding/rule-ID counts, the clone-group
 /// count, and the top25 triples have no independent source outside the
 /// archived report itself and are verified only by the equality check
 /// against the committed golden below -- typing them in here would be the
@@ -362,8 +361,7 @@ fn assert_digest_carries_no_paths_names_or_excerpts(
 
     /// The one field this digest carries whose value is a fixed,
     /// hand-authored free-text label rather than anything read out of the
-    /// archive: `src/golden.rs`'s `LANGUAGE` constant, verbatim from
-    /// `nsd-plan-final.md`'s *Measured starting state* row. The `/` in
+    /// archive: `src/golden.rs`'s recorded `LANGUAGE` constant. The `/` in
     /// `"JS/TS"` is not a path. Every archive-derived leaf this digest holds
     /// is a number (`scores`, `clones`, `findings_by_rule_id`,
     /// `skips_by_reason`, `top25` -- see the leaf-number check below), so

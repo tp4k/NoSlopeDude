@@ -7,7 +7,7 @@ use crate::git::path::RepoPath;
 use crate::model::RuleId;
 
 /// A candidate callable has `CC > 10` while its matched base callable is
-/// absent or has `CC <= 10` (`nsd-plan-final.md` *Diagnostics*, `NSD-E101`).
+/// absent or has `CC <= 10` (`NSD-E101`).
 pub const CODE_COMPLEXITY_ABOVE_THRESHOLD: &str = "NSD-E101";
 
 /// Base and candidate both have `CC > 10`, and CC increased or SLOC grew past

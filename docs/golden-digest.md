@@ -1,13 +1,9 @@
 # The `java-fixture-01` golden digest
 
-`nsd-plan-final.md`'s A1 amendment ("*Golden is a digest*") picks
-`java-fixture-01@c6671504…` as the one clean, complete recorded scan and
-commits it as a **digest**, not the underlying `report.json`: that file
-carries private source excerpts and an absolute checkout path and stays
-outside this repository, in the `agent_slope` archive, forever. See
-`nsd-plan-final.md`'s *Measured starting state* and *Settled decisions* →
-*Golden fixture* for the decision; this document only covers the digest's
-shape and how to re-derive it.
+`java-fixture-01@c6671504…` is the clean, complete reference scan. The
+repository commits its sanitized **digest**, not the underlying `report.json`:
+that report contains private source excerpts and an absolute checkout path.
+This document describes the digest and how to re-derive it.
 
 ## What is committed
 
@@ -17,7 +13,7 @@ nothing else:
 | field | content |
 |---|---|
 | `label` | the neutral fixture name (`"java-fixture-01"`), replacing the archive's absolute checkout path |
-| `language` | the fixture's language, from `nsd-plan-final.md`'s *Measured starting state* row |
+| `language` | the fixture's recorded language |
 | `authorship` | `"unknown"` — not inferred from the scan (`AGENTS.md`) |
 | `revision_sha` | `scan.revision.sha`, the one checkout-independent identity the archive carries |
 | `hash_version` | the `body_blake3` hash family's version tag |
@@ -123,23 +119,12 @@ checkout it came from:
    `clones`, `findings_by_rule_id`, `skips_by_reason` and `top25` is
    numeric, except the `nsd-v1` file's boolean `scores.*.verbosity.complete`.
 
-## The `nsd-v1` digest (M0c-14)
+## The `nsd-v1` digest
 
-`nsd-plan-final.md` (*Test and acceptance plan*) and `nsd-plan-implementation.md:175` make the
-`java-fixture-01` digest the committed Java E2E golden. M0c's grammar swap
-(`tree-sitter-java` 0.23.5 → `tree-sitter-java-orchard` 0.5.18) and the
-`Callable::end_line`/`-0.0` fixes (M0c-13) mean the M0b digest above no
-longer describes what `nsd-v1` actually emits, so a second file,
-`tests/golden/java-fixture-01.nsd-v1.digest.json`, is committed alongside
-it. The M0b file above stays byte-identical, as history: it is what
-`tree-sitter-java` 0.23.5 emitted, and
-`test_committed_digest_matches_the_archived_report` keeps checking it
-against the archive.
-
-Captured at `feat/m0c-grammar@beee958` (M0c-14's red commit), under the
-frozen `nsd-v1` measurement profile fingerprint
-`blake3:90b27f53ddecccd4ac879652d4d9c4eb` (`src/profile.rs::PROFILE_NAME`,
-pinned by `tests/profile.rs::test_nsd_v1_fingerprint_is_frozen`).
+`tests/golden/java-fixture-01.nsd-v1.digest.json` is the current Java
+end-to-end golden. The older `java-fixture-01.digest.json` remains as a
+historical fixture because `test_committed_digest_matches_the_archived_report`
+still checks it against the archive.
 
 `tests/golden_digest.rs::test_nsd_v1_digest_matches_a_live_scan_of_java_fixture_01`
 re-scans the archive's own recorded target with its own
@@ -161,54 +146,9 @@ The archive checkout's cleanliness check opens the recipe target with
 `git2::Repository::discover`, so a `recipe.target` that is a subdirectory of
 the checkout passes it; a target outside any repository still fails loudly.
 
-The file was re-captured after the last M6 format change (status row M6-2b,
-`46f1525`), on `main@b069e55`, and once more after M7-1's new `skipped` key and
-default globs (status row M7-1a, `a7a7119`), on `main@67a0c5e`, and for the
-Rust lowering (status row PV-2, `a6bcd39`), and after the `adaptation` key's
-removal (status row PV-4); see *M6-2b recapture delta*, *M7-1a recapture
-delta*, *PV-1 recapture delta* and *PV-4 recapture delta* below.
-
 Re-capturing (implementer-only; overwrites the committed file) sets a
 second, separate opt-in alongside the archive path:
 
 ```
 NSD_ARCHIVED_REPORT=… NSD_GOLDEN_CAPTURE=1 cargo test --test golden_digest
 ```
-
-### Per-field delta against the M0b digest
-
-At capture only `body_blake3` differed from the M0b file
-(`blake3:f78712b4…` → `blake3:bf38db17…`): M0c-13's `build_callable` change
-widened `top25[].location.{end_line, link}` on 20 of 25 rows; the orchard swap
-moved no score, finding, clone, skip or top-25 triple on this fixture.
-
-### M6-2b recapture delta
-
-Re-captured at `main@b069e55` (status row M6-2b): M1-8 added `complete: true`
-and `unanalyzed_lines: 0` to every `scores.*.verbosity`, and the six WS-3
-canonical top-level keys plus `scan.revision.dirty` `null` moved
-`body_blake3` to `blake3:ce58a4d8…`; no measurement moved.
-
-### M7-1a recapture delta
-
-Re-captured at `a7a7119` on `main@67a0c5e` (status row M7-1a): the built-in
-WebJar exclusion moved one file to `dependency_or_build_output` (1 → 2),
-removing its two `JSTS-*` finding kinds, the whole `js_ts` contribution (so
-`overall` now equals `java`) and five `top25` rows; with the new
-`skipped.nested_checkout` key this moved `body_blake3` to
-`blake3:9db99d29…`. Clones and `java` scores are unchanged.
-
-### PV-1 recapture delta
-
-Re-captured at `a6bcd39` (status row PV-2): the Rust lowering adds a
-`scores.rust` family (erosion `0.0`, every verbosity count `0`, `complete`
-true; the fixture has no `.rs` file), which moved `body_blake3` to
-`blake3:e7285498089bb0e90f2a617f24ab1d32`; no Java or JS/TS measurement
-moved.
-
-### PV-4 recapture delta
-
-Re-captured for status row PV-4: dropping the top-level `adaptation` object
-from the report body moved `body_blake3` to the current
-`blake3:d2f08c7b7f26c5376acbea7f9d8ae1eb`; every other field, and so every
-measurement, is unchanged.

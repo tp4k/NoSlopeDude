@@ -12,11 +12,8 @@ pub mod snapshot;
 pub mod snapshot_id;
 mod wildmatch;
 
-/// The one diagnostic code this workstream raises: "merge base or required
-/// snapshot unavailable" (`nsd-plan-final.md` *Diagnostics*). The full
-/// twelve-code diagnostics enum is M3's `src/policy/` and is not created
-/// here (D21) — until then, every fallible Git read in this module reports
-/// through this single stable code.
+/// Merge base or required snapshot unavailable. Git reads report this
+/// stable diagnostic code.
 pub const CODE_SNAPSHOT_UNAVAILABLE: &str = "NSD-G101";
 
 /// A Git-domain error carrying a stable diagnostic code (D21).

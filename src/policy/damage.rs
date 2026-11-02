@@ -1,4 +1,4 @@
-//! M3-4: A101, the parse-damage policy (`nsd-plan-final.md` *Diagnostics*).
+//! A101: parse-damage policy.
 //!
 //! Damage is tolerated line by line only when it is the `LineMap` image of
 //! base damage lines. Separately, a callable or block salvage excluded that

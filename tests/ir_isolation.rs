@@ -1,5 +1,4 @@
-//! WS-6: the lowering-isolation freeze (`nsd-plan-final.md`'s *IR
-//! conformance* -> *Lowering isolation* bullet): "no symbol under `src/ir/`
+//! Lowering isolation: "no symbol under `src/ir/`
 //! or any analyzer names a grammar node kind (enforced by a source-level
 //! test)". A leaked node-kind string would silently re-couple a metric to
 //! the grammar and quietly restore the re-baseline cost D-IR exists to

@@ -1,17 +1,12 @@
-# The `nsd-v1` measurement profile (M0c-12)
+# The `nsd-v1` measurement profile
 
-`nsd-plan-final.md` M0c step 12: "Freeze `nsd-v1`, fingerprint including IR
-version, all three lowering versions, the four grammar versions, the
-`tree-sitter` runtime version, the rule catalog and the effective clone
-configuration (correction #18, A2)." `src/profile.rs` is that freeze: a
-`pub mod profile` exposing the profile's name, its pinned version
-constants, an inputs struct, and a fingerprint function over exactly those
-inputs — nothing added, nothing dropped.
+`src/profile.rs` defines the profile's name, pinned parser versions, input
+fields and fingerprint function. The fingerprint covers the IR version, three
+lowering versions, five grammar versions, the tree-sitter runtime version,
+the rule catalog and the effective clone threshold.
 
-This document covers only the profile's shape and how to re-derive it. It
-adds no `report.json` field and no cache: the canonical-JSON fingerprint
-field is M6-2's scope, and the persisted cache key is M5-1's; both are
-later consumers of `profile::fingerprint`, not built here.
+This document covers the profile's shape and how to re-derive its fingerprint.
+The report and cache consume `profile::fingerprint`.
 
 ## What `PROFILE_NAME` names
 
@@ -38,7 +33,7 @@ not itself a fingerprint input.
 | `typescript_grammar_version` | `profile::TYPESCRIPT_GRAMMAR_VERSION`, pinned against `Cargo.lock`'s `tree-sitter-typescript` package | Same reasoning, TS half |
 | `rust_grammar_version` | `profile::RUST_GRAMMAR_VERSION`, pinned against `Cargo.lock`'s `tree-sitter-rust` package | Same reasoning, Rust |
 | `rule_catalog` | `rules::ALL_RULE_IDS` | Which D22 rules ran; adding, removing or renaming a rule id changes what a finding count means |
-| `min_clone_lines` | `model::DEFAULT_MIN_CLONE_LINES` for the default profile, or a scan's own `ScanSettings::min_clone_lines` for a non-default one | "`min_clone_lines` from config changes the measurement fingerprint and the cache key" (`nsd-plan-implementation.md`, *Test and acceptance plan*) |
+| `min_clone_lines` | `model::DEFAULT_MIN_CLONE_LINES` for the default profile, or a scan's own `ScanSettings::min_clone_lines` for a non-default one | The effective threshold changes both the measurement fingerprint and the cache key |
 
 `MeasurementProfileInputs::current()` builds the default-configuration set
 by reading every field off its own live source of truth above — it cannot

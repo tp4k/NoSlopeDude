@@ -1,5 +1,4 @@
-//! Integration tests for M3-1's E101/E102 classification and G102
-//! (`nsd-plan-final.md` *Diagnostics* and *Stable data model*). Boundary and
+//! Integration tests for E101/E102 classification and G102. Boundary and
 //! ambiguity scenarios use synthetic metrics fed through the real matcher;
 //! the commit-to-commit scenarios go through real parsing and `git2`.
 

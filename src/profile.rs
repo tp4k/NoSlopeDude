@@ -1,14 +1,7 @@
-//! M0c-12: freeze the `nsd-v1` measurement fingerprint (`nsd-plan-final.md`
-//! M0c step 12, *Settled decisions* → *Measurement profile*, *Corrections
-//! applied* #18). A fingerprint over exactly the inputs the plan names —
-//! the IR version, the three per-language lowering versions, the four grammar
-//! versions, the `tree-sitter` runtime version, the rule catalog, and the
-//! effective clone configuration's `min_clone_lines` — so a future change
-//! to any one of them is forced to move the fingerprint rather than
-//! silently reuse a cache key or golden digest computed under a different
-//! profile. No `report.json` field and no cache read or write here: M5's
-//! cache key and M6-2's canonical-JSON fingerprint field are later
-//! consumers of `fingerprint`, not built by this module.
+//! Versioned measurement fingerprint over the IR, three lowerings, five
+//! grammars, the tree-sitter runtime, the rule catalog, and the effective
+//! clone threshold. Changes to these inputs move cache and report fingerprints.
+//! This module computes the fingerprint; the cache and report consume it.
 
 use crate::hashing::Digest;
 use crate::ir;
@@ -48,8 +41,7 @@ pub const RUST_GRAMMAR_VERSION: &str = "0.24.2";
 /// bytes.
 const FINGERPRINT_FAMILY_PREFIX: &str = "measurement-profile";
 
-/// Exactly the inputs `nsd-plan-final.md` M0c step 12 names for the
-/// measurement fingerprint — nothing else. `current()` is the only
+/// Inputs to the measurement fingerprint. `current()` is the only
 /// constructor v1 callers need; the fields stay public so
 /// `tests/profile.rs` can build deliberately altered copies to prove each
 /// one actually moves `fingerprint`'s output.

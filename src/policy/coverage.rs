@@ -1,5 +1,4 @@
-//! M4-1: A102, required analysis coverage (`nsd-plan-final.md` *Required
-//! clone coverage*).
+//! A102: required analysis coverage, including unchanged clone inputs.
 
 use crate::analysis::UnanalyzableReason;
 use crate::config::{PolicyConfig, Severity};

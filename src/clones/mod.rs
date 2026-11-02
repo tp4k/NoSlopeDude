@@ -500,8 +500,7 @@ pub(crate) fn leaf_text<'a>(node: &IrNode, source: &'a str) -> &'a str {
         .unwrap_or("")
 }
 
-/// The pre-IR reference implementation, kept verbatim: `nsd-plan-final.md`
-/// M0b item 4's floor test (`src/lower/mod.rs::tests::
+/// The pre-IR reference implementation, kept for the clone-token floor test (`src/lower/mod.rs::tests::
 /// test_ir_tokens_reproduce_the_pre_ir_stream_on_every_fixture`, WS-1's,
 /// out of this stream's file scope) calls this exact function, by this
 /// exact name, with a tree-sitter `Node` argument -- so its signature

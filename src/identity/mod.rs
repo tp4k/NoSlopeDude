@@ -1,14 +1,11 @@
 //! M1-7: a line-independent callable identity, computed from the lowering's
-//! own facts rather than a grammar string or a byte/line offset
-//! (`nsd-plan-final.md` *M1-M2*: "Replace `<anonymous>@<line>` with a
-//! line-independent identity; the current form makes every insertion above
-//! an anonymous callable look like delete+add"). Takes an already-lowered
+//! own facts rather than a grammar string or a byte/line offset, so insertions
+//! above anonymous callables do not look like delete+add. Takes an already-lowered
 //! `&lower::IrFile` plus the file's own source text; it never re-parses and
 //! never re-lowers.
 //!
 //! `CallableIdentity` is owner chain + kind + name (`<anonymous>` when there
-//! is no declared name) + signature -- no ordinal (correction #13,
-//! `nsd-plan-final.md` *Stable data model*), path-free, and carrying no line
+//! is no declared name) + signature -- no ordinal, path-free, and carrying no line
 //! or byte offset. It is deliberately **not** unique within a file:
 //! same-key siblings (e.g. two anonymous callbacks in the same owner) share
 //! one `CallableIdentity`; `IrFile.callables`' own document order

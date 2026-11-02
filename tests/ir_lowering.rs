@@ -1,5 +1,4 @@
-//! Integration tests for M0b's IR core and both lowerings
-//! (`nsd-plan-final.md` M0b items 3-5). `src/lower/mod.rs`'s own in-crate
+//! Integration tests for the IR core and Java and JS/TS lowerings. `src/lower/mod.rs`'s own in-crate
 //! tests already prove the clone-token floor and the D11 `executable`
 //! predicate across every in-repo fixture; this file exercises the rest of
 //! *What the IR must carry*: spans, decision kinds, the three structural

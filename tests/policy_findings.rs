@@ -1,5 +1,4 @@
-//! Integration tests for M3-2's diff-aware finding matching and V101
-//! (`nsd-plan-final.md` *Diagnostics* and *Stable data model*). Every
+//! Integration tests for diff-aware finding matching and V101. Every
 //! scenario commits real sources to a scratch repository and goes through
 //! the real diff, analysis and callable matcher.
 

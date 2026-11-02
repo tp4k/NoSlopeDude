@@ -1,7 +1,7 @@
 //! M0c-12: the frozen `nsd-v1` measurement fingerprint (`src/profile.rs`).
-//! `nsd-plan-final.md` M0c step 12: the fingerprint covers IR version, all three
-//! lowering versions, the four grammar versions, the `tree-sitter` runtime
-//! version, the rule catalog, and the effective clone configuration
+//! The fingerprint covers the IR version, three lowering versions, five
+//! grammar versions, the tree-sitter runtime, the rule catalog and the
+//! effective clone configuration
 //! (`min_clone_lines`) — nothing else, and every one of those inputs must
 //! actually move the fingerprint.
 
@@ -102,12 +102,8 @@ fn test_identical_inputs_give_identical_fingerprints() {
     assert_eq!(profile::fingerprint(&a), profile::fingerprint(&b));
 }
 
-/// "changing the IR version, either lowering version, or any grammar
-/// version changes the measurement fingerprint" (`nsd-plan-final.md`, *Test
-/// and acceptance plan*), extended here to the three inputs the *Settled
-/// decisions* text adds on top of that list: the
-/// `tree-sitter` runtime version, the rule catalog, and
-/// `measurement.min_clone_lines` (`nsd-plan-implementation.md`).
+/// Every input, including the runtime version, rule catalog and clone
+/// threshold, must independently move the measurement fingerprint.
 #[test]
 fn test_each_input_changes_the_fingerprint() {
     let baseline = MeasurementProfileInputs::current();

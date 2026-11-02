@@ -1,5 +1,4 @@
-//! M3-3: source suppressions (`nsd-plan-final.md` *Stable data model*,
-//! *Diagnostics*, A9).
+//! Source suppressions and their finding identity.
 //!
 //! A valid directive suppresses the finding of its rule that starts on the
 //! next line. Suppression is applied after finding matching: S101 is raised
