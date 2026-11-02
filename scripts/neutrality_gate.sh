@@ -25,7 +25,9 @@
 #                                             and _MALFORMED modes
 #                                             (`cargo test --test neutrality`);
 #                                             skips the pre-IR worktree/diff
-#                                             logic entirely.
+#                                             logic entirely. Follow
+#                                             docs/neutrality-baselines.md
+#                                             before capturing.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,7 +36,9 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 if [ "${1:-}" = "--capture" ]; then
   echo "Capturing tests/golden/neutrality/ baselines from HEAD via 'cargo test --test neutrality'..." >&2
   cd "$REPO_ROOT"
-  NSD_NEUTRALITY_CAPTURE_CLEAN=1 NSD_NEUTRALITY_CAPTURE_MALFORMED=1 cargo test --test neutrality
+  # One thread: test_previous_baselines_differ_only_by_enumerated_format_deltas
+  # reads both baselines while the capture tests rewrite them.
+  NSD_NEUTRALITY_CAPTURE_CLEAN=1 NSD_NEUTRALITY_CAPTURE_MALFORMED=1 cargo test --test neutrality -- --test-threads=1
   exit $?
 fi
 
