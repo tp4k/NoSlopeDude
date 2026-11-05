@@ -173,3 +173,15 @@ records the evidence per row. What each step still binds:
 - Prove exits `0/1/2/3`, unchanged staged verdicts under unstaged edits, and byte-stable JSON across roots, thread counts, and cache states.
 - Run tests with the current Homebrew toolchain only. MSRV 1.90 is declared, not exercised (A4).
 - Re-run pinned `java-fixture-01`, `js-ts-fixture-01`, Spring, and Angular acceptance scans locally; the `java-fixture-01` digest is the committed golden, the archived full report is the local byte-identity reference, and the dirty `js-ts-fixture-02` result is never adopted.
+
+## Live-trial follow-up (2026-11-05)
+
+Amendments A13–A15 in the final plan govern this follow-up. Preserve measurement
+values and default policy, discard version-1 cached identities, and distinguish
+JS/TS lexical bindings and callback callsites before positional matching.
+`complexity.sloc_growth` is an optional strict boolean, default `true`, loaded
+from the same trusted base or external configuration as the existing policy.
+It participates in the configuration fingerprint but not the measurement profile.
+Complexity diagnostics carry candidate metrics and a reason without joining
+entities. Validate scope trust, retained ambiguity, cache invalidation,
+canonical JSON, terminal/agent/GitHub escaping and unchanged scan baselines.

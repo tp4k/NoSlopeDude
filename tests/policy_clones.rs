@@ -234,6 +234,7 @@ fn policy_with(nsd_v102: Severity) -> PolicyConfig {
         nsd_v101: Severity::Deny,
         nsd_v102,
         nsd_s102: Severity::Warn,
+        sloc_growth: true,
     }
 }
 

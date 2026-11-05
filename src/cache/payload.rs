@@ -159,6 +159,8 @@ pub struct CachedDamage {
 pub struct CachedIdentity {
     #[serde(with = "owner_digest_hex")]
     pub owner_digest: OwnerDigest,
+    #[serde(with = "owner_digest_hex")]
+    pub context_digest: OwnerDigest,
     pub kind: CachedCallableKind,
     pub name: String,
     pub signature: Vec<String>,
@@ -285,6 +287,7 @@ impl CachedAnalysis {
                 sloc: callable.metrics.sloc,
                 identity: CachedIdentity {
                     owner_digest: callable.identity.owner_digest,
+                    context_digest: callable.identity.context_digest,
                     kind: CachedCallableKind::from_ir(callable.identity.kind),
                     name: callable.identity.name.clone(),
                     signature: callable.identity.signature.clone(),
@@ -393,6 +396,7 @@ impl CachedAnalysis {
                 },
                 identity: CallableIdentity {
                     owner_digest: callable.identity.owner_digest,
+                    context_digest: callable.identity.context_digest,
                     kind: callable.identity.kind.to_ir(),
                     name: callable.identity.name.clone(),
                     signature: callable.identity.signature.clone(),

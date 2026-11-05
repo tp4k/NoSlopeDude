@@ -5,6 +5,7 @@
 use tree_sitter::Node;
 
 use crate::exec_lines::is_comment_kind;
+use crate::hashing::Digest;
 use crate::ir::{
     CallableKind, DamageKind, DecisionKind, OwnerKind, OwnerSegment, Span, TerminatorKind,
 };
@@ -117,6 +118,144 @@ fn owner_segment_for_type(kind: &str, node: Node, source: &str) -> Option<OwnerS
         }
         _ => None,
     }
+}
+
+const MAX_CONTEXT_NODES: usize = 64;
+const MAX_CONTEXT_ARGUMENTS: usize = 64;
+
+fn static_context(node: Node, source: &str) -> Option<String> {
+    let mut pending = vec![node];
+    let mut visited = 0;
+    let mut digest = Digest::new("callable-static-context-v1");
+    while let Some(current) = pending.pop() {
+        visited += 1;
+        if visited > MAX_CONTEXT_NODES {
+            return None;
+        }
+        if is_comment_kind(current.kind(), LanguageFamily::JsTs) {
+            continue;
+        }
+        match current.kind() {
+            "identifier"
+            | "property_identifier"
+            | "string"
+            | "number"
+            | "true"
+            | "false"
+            | "null"
+            | "this" => {
+                digest.push(current.kind().as_bytes());
+                digest.push(current.utf8_text(source.as_bytes()).ok()?.as_bytes());
+            }
+            "member_expression" | "array" => {
+                if current.named_child_count() > MAX_CONTEXT_NODES {
+                    return None;
+                }
+                digest.push(current.kind().as_bytes());
+                let child_count = (0..current.named_child_count())
+                    .filter_map(|index| current.named_child(index as u32))
+                    .filter(|child| !is_comment_kind(child.kind(), LanguageFamily::JsTs))
+                    .count();
+                digest.push(&(child_count as u32).to_le_bytes());
+                for index in (0..current.named_child_count()).rev() {
+                    pending.push(current.named_child(index as u32)?);
+                }
+            }
+            _ => return None,
+        }
+    }
+    Some(format!("{:032x}", digest.finish()))
+}
+
+fn binding_context(node: Node, source: &str) -> Option<OwnerSegment> {
+    let field = match node.kind() {
+        "variable_declarator" => "name",
+        "pair" => "key",
+        _ => return None,
+    };
+    let name = static_context(node.child_by_field_name(field)?, source)?;
+    Some(OwnerSegment {
+        kind: OwnerKind::Binding,
+        name: Some(name),
+    })
+}
+
+fn callee_context(node: Node, source: &str) -> Option<String> {
+    if node.kind() != "member_expression" {
+        return static_context(node, source);
+    }
+    let mut current = node;
+    let mut properties = Vec::new();
+    while current.kind() == "member_expression" {
+        if properties.len() >= MAX_CONTEXT_NODES {
+            return None;
+        }
+        properties.push(static_context(
+            current.child_by_field_name("property")?,
+            source,
+        )?);
+        current = current.child_by_field_name("object")?;
+    }
+    if !matches!(current.kind(), "identifier" | "this") {
+        return None;
+    }
+    let mut digest = Digest::new("callable-member-callee-context-v1");
+    digest.push(current.kind().as_bytes());
+    for property in properties.into_iter().rev() {
+        digest.push(property.as_bytes());
+    }
+    Some(format!("{:032x}", digest.finish()))
+}
+
+fn callsite_context(node: Node, source: &str) -> Option<OwnerSegment> {
+    if node.kind() != "call_expression" {
+        return None;
+    }
+    let function = callee_context(node.child_by_field_name("function")?, source)?;
+    let arguments = node.child_by_field_name("arguments")?;
+    if arguments.named_child_count() > MAX_CONTEXT_ARGUMENTS {
+        return None;
+    }
+    let mut digest = Digest::new("callable-callsite-context-v1");
+    digest.push(function.as_bytes());
+    let mut argument_index = 0u32;
+    for index in 0..arguments.named_child_count() {
+        let argument = arguments.named_child(index as u32)?;
+        if is_comment_kind(argument.kind(), LanguageFamily::JsTs) {
+            continue;
+        }
+        if let Some(context) = static_context(argument, source) {
+            digest.push(&argument_index.to_le_bytes());
+            digest.push(context.as_bytes());
+        }
+        argument_index += 1;
+    }
+    Some(OwnerSegment {
+        kind: OwnerKind::CallSite,
+        name: Some(format!("{:032x}", digest.finish())),
+    })
+}
+
+fn argument_context(node: Node, parent: Option<Node>) -> Option<OwnerSegment> {
+    let parent = parent?;
+    if parent.kind() != "arguments" || parent.named_child_count() > MAX_CONTEXT_ARGUMENTS {
+        return None;
+    }
+    let mut argument_index = 0;
+    for index in 0..parent.named_child_count() {
+        let argument = parent.named_child(index as u32)?;
+        if is_comment_kind(argument.kind(), LanguageFamily::JsTs) {
+            continue;
+        }
+        if argument.id() == node.id() {
+            return Some(OwnerSegment {
+                kind: OwnerKind::Argument,
+                name: Some(argument_index.to_string()),
+            });
+        }
+        argument_index += 1;
+    }
+    None
 }
 
 fn callable_info(
@@ -297,10 +436,15 @@ pub(super) fn classify(
         // `class_declaration`/`class` expression/`module` arms above --
         // gating on `is_named` keeps the keyword leaf from getting a
         // phantom owner segment of its own.
-        None if is_named => owner_segment_for_type(kind, node, source),
+        None if is_named => owner_segment_for_type(kind, node, source)
+            .or_else(|| binding_context(node, source))
+            .or_else(|| callsite_context(node, source)),
         None => None,
     };
     Classification {
+        context_segment: callable
+            .as_ref()
+            .and_then(|_| argument_context(node, parent)),
         decision: decision_kind(node, kind),
         terminator: terminator_kind(kind),
         in_block: parent_kind.is_some_and(|kind| is_block_kind(kind).is_some()),

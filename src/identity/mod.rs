@@ -87,6 +87,9 @@ fn owner_kind_tag(kind: OwnerKind) -> u8 {
         OwnerKind::AnonymousClassBody => 1,
         OwnerKind::Namespace => 2,
         OwnerKind::Callable => 3,
+        OwnerKind::Binding => 4,
+        OwnerKind::CallSite => 5,
+        OwnerKind::Argument => 6,
     }
 }
 
@@ -116,6 +119,7 @@ impl OwnerDigest {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CallableIdentity {
     pub owner_digest: OwnerDigest,
+    pub context_digest: OwnerDigest,
     pub kind: CallableKind,
     pub name: String,
     pub signature: Vec<String>,
@@ -138,8 +142,9 @@ pub struct CallableIdentity {
 /// `callable_identity` in a loop over every callable would cost
 /// O(callables * owners) instead.
 pub fn callable_identity(ir_file: &IrFile, callable: &IrCallable) -> CallableIdentity {
-    let owner_digest = owner_digest_walk(ir_file, callable.owner);
-    build_callable_identity(callable, owner_digest)
+    let owner_digest = owner_digest_walk(ir_file, callable.owner, false);
+    let context_digest = owner_digest_walk(ir_file, callable.owner, true);
+    build_callable_identity(callable, owner_digest, context_digest)
 }
 
 /// Every callable's `CallableIdentity` in `ir_file`, in `IrFile.callables`'
@@ -151,7 +156,8 @@ pub fn callable_identity(ir_file: &IrFile, callable: &IrCallable) -> CallableIde
 /// fix this module's own doc comment describes, in place of the previous
 /// per-callable full-chain walk-and-clone.
 pub fn identities(ir_file: &IrFile) -> Vec<CallableIdentity> {
-    let digests = owner_digests(ir_file);
+    let digests = owner_digests(ir_file, false);
+    let contexts = owner_digests(ir_file, true);
     ir_file
         .callables
         .iter()
@@ -160,7 +166,11 @@ pub fn identities(ir_file: &IrFile) -> Vec<CallableIdentity> {
                 Some(index) => digests[index as usize],
                 None => OwnerDigest::default(),
             };
-            build_callable_identity(callable, owner_digest)
+            let context_digest = callable
+                .owner
+                .map(|index| contexts[index as usize])
+                .unwrap_or_default();
+            build_callable_identity(callable, owner_digest, context_digest)
         })
         .collect()
 }
@@ -170,7 +180,11 @@ pub fn identities(ir_file: &IrFile) -> Vec<CallableIdentity> {
 /// callers differ only in how they get that digest (a table lookup in
 /// `identities()`, an O(depth) walk in `callable_identity`), never in how
 /// it is folded into the rest of the identity.
-fn build_callable_identity(callable: &IrCallable, owner_digest: OwnerDigest) -> CallableIdentity {
+fn build_callable_identity(
+    callable: &IrCallable,
+    owner_digest: OwnerDigest,
+    context_digest: OwnerDigest,
+) -> CallableIdentity {
     let name = if callable.is_anonymous {
         ANONYMOUS_NAME.to_string()
     } else {
@@ -178,6 +192,7 @@ fn build_callable_identity(callable: &IrCallable, owner_digest: OwnerDigest) -> 
     };
     CallableIdentity {
         owner_digest,
+        context_digest,
         kind: callable.kind,
         name,
         signature: callable.signature.clone(),
@@ -193,7 +208,7 @@ fn build_callable_identity(callable: &IrCallable, owner_digest: OwnerDigest) -> 
 /// `owner_digests`'s own index-order fold exactly, so this always agrees
 /// with `owner_digests(ir_file)[index]` for the same owner index -- proven
 /// by `tests/identity.rs`'s own equality test against `identities()`.
-fn owner_digest_walk(ir_file: &IrFile, owner: Option<u32>) -> OwnerDigest {
+fn owner_digest_walk(ir_file: &IrFile, owner: Option<u32>, include_context: bool) -> OwnerDigest {
     let mut ancestors = Vec::new();
     let mut current = owner;
     while let Some(index) = current {
@@ -202,7 +217,10 @@ fn owner_digest_walk(ir_file: &IrFile, owner: Option<u32>) -> OwnerDigest {
     }
     let mut digest = OwnerDigest::default();
     for index in ancestors.into_iter().rev() {
-        digest = hash_owner_entry(digest, &ir_file.owners[index as usize].segment);
+        let segment = &ir_file.owners[index as usize].segment;
+        if include_context || !is_context_owner(segment.kind) {
+            digest = hash_owner_entry(digest, segment);
+        }
     }
     digest
 }
@@ -213,14 +231,27 @@ fn owner_digest_walk(ir_file: &IrFile, owner: Option<u32>) -> OwnerDigest {
 /// digest is always already in `digests` by the time this loop reaches
 /// `entry` itself. O(owners) total, each entry hashed exactly once
 /// regardless of how many callables (or descendant owners) later share it.
-fn owner_digests(ir_file: &IrFile) -> Vec<OwnerDigest> {
+fn is_context_owner(kind: OwnerKind) -> bool {
+    matches!(
+        kind,
+        OwnerKind::Binding | OwnerKind::CallSite | OwnerKind::Argument
+    )
+}
+
+fn owner_digests(ir_file: &IrFile, include_context: bool) -> Vec<OwnerDigest> {
     let mut digests: Vec<OwnerDigest> = Vec::with_capacity(ir_file.owners.len());
     for entry in &ir_file.owners {
         let parent_digest = match entry.parent {
             Some(parent_index) => digests[parent_index as usize],
             None => OwnerDigest::default(),
         };
-        digests.push(hash_owner_entry(parent_digest, &entry.segment));
+        digests.push(
+            if include_context || !is_context_owner(entry.segment.kind) {
+                hash_owner_entry(parent_digest, &entry.segment)
+            } else {
+                parent_digest
+            },
+        );
     }
     digests
 }

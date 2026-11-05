@@ -123,8 +123,8 @@ fn test_identities_allocation_is_linear_in_owners_on_a_deep_chain() {
     );
     assert_eq!(
         ir_file.owners.len(),
-        DEPTH,
-        "fixture must have one owner per nesting level"
+        DEPTH + 1,
+        "fixture must have one owner per nesting level plus its binding"
     );
 
     let before = ALLOCATED_BYTES.load(Ordering::SeqCst);
@@ -156,8 +156,9 @@ fn test_single_callable_identity_call_does_not_build_the_whole_table() {
     let ir_file = lower::lower_file(&parsed);
     let outermost = &ir_file.callables[0];
     assert_eq!(
-        outermost.owner, None,
-        "fixture's own document-order first callable must be the top-level, owner-less one"
+        outermost.owner,
+        Some(0),
+        "fixture's first callable has only its single binding owner"
     );
 
     let single_call_bound_bytes = DEPTH * std::mem::size_of::<identity::OwnerDigest>();

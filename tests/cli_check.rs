@@ -172,6 +172,8 @@ fn complexity(name: &str, path: RepoPath) -> CheckDiagnostic {
         candidate_name: name.to_string(),
         candidate_start_line: 1,
         candidate_end_line: 2,
+        candidate_cc: 14,
+        candidate_sloc: 21,
         base: None,
     }))
 }

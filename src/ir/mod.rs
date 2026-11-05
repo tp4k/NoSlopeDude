@@ -156,6 +156,9 @@ pub enum OwnerKind {
     AnonymousClassBody,
     Namespace,
     Callable,
+    Binding,
+    CallSite,
+    Argument,
 }
 
 /// One segment of a callable's lexical owner chain (M1-7): its kind, and its

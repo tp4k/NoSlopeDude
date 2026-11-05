@@ -102,6 +102,7 @@ fn file_callables(path: &str, ir_file: &IrFile, source: &str) -> FileCallables {
 fn synth_identity(name: &str, signature: &[&str]) -> CallableIdentity {
     CallableIdentity {
         owner_digest: OwnerDigest::default(),
+        context_digest: OwnerDigest::default(),
         kind: CallableKind::JavaMethod,
         name: name.to_string(),
         signature: signature.iter().map(|part| part.to_string()).collect(),
@@ -1054,4 +1055,139 @@ fn test_displacement_in_a_renamed_file_keeps_the_rename_tier() {
             "{fingerprints:?}"
         );
     }
+}
+
+#[test]
+fn test_named_object_methods_keep_separate_structural_matches_after_edits() {
+    let before = "const alpha = { execute() { return first(); } };\nconst beta = { execute() { return second(); } };";
+    let after = "const beta = { execute() { return updatedSecond(); } };\nconst alpha = { execute() { return updatedFirst(); } };";
+    let (base_ir, base_source) = lower_ts(before);
+    let (candidate_ir, candidate_source) = lower_ts(after);
+    let base = file_callables("tools.ts", &base_ir, &base_source);
+    let candidate = file_callables("tools.ts", &candidate_ir, &candidate_source);
+    let output = match_callables(&[base], &[candidate], &[]);
+    assert_eq!(output.matches.len(), 2);
+    assert_eq!(output.matches[0].candidate.index, 1);
+    assert_eq!(output.matches[1].candidate.index, 0);
+    assert!(output
+        .positional_remainders
+        .iter()
+        .all(|group| group.base.len() == 1 && group.candidate.len() == 1));
+}
+
+#[test]
+fn test_route_literals_keep_edited_callbacks_separate_when_reordered() {
+    let before = "router.get('/alpha', () => first());\nrouter.get('/beta', () => second());";
+    let after =
+        "router.get('/beta', () => updatedSecond());\nrouter.get('/alpha', () => updatedFirst());";
+    let (base_ir, base_source) = lower_ts(before);
+    let (candidate_ir, candidate_source) = lower_ts(after);
+    let output = match_callables(
+        &[file_callables("routes.ts", &base_ir, &base_source)],
+        &[file_callables(
+            "routes.ts",
+            &candidate_ir,
+            &candidate_source,
+        )],
+        &[],
+    );
+    assert_eq!(output.matches.len(), 2);
+    assert_eq!(output.matches[0].candidate.index, 1);
+    assert_eq!(output.matches[1].candidate.index, 0);
+}
+
+#[test]
+fn test_dependency_arrays_distinguish_edited_effect_callbacks() {
+    let before = "useEffect(() => first(), [alpha]);\nuseEffect(() => second(), [beta]);";
+    let after =
+        "useEffect(() => updatedSecond(), [beta]);\nuseEffect(() => updatedFirst(), [alpha]);";
+    let (base_ir, base_source) = lower_ts(before);
+    let (candidate_ir, candidate_source) = lower_ts(after);
+    let output = match_callables(
+        &[file_callables("effects.ts", &base_ir, &base_source)],
+        &[file_callables(
+            "effects.ts",
+            &candidate_ir,
+            &candidate_source,
+        )],
+        &[],
+    );
+    assert_eq!(output.matches.len(), 2);
+    assert_eq!(output.matches[0].candidate.index, 1);
+    assert_eq!(output.matches[1].candidate.index, 0);
+}
+
+#[test]
+fn test_callback_argument_slots_have_distinct_identities() {
+    let (file, source) = lower_ts("promise.then(() => success(), () => failure());");
+    let found = file_callables("slots.ts", &file, &source);
+    assert_eq!(found.callables.len(), 2);
+    assert_ne!(found.callables[0].0, found.callables[1].0);
+}
+
+#[test]
+fn test_repeated_identical_calls_retain_ambiguous_structural_groups() {
+    let before = "useEffect(() => first(), []);\nuseEffect(() => second(), []);";
+    let after = "useEffect(() => updatedFirst(), []);\nuseEffect(() => updatedSecond(), []);";
+    let (base_ir, base_source) = lower_ts(before);
+    let (candidate_ir, candidate_source) = lower_ts(after);
+    let output = match_callables(
+        &[file_callables("effects.ts", &base_ir, &base_source)],
+        &[file_callables(
+            "effects.ts",
+            &candidate_ir,
+            &candidate_source,
+        )],
+        &[],
+    );
+    assert_eq!(output.positional_remainders.len(), 1);
+    assert_eq!(output.positional_remainders[0].base.len(), 2);
+    assert_eq!(output.positional_remainders[0].candidate.len(), 2);
+}
+
+#[test]
+fn test_comments_and_line_shifts_leave_callback_context_unchanged() {
+    let before = "router.get('/alpha', () => first());";
+    let after = "\nrouter . get( /* before */ '/alpha', /* callback */ () => first());";
+    let (base_ir, base_source) = lower_ts(before);
+    let (candidate_ir, candidate_source) = lower_ts(after);
+    let base = file_callables("routes.ts", &base_ir, &base_source);
+    let candidate = file_callables("routes.ts", &candidate_ir, &candidate_source);
+    assert_eq!(base.callables[0].0, candidate.callables[0].0);
+}
+
+#[test]
+fn test_nested_dependency_shapes_do_not_share_a_context_digest() {
+    let (file, source) =
+        lower_ts("useEffect(() => first(), [[], alpha]);\nuseEffect(() => second(), [[alpha]]);");
+    let found = file_callables("effects.ts", &file, &source);
+    assert_eq!(found.callables.len(), 2);
+    assert_ne!(found.callables[0].0, found.callables[1].0);
+}
+
+#[test]
+fn test_oversized_calls_fall_back_to_ambiguous_identity() {
+    let arguments = (0..65)
+        .map(|index| format!("argument{index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let source =
+        format!("register({arguments}, () => first());\nregister({arguments}, () => second());");
+    let (file, source) = lower_ts(&source);
+    let found = file_callables("large.ts", &file, &source);
+    assert_eq!(found.callables.len(), 2);
+    assert_eq!(found.callables[0].0, found.callables[1].0);
+}
+
+#[test]
+fn test_long_dependency_arrays_leave_the_group_ambiguous() {
+    let dependencies = (0..65)
+        .map(|index| format!("dependency{index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let source = format!("useEffect(() => first(), [{dependencies}, alpha]);\nuseEffect(() => second(), [{dependencies}, beta]);");
+    let (file, source) = lower_ts(&source);
+    let found = file_callables("large.ts", &file, &source);
+    assert_eq!(found.callables.len(), 2);
+    assert_eq!(found.callables[0].0, found.callables[1].0);
 }

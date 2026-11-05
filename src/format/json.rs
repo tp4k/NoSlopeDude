@@ -282,6 +282,8 @@ fn entry(diagnostic: &CheckDiagnostic) -> Value {
             "end_line": found.candidate_end_line,
             "callable": published_name(&found.candidate_name, found.candidate_start_line),
             "base": found.base.as_ref().map(base_callable),
+            "candidate": {"cc": found.candidate_cc, "sloc": found.candidate_sloc},
+            "reason": found.reason(),
         }),
         CheckDiagnostic::Finding(found) => json!({
             "path": found.candidate_path.render(),

@@ -61,7 +61,7 @@ Each line starts with the code. What follows depends on the code (`<span>` is `<
 
 | Codes | Rest of the line |
 |---|---|
-| `NSD-E101`, `NSD-E102`, `NSD-G102` | `<span> <callable>`, plus ` (base <span> cc <n> sloc <n>)` when the callable has a base match |
+| `NSD-E101`, `NSD-E102`, `NSD-G102` | `<span> <callable>`, plus ` (base <span> cc <n> sloc <n>)` when matched, followed by candidate/base metrics and the growth reason; G102 explains its ambiguous base match |
 | `NSD-V101` | `<span> <rule id>` |
 | `NSD-S101`, `NSD-S102` | `<repo-relative path>:<directive line>`, plus ` <rule id>` when the directive names one |
 | `NSD-A101` | `<span>` |
@@ -71,6 +71,16 @@ Each line starts with the code. What follows depends on the code (`<span>` is `<
 | `NSD-C102`, `NSD-G101` | a free-text message, with no path in a fixed position |
 
 Non-UTF-8 path bytes print as `%XX`, and control characters and Unicode bidi controls (U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069) in any text print as `\u{..}`. Argument-parsing errors from the command-line parser are escaped the same way, a newline inside an argument value included, print without colour, and still exit `2`.
+
+### Complexity length policy
+
+The optional root setting `complexity: {sloc_growth: false}` disables the
+SLOC-only arm of `NSD-E102`. Omitted or explicit `true` preserves its default
+CC-or-SLOC trigger. CC increases above the threshold and `NSD-E101` are
+unaffected, and `G102` still fails closed when CC-based verdicts disagree.
+Only the base snapshot or an external trusted `--config` supplies this value;
+a candidate cannot disable its own length regression. The value must be a
+boolean; null, unknown keys and duplicate keys are `NSD-C102`.
 
 ### Output caps
 
@@ -103,7 +113,7 @@ A `--json-out` file that cannot be written adds the `2` bit to the verdict's sta
 
 | Codes | Message |
 |---|---|
-| `NSD-E101`, `NSD-E102`, `NSD-G102` | `<callable>` as the JSON report names it (a computed name is `<computed>@<line>`), then ` \| CC <base> -> <candidate>, SLOC <base> -> <candidate>` when it has a base match and the JSON report's `entities` hold it (same path, start line and name), or ` \| base CC <n>, SLOC <n>` when only the base is known |
+| `NSD-E101`, `NSD-E102`, `NSD-G102` | `<callable>` as the JSON report names it (a computed name is `<computed>@<line>`), then ` \| CC <base> -> <candidate>, SLOC <base> -> <candidate>` for a matched base or ` \| CC <candidate>, SLOC <candidate>` otherwise; E101/E102 append the reason, and G102 explains that the base match is ambiguous |
 | `NSD-V101` | `<rule id>` |
 | `NSD-S101`, `NSD-S102` | `<rule id>`, or `suppression directive` when the directive names no valid rule |
 | `NSD-A101` | `damaged span; see the nsd JSON report` |

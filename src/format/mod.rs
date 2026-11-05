@@ -7,6 +7,7 @@ mod json;
 
 use crate::check::CheckDiagnostic;
 use crate::git::path::RepoPath;
+use crate::policy::diagnostics::{PolicyDiagnostic, CODE_MATCH_AMBIGUITY};
 
 pub use agent::render_agent;
 pub use github::{escape_github_data, escape_github_property, render_github};
@@ -99,6 +100,7 @@ fn describe(diagnostic: &CheckDiagnostic) -> String {
                     base.sloc
                 ));
             }
+            line.push_str(&format!(" | {}", complexity_change(found)));
             line
         }
         CheckDiagnostic::Finding(found) => format!(
@@ -149,5 +151,20 @@ fn describe(diagnostic: &CheckDiagnostic) -> String {
         ),
         CheckDiagnostic::Config(_) => format!("{code} {CANDIDATE_CONFIG_FILE}"),
         CheckDiagnostic::Failure { message, .. } => format!("{code} {message}"),
+    }
+}
+
+fn complexity_change(found: &PolicyDiagnostic) -> String {
+    let metrics = match &found.base {
+        Some(base) => format!(
+            "CC {} -> {}, SLOC {} -> {}",
+            base.cc, found.candidate_cc, base.sloc, found.candidate_sloc
+        ),
+        None => format!("CC {}, SLOC {}", found.candidate_cc, found.candidate_sloc),
+    };
+    if found.code == CODE_MATCH_AMBIGUITY {
+        format!("{metrics} | ambiguous base match; cannot determine complexity regression")
+    } else {
+        format!("{metrics} | {}", found.reason())
     }
 }

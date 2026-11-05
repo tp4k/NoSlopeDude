@@ -40,7 +40,31 @@ pub struct PolicyDiagnostic {
     pub candidate_name: String,
     pub candidate_start_line: usize,
     pub candidate_end_line: usize,
+    pub candidate_cc: u32,
+    pub candidate_sloc: usize,
     pub base: Option<BaseCallable>,
+}
+
+impl PolicyDiagnostic {
+    pub fn reason(&self) -> &'static str {
+        if self.code == CODE_MATCH_AMBIGUITY {
+            return "match_ambiguity";
+        }
+        let Some(base) = &self.base else {
+            return "new_callable";
+        };
+        if self.code == CODE_COMPLEXITY_ABOVE_THRESHOLD {
+            return "threshold_crossed";
+        }
+        let cc_grew = self.candidate_cc > base.cc;
+        let sloc_grew = self.candidate_sloc > super::complexity::growth_limit(base.sloc);
+        match (cc_grew, sloc_grew) {
+            (true, true) => "cc_and_sloc_growth",
+            (true, false) => "cc_growth",
+            (false, true) => "sloc_growth",
+            (false, false) => "complexity_growth",
+        }
+    }
 }
 
 /// One V101 about an unmatched candidate finding.

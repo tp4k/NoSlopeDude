@@ -89,6 +89,26 @@ policy:
 
 For `check`, the **base snapshot's** policy judges the candidate. A change to `nsd.yml` is reported, but cannot turn off its own gate; its settings apply to later changes. An external `--config` is an explicit trusted override. `scan` reads only `measurement.min_clone_lines` from its target root's `nsd.yml`; its `--min-clone-lines` flag overrides that value. See the [configuration contract](nsd-plan-final.md#cli-and-configuration) for all supported keys.
 
+### Separate complexity growth from length growth
+
+`E102` defaults to reporting both CC increases and SLOC increases beyond its
+allowance. A trusted configuration can keep CC checks while disabling the
+SLOC-only trigger:
+
+```yaml
+version: 1
+complexity:
+  sloc_growth: false
+policy:
+  NSD-E101: warn
+  NSD-E102: deny
+```
+
+The base snapshot supplies this setting, so changing it in a PR affects later
+checks. Diagnostics include candidate metrics and a reason (`cc_growth`,
+`sloc_growth`, or `cc_and_sloc_growth`) to distinguish the measured changes.
+An unresolved callable match remains an analysis error rather than a clean pass.
+
 ## Where this came from
 
 `nsd` builds on the measurement ideas in [*SlopCodeBench: Benchmarking How Coding Agents Degrade Over Long-Horizon Iterative Tasks*](https://arxiv.org/abs/2603.24755), rather than claiming that its rules reproduce the paper's entire benchmark. Its measurement engine was selectively imported from the read-only `agent_slope` archive at commit `912ec7a1ca2b9e5dd1ffa976a51f98d7d00d6704`, then extended with Git snapshots, a normalized IR, regression diagnostics, and trusted policy. The [authoritative v1 plan](nsd-plan-final.md), [implementation plan](nsd-plan-implementation.md), and [implementation status](docs/implementation-status.md) record the detailed design and evidence. Licensed under [MIT](LICENSE).

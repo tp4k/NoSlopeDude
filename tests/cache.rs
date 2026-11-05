@@ -208,8 +208,8 @@ fn test_other_cache_version_is_a_miss() {
     let bytes = fs::read(&path).expect("read entry");
     let split = bytes.iter().position(|&b| b == b'\n').expect("header line");
     let mut header: serde_json::Value = serde_json::from_slice(&bytes[..split]).expect("header");
-    assert_eq!(header["cache_version"], 1);
-    header["cache_version"] = serde_json::json!(2);
+    assert_eq!(header["cache_version"], 2);
+    header["cache_version"] = serde_json::json!(1);
     let mut rewritten = serde_json::to_vec(&header).expect("encode header");
     rewritten.extend_from_slice(&bytes[split..]);
     fs::write(&path, rewritten).expect("write entry");
@@ -535,4 +535,36 @@ fn test_payload_round_trip_keeps_scanned_lines() {
         .hydrate(Path::new("A.java"), LanguageFamily::Java)
         .expect("hydrates");
     assert_eq!(hydrated.scanned_lines, clean.scanned_lines);
+}
+
+#[test]
+fn test_callback_context_and_legacy_identity_round_trip_independently() {
+    let (_dir, _repo, cache) = open_cache();
+    let source = "router.get('/alpha', () => first());\nrouter.get('/beta', () => second());";
+    let analysis = analyze("callbacks.ts", source);
+    let key = CacheKey::new(blob_oid(source), Grammar::TypeScript, MIN_LINES);
+    cache
+        .put(&key, &payload_of(&analysis, source))
+        .expect("cache contextual callbacks");
+    let hydrated = cache
+        .get(&key)
+        .expect("read cache")
+        .expect("hit")
+        .hydrate(Path::new("callbacks.ts"), LanguageFamily::JsTs)
+        .expect("hydrate");
+    assert_eq!(analysis.callables.len(), 2);
+    let identities: Vec<_> = analysis
+        .callables
+        .iter()
+        .map(|callable| &callable.identity)
+        .collect();
+    let restored: Vec<_> = hydrated
+        .callables
+        .iter()
+        .map(|callable| &callable.identity)
+        .collect();
+    assert_eq!(identities[0].owner_digest, identities[1].owner_digest);
+    assert_ne!(identities[0].context_digest, identities[1].context_digest);
+    assert_ne!(identities[0].context_digest, identities[0].owner_digest);
+    assert_eq!(restored, identities);
 }

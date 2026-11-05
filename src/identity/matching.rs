@@ -31,7 +31,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::git::diff::Change;
 use crate::git::path::RepoPath;
-use crate::identity::CallableIdentity;
+use crate::identity::{CallableIdentity, OwnerDigest};
+use crate::ir::CallableKind;
 
 /// One file's callables from one snapshot, in document order -- WS-1's
 /// `identity::identities` zipped with a `identity::body_fingerprint` call per
@@ -456,13 +457,24 @@ struct GroupPairs {
     remainders: Vec<(Vec<usize>, Vec<usize>)>,
 }
 
+type StructuralKey<'a> = (OwnerDigest, CallableKind, &'a str, &'a [String]);
+
 fn identity_groups(
     callables: &[(CallableIdentity, String)],
     indices: impl Iterator<Item = usize>,
-) -> HashMap<&CallableIdentity, Vec<usize>> {
-    let mut groups: HashMap<&CallableIdentity, Vec<usize>> = HashMap::new();
+) -> HashMap<StructuralKey<'_>, Vec<usize>> {
+    let mut groups: HashMap<StructuralKey<'_>, Vec<usize>> = HashMap::new();
     for index in indices {
-        groups.entry(&callables[index].0).or_default().push(index);
+        let identity = &callables[index].0;
+        groups
+            .entry((
+                identity.owner_digest,
+                identity.kind,
+                identity.name.as_str(),
+                identity.signature.as_slice(),
+            ))
+            .or_default()
+            .push(index);
     }
     groups
 }
@@ -522,20 +534,61 @@ fn pair_group(
         .copied()
         .filter(|index| !consumed_candidate.contains(index))
         .collect();
-    let paired = remaining_base.len().min(remaining_candidate.len());
-    for k in 0..paired {
-        pairs.push((
-            remaining_base[k],
-            remaining_candidate[k],
-            MatchPairing::Positional,
-        ));
+    let remainders = context_remainders(
+        remaining_base,
+        base_callables,
+        remaining_candidate,
+        candidate_callables,
+    );
+    for (base, candidate) in &remainders {
+        for (&base_index, &candidate_index) in base.iter().zip(candidate) {
+            pairs.push((base_index, candidate_index, MatchPairing::Positional));
+        }
     }
-    let remainders = if paired > 0 {
-        vec![(remaining_base, remaining_candidate)]
-    } else {
-        Vec::new()
-    };
     GroupPairs { pairs, remainders }
+}
+
+fn context_remainders(
+    base_indices: Vec<usize>,
+    base_callables: &[(CallableIdentity, String)],
+    candidate_indices: Vec<usize>,
+    candidate_callables: &[(CallableIdentity, String)],
+) -> Vec<(Vec<usize>, Vec<usize>)> {
+    if base_indices.is_empty() || candidate_indices.is_empty() {
+        return Vec::new();
+    }
+    let group = |indices: &[usize], callables: &[(CallableIdentity, String)]| {
+        let mut groups: HashMap<OwnerDigest, Vec<usize>> = HashMap::new();
+        for &index in indices {
+            groups
+                .entry(callables[index].0.context_digest)
+                .or_default()
+                .push(index);
+        }
+        groups
+    };
+    let base_groups = group(&base_indices, base_callables);
+    let mut candidate_groups = group(&candidate_indices, candidate_callables);
+    let context_sets_unchanged = base_groups.len() == candidate_groups.len()
+        && base_groups.iter().all(|(context, members)| {
+            candidate_groups
+                .get(context)
+                .is_some_and(|candidates| candidates.len() == members.len())
+        });
+    if !context_sets_unchanged {
+        return vec![(base_indices, candidate_indices)];
+    }
+    base_groups
+        .into_iter()
+        .map(|(context, members)| {
+            (
+                members,
+                candidate_groups
+                    .remove(&context)
+                    .expect("validated context group"),
+            )
+        })
+        .collect()
 }
 
 /// One side (base or candidate) of a single file's tier-1/tier-2 pairing:

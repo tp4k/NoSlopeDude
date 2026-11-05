@@ -335,7 +335,7 @@ bytes), nothing records time, and no field except a pass-through `message`
 
 | Codes | Fields besides `code` |
 |---|---|
-| `NSD-E101`, `NSD-E102`, `NSD-G102` | `path`, `start_line`, `end_line`, `callable`, `base` (`{path, start_line, end_line, cc, sloc}` or `null`) |
+| `NSD-E101`, `NSD-E102`, `NSD-G102` | `path`, `start_line`, `end_line`, `callable`, `base` (`{path, start_line, end_line, cc, sloc}` or `null`), `candidate` (`{cc, sloc}`), `reason` |
 | `NSD-V101` | `path`, `start_line`, `end_line`, `rule_id` |
 | `NSD-S101`, `NSD-S102` | `path`, `directive_line`, `rule_id` (a string or `null`) |
 | `NSD-A101` | `path`, `start_line`, `end_line` |
@@ -343,6 +343,15 @@ bytes), nothing records time, and no field except a pass-through `message`
 | `NSD-V102` | `path`, `start_line`, `end_line`, `added_lines`, `matched` (`{path, start_line, end_line}`) |
 | `NSD-C101`, `NSD-C102` about the candidate config | `path` (`"nsd.yml"`) |
 | `NSD-G101`, `NSD-C102` for a refused `--config` | `message` |
+
+Complexity diagnostics carry their own candidate metrics, so consumers do not
+need to join `entities`, even for same-line overloads. `reason` is
+`new_callable` or `threshold_crossed` for E101; `cc_growth`, `sloc_growth` or
+`cc_and_sloc_growth` for E102; and `match_ambiguity` for G102. Growth reasons
+describe the measured changes, including SLOC growth when trusted policy
+disables that trigger. `sloc_growth` means the candidate exceeds the base by
+more than `max(1, floor(base_sloc / 10))`, including when CC decreased.
+These fields are additive within schema version 1.
 
 `scan`'s `report.json` uses the same canonical writer and the same
 `snapshots`, `fingerprints` and `skipped` keys; see "The canonical keys".
@@ -363,7 +372,8 @@ compact):
 - `fingerprints`: `{configuration, measurement}`, each `blake3:` plus
   lowercase hex. The configuration fingerprint covers the trusted config's
   version, `include` (omitted differs from listed), `exclude`,
-  `measurement.min_clone_lines` and the five severities; output caps are
+  `measurement.min_clone_lines`, the five severities and `complexity.sloc_growth`
+  under domain `nsd-config-v2`; output caps are
   excluded. The measurement fingerprint uses the trusted `min_clone_lines`.
 - `skipped`: per-reason counts, always all 13 keys (zero when none),
   including `parse_syntax_error`.
