@@ -132,16 +132,7 @@ impl Config {
             None => MeasurementConfig::defaults(),
         };
 
-        let policy = match raw.policy {
-            Some(raw_policy) => PolicyConfig {
-                nsd_e101: raw_policy.nsd_e101.unwrap_or(Severity::Deny),
-                nsd_e102: raw_policy.nsd_e102.unwrap_or(Severity::Deny),
-                nsd_v101: raw_policy.nsd_v101.unwrap_or(Severity::Deny),
-                nsd_v102: raw_policy.nsd_v102.unwrap_or(Severity::Deny),
-                nsd_s102: raw_policy.nsd_s102.unwrap_or(Severity::Warn),
-            },
-            None => PolicyConfig::defaults(),
-        };
+        let policy = PolicyConfig::from_raw(raw.policy, raw.complexity);
 
         let output = match raw.output {
             Some(raw_output) => OutputConfig {
@@ -211,13 +202,15 @@ impl Config {
             digest.push(code.as_bytes());
             digest.push(severity.label().as_bytes());
         }
+        digest.push(b"complexity.sloc_growth");
+        digest.push(&[u8::from(policy.sloc_growth)]);
         format!("blake3:{:032x}", digest.finish())
     }
 }
 
 /// The `Digest` domain of `Config::fingerprint`; bump the suffix when the
 /// fields it covers change.
-const CONFIGURATION_FAMILY_PREFIX: &str = "nsd-config-v1";
+const CONFIGURATION_FAMILY_PREFIX: &str = "nsd-config-v2";
 
 /// Feeds an ordered pattern list: its count, then each pattern (the order is
 /// part of the meaning, since the last matching glob wins).
@@ -264,7 +257,7 @@ impl Severity {
     }
 }
 
-/// The five policy codes this track recognises (D13); any other code,
+/// The five policy codes and the trusted SLOC-growth opt-out (A14). Any other code,
 /// including a short form such as `E101`, is unsupported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PolicyConfig {
@@ -273,9 +266,28 @@ pub struct PolicyConfig {
     pub nsd_v101: Severity,
     pub nsd_v102: Severity,
     pub nsd_s102: Severity,
+    pub sloc_growth: bool,
 }
 
 impl PolicyConfig {
+    fn from_raw(raw: Option<RawPolicy>, complexity: Option<RawComplexity>) -> PolicyConfig {
+        let mut policy = match raw {
+            Some(raw) => PolicyConfig {
+                nsd_e101: raw.nsd_e101.unwrap_or(Severity::Deny),
+                nsd_e102: raw.nsd_e102.unwrap_or(Severity::Deny),
+                nsd_v101: raw.nsd_v101.unwrap_or(Severity::Deny),
+                nsd_v102: raw.nsd_v102.unwrap_or(Severity::Deny),
+                nsd_s102: raw.nsd_s102.unwrap_or(Severity::Warn),
+                sloc_growth: true,
+            },
+            None => PolicyConfig::defaults(),
+        };
+        policy.sloc_growth = complexity
+            .and_then(|complexity| complexity.sloc_growth)
+            .unwrap_or(true);
+        policy
+    }
+
     fn defaults() -> PolicyConfig {
         PolicyConfig {
             nsd_e101: Severity::Deny,
@@ -283,6 +295,7 @@ impl PolicyConfig {
             nsd_v101: Severity::Deny,
             nsd_v102: Severity::Deny,
             nsd_s102: Severity::Warn,
+            sloc_growth: true,
         }
     }
 }
@@ -613,7 +626,7 @@ fn reject_empty_tagged_containers(text: &str) -> Result<(), ConfigError> {
     let Value::Mapping(map) = value else {
         return Ok(());
     };
-    for key in ["exclude", "measurement", "policy", "output"] {
+    for key in ["exclude", "measurement", "policy", "output", "complexity"] {
         let is_empty_scalar = match map.get(key) {
             Some(Value::String(text)) => text.is_empty(),
             Some(Value::Tagged(tagged)) => match &tagged.value {
@@ -766,8 +779,26 @@ struct RawConfig {
     measurement: Option<RawMeasurement>,
     #[serde(default, deserialize_with = "deserialize_present_policy")]
     policy: Option<RawPolicy>,
+    #[serde(default, deserialize_with = "deserialize_present_complexity")]
+    complexity: Option<RawComplexity>,
     #[serde(default, deserialize_with = "deserialize_present_output")]
     output: Option<RawOutput>,
+}
+
+fn deserialize_present_complexity<'de, D>(
+    deserializer: D,
+) -> Result<Option<RawComplexity>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    deserialize_present("complexity", deserializer).map(Some)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawComplexity {
+    #[serde(default, deserialize_with = "deserialize_present_scalar")]
+    sloc_growth: Option<bool>,
 }
 
 #[derive(Deserialize)]

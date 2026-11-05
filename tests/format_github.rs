@@ -1,5 +1,5 @@
 //! `nsd check --format github` on hand-built diagnostics: one `::notice`
-//! workflow command per diagnostic shape, the E102 metrics join, the
+//! workflow command per diagnostic shape, self-contained complexity metrics, the
 //! violations-first order and cap, and hostile PR values read back through a
 //! re-implementation of the runner's command parser.
 
@@ -14,7 +14,7 @@ use nsd::policy::diagnostics::{
     BaseCallable, CloneDiagnostic, CoverageDiagnostic, DamageDiagnostic, FindingDiagnostic,
     PolicyDiagnostic, SuppressionDiagnostic, CODE_ANALYSIS_UNAVAILABLE, CODE_CLONE_REGRESSION,
     CODE_COMPLEXITY_ABOVE_THRESHOLD, CODE_COMPLEXITY_INCREASED, CODE_INVALID_SUPPRESSION,
-    CODE_PARSE_DAMAGE, CODE_UNMATCHED_FINDING,
+    CODE_MATCH_AMBIGUITY, CODE_PARSE_DAMAGE, CODE_UNMATCHED_FINDING,
 };
 use nsd::policy::Diagnostic as ConfigNote;
 use nsd::report::published_name;
@@ -164,6 +164,8 @@ fn complexity(
         candidate_name: name.to_string(),
         candidate_start_line: start,
         candidate_end_line: start + 20,
+        candidate_cc: 14,
+        candidate_sloc: 21,
         base,
     }))
 }
@@ -258,7 +260,7 @@ fn test_complexity_is_one_notice_on_the_callable_span() {
     assert_eq!(property(&command, "file"), Some("src/A.java"));
     assert_eq!(property(&command, "line"), Some("3"));
     assert_eq!(property(&command, "endLine"), Some("23"));
-    assert_eq!(command.data, "run");
+    assert_eq!(command.data, "run | CC 14, SLOC 21 | new_callable");
 }
 
 #[test]
@@ -404,7 +406,7 @@ fn test_failure_has_a_title_and_its_message_only() {
 }
 
 #[test]
-fn test_e102_joins_the_matching_candidate_entity() {
+fn test_e102_uses_its_own_candidate_metrics() {
     let diagnostic = complexity(
         CODE_COMPLEXITY_INCREASED,
         "src/A.java",
@@ -414,16 +416,16 @@ fn test_e102_joins_the_matching_candidate_entity() {
     );
     let found = details(vec![
         entity("src/A.java", "other", 3, 99, 99),
-        entity("src/A.java", "run", 3, 14, 21),
+        entity("src/A.java", "run", 3, 90, 95),
     ]);
 
     let command = single(diagnostic, Some(&found));
 
-    assert_eq!(command.data, "run | CC 11 -> 14, SLOC 20 -> 21");
+    assert_eq!(command.data, "run | CC 11 -> 14, SLOC 20 -> 21 | cc_growth");
 }
 
 #[test]
-fn test_computed_callable_shows_its_published_name_and_still_joins() {
+fn test_computed_callable_shows_its_published_name_with_metrics() {
     let raw = "[\"secret literal\"]";
     let diagnostic = complexity(
         CODE_COMPLEXITY_INCREASED,
@@ -436,11 +438,14 @@ fn test_computed_callable_shows_its_published_name_and_still_joins() {
 
     let command = single(diagnostic, Some(&found));
 
-    assert_eq!(command.data, "<computed>@3 | CC 11 -> 14, SLOC 20 -> 21");
+    assert_eq!(
+        command.data,
+        "<computed>@3 | CC 11 -> 14, SLOC 20 -> 21 | cc_growth"
+    );
 }
 
 #[test]
-fn test_e102_without_a_matching_entity_falls_back_to_the_base() {
+fn test_e102_metrics_do_not_depend_on_details_or_overload_lookup() {
     let diagnostic = || {
         complexity(
             CODE_COMPLEXITY_INCREASED,
@@ -456,27 +461,30 @@ fn test_e102_without_a_matching_entity_falls_back_to_the_base() {
         entity("src/A.java", "run", 3, 14, 21),
         entity("src/A.java", "run", 3, 30, 40),
     ]);
-    let fallback = "run | base CC 11, SLOC 20";
+    let expected = "run | CC 11 -> 14, SLOC 20 -> 21 | cc_growth";
 
-    assert_eq!(single(diagnostic(), Some(&other_path)).data, fallback);
-    assert_eq!(single(diagnostic(), Some(&other_line)).data, fallback);
+    assert_eq!(single(diagnostic(), Some(&other_path)).data, expected);
+    assert_eq!(single(diagnostic(), Some(&other_line)).data, expected);
     assert_eq!(
         single(diagnostic(), Some(&same_line_overloads)).data,
-        fallback
+        expected
     );
-    assert_eq!(single(diagnostic(), None).data, fallback);
+    assert_eq!(single(diagnostic(), None).data, expected);
 }
 
 #[test]
-fn test_complexity_without_a_base_is_the_callable_alone() {
+fn test_ambiguity_explains_why_the_base_is_unknown() {
     let found = details(vec![entity("src/A.java", "run", 3, 14, 21)]);
 
     let command = single(
-        complexity(CODE_COMPLEXITY_INCREASED, "src/A.java", "run", 3, None),
+        complexity(CODE_MATCH_AMBIGUITY, "src/A.java", "run", 3, None),
         Some(&found),
     );
 
-    assert_eq!(command.data, "run");
+    assert_eq!(
+        command.data,
+        "run | CC 14, SLOC 21 | ambiguous base match; cannot determine complexity regression"
+    );
 }
 
 #[test]
@@ -641,7 +649,10 @@ fn test_hostile_paths_and_names_stay_one_annotation_each() {
                 assert_eq!(property(&command, "line"), Some("3"), "{line}");
                 assert_eq!(
                     command.data,
-                    published_name(&found.candidate_name, found.candidate_start_line)
+                    format!(
+                        "{} | CC 14, SLOC 21 | new_callable",
+                        published_name(&found.candidate_name, found.candidate_start_line)
+                    )
                 );
             }
             CheckDiagnostic::Failure { message, .. } => {

@@ -5,11 +5,10 @@
 
 use crate::check::{CheckDetails, CheckDiagnostic};
 use crate::config::{PolicyConfig, CODE_CONFIG_CHANGED};
-use crate::policy::diagnostics::PolicyDiagnostic;
 use crate::policy::exit::contribution;
 use crate::report::published_name;
 
-use super::{needs_escape, CANDIDATE_CONFIG_FILE, OMITTED_DIAGNOSTICS_LABEL};
+use super::{complexity_change, needs_escape, CANDIDATE_CONFIG_FILE, OMITTED_DIAGNOSTICS_LABEL};
 
 /// The message of an A101, whose damaged spans only the JSON report details.
 const DAMAGE_MESSAGE: &str = "damaged span; see the nsd JSON report";
@@ -21,10 +20,10 @@ const UNNAMED_SUPPRESSION_MESSAGE: &str = "suppression directive";
 /// contribution under `policy` and the invocation's flag) first, then the
 /// rest, each group in input order. The first `cap` of those, then one plain
 /// `omitted diagnostics: N of M` line when `N` of the `M` were dropped.
-/// `details` supplies the candidate metrics of a paired E101/E102.
+/// Candidate metrics are carried by each diagnostic.
 pub fn render_github(
     diagnostics: &[CheckDiagnostic],
-    details: Option<&CheckDetails>,
+    _details: Option<&CheckDetails>,
     policy: &PolicyConfig,
     allow_new_suppressions: bool,
     cap: u32,
@@ -37,7 +36,7 @@ pub fn render_github(
     let kept = usize::try_from(cap).map_or(total, |cap| cap.min(total));
     let mut listing = String::new();
     for diagnostic in violations.into_iter().chain(rest).take(kept) {
-        listing.push_str(&annotation(diagnostic, details));
+        listing.push_str(&annotation(diagnostic));
         listing.push('\n');
     }
     if total > kept {
@@ -95,8 +94,8 @@ impl Location {
     }
 }
 
-fn annotation(diagnostic: &CheckDiagnostic, details: Option<&CheckDetails>) -> String {
-    let (location, message) = locate_and_describe(diagnostic, details);
+fn annotation(diagnostic: &CheckDiagnostic) -> String {
+    let (location, message) = locate_and_describe(diagnostic);
     let mut properties = vec![format!(
         "title={}",
         escape_github_property(&format!("nsd {}", diagnostic.code()))
@@ -115,10 +114,7 @@ fn annotation(diagnostic: &CheckDiagnostic, details: Option<&CheckDetails>) -> S
     )
 }
 
-fn locate_and_describe(
-    diagnostic: &CheckDiagnostic,
-    details: Option<&CheckDetails>,
-) -> (Option<Location>, String) {
+fn locate_and_describe(diagnostic: &CheckDiagnostic) -> (Option<Location>, String) {
     match diagnostic {
         CheckDiagnostic::Complexity(found) => (
             Location::span(
@@ -128,7 +124,7 @@ fn locate_and_describe(
             ),
             joined(&[
                 &published_name(&found.candidate_name, found.candidate_start_line),
-                &complexity_change(found, details),
+                &complexity_change(found),
             ]),
         ),
         CheckDiagnostic::Finding(found) => (
@@ -185,31 +181,6 @@ fn locate_and_describe(
             },
         ),
         CheckDiagnostic::Failure { message, .. } => (None, message.clone()),
-    }
-}
-
-/// The base-to-candidate metrics of a paired callable, or the base's alone
-/// unless exactly one changed candidate entity has the diagnostic's path,
-/// start line and name (Java overloads on one line share all three); empty
-/// when there is no base.
-fn complexity_change(found: &PolicyDiagnostic, details: Option<&CheckDetails>) -> String {
-    let Some(base) = &found.base else {
-        return String::new();
-    };
-    let path = found.candidate_path.render();
-    let mut matches = details.into_iter().flat_map(|details| {
-        details.entities.iter().filter(|entity| {
-            entity.path == path
-                && entity.start_line == found.candidate_start_line
-                && entity.name == found.candidate_name
-        })
-    });
-    match (matches.next(), matches.next()) {
-        (Some(entity), None) => format!(
-            "CC {} -> {}, SLOC {} -> {}",
-            base.cc, entity.cc, base.sloc, entity.sloc
-        ),
-        _ => format!("base CC {}, SLOC {}", base.cc, base.sloc),
     }
 }
 

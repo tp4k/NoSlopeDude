@@ -52,6 +52,7 @@ fn spec(name: &str, fingerprint: &str, cc: u32, sloc: usize) -> Spec {
 fn identity(name: &str) -> CallableIdentity {
     CallableIdentity {
         owner_digest: OwnerDigest::default(),
+        context_digest: OwnerDigest::default(),
         kind: CallableKind::JavaMethod,
         name: name.to_string(),
         signature: Vec::new(),
@@ -1091,5 +1092,51 @@ fn test_callable_ref_past_the_end_of_its_file_metrics_panics_in_debug_builds() {
         &candidate_metrics,
         &matched,
         &default_policy(),
+    );
+}
+
+#[test]
+fn test_cc_only_policy_resolves_sloc_only_ambiguity() {
+    let base = [(
+        "A.java",
+        vec![spec("cb", "first", 12, 10), spec("cb", "second", 12, 100)],
+    )];
+    let candidate = [("A.java", vec![spec("cb", "changed", 12, 30)])];
+    assert_eq!(
+        codes(&run(&base, &candidate)),
+        vec![(CODE_MATCH_AMBIGUITY, "cb")]
+    );
+    let mut policy = default_policy();
+    policy.sloc_growth = false;
+    assert!(run_with(&base, &candidate, &policy).is_empty());
+}
+
+#[test]
+fn test_cc_only_policy_preserves_cc_ambiguity() {
+    let mut policy = default_policy();
+    policy.sloc_growth = false;
+    let diagnostics = run_with(
+        &[(
+            "A.java",
+            vec![spec("cb", "first", 20, 10), spec("cb", "second", 12, 10)],
+        )],
+        &[("A.java", vec![spec("cb", "changed", 20, 30)])],
+        &policy,
+    );
+    assert_eq!(codes(&diagnostics), vec![(CODE_MATCH_AMBIGUITY, "cb")]);
+}
+
+#[test]
+fn test_cc_only_policy_still_gates_new_complex_functions() {
+    let mut policy = default_policy();
+    policy.sloc_growth = false;
+    let diagnostics = run_with(
+        &[],
+        &[("A.java", vec![spec("fresh", "body", 11, 5)])],
+        &policy,
+    );
+    assert_eq!(
+        codes(&diagnostics),
+        vec![(CODE_COMPLEXITY_ABOVE_THRESHOLD, "fresh")]
     );
 }

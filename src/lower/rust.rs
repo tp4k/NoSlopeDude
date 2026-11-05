@@ -254,6 +254,7 @@ pub(super) fn classify(node: Node, source: &str, parent: Option<Node>) -> Classi
         None => None,
     };
     Classification {
+        context_segment: None,
         decision: decision_kind(node, kind),
         terminator: terminator_kind(kind),
         in_block: parent_kind.is_some_and(|kind| is_block_kind(kind).is_some()),

@@ -48,19 +48,19 @@ enum Verdict {
 }
 
 /// The base SLOC above which a candidate's SLOC counts as E102 growth.
-fn growth_limit(base_sloc: usize) -> usize {
+pub(crate) fn growth_limit(base_sloc: usize) -> usize {
     base_sloc + SLOC_GROWTH_FLOOR.max(base_sloc / SLOC_GROWTH_DIVISOR)
 }
 
 /// The spec's verdict of one candidate against one base callable, or none,
 /// before any `off` code is applied.
-fn raw_verdict(candidate: &Callable, base: Option<&Callable>) -> Verdict {
+fn raw_verdict(candidate: &Callable, base: Option<&Callable>, sloc_growth: bool) -> Verdict {
     if candidate.cc <= POLICY_CC_THRESHOLD {
         return Verdict::Pass;
     }
     match base {
         Some(base) if base.cc > POLICY_CC_THRESHOLD => {
-            if candidate.cc > base.cc || candidate.sloc > growth_limit(base.sloc) {
+            if candidate.cc > base.cc || (sloc_growth && candidate.sloc > growth_limit(base.sloc)) {
                 Verdict::E102
             } else {
                 Verdict::Pass
@@ -146,9 +146,10 @@ impl BaseSet {
         let grows = self
             .min_cc_above_threshold
             .is_some_and(|cc| candidate.cc > cc)
-            || self
-                .min_growth_limit_above_threshold
-                .is_some_and(|limit| candidate.sloc > limit);
+            || policy.sloc_growth
+                && self
+                    .min_growth_limit_above_threshold
+                    .is_some_and(|limit| candidate.sloc > limit);
         if grows {
             note(Verdict::E102);
         }
@@ -158,7 +159,7 @@ impl BaseSet {
         let passes = self
             .suffix_max_limit
             .get(first_not_lower)
-            .is_some_and(|&(_, limit)| candidate.sloc <= limit);
+            .is_some_and(|&(_, limit)| !policy.sloc_growth || candidate.sloc <= limit);
         if passes {
             note(Verdict::Pass);
         }
@@ -231,6 +232,8 @@ impl<'a> Classifier<'a> {
                 candidate_name: candidate.name.clone(),
                 candidate_start_line: candidate.start_line,
                 candidate_end_line: candidate.end_line,
+                candidate_cc: candidate.cc,
+                candidate_sloc: candidate.sloc,
                 base,
             },
         ));
@@ -242,7 +245,10 @@ impl<'a> Classifier<'a> {
             return;
         };
         let base_callable = base.and_then(|base_ref| self.base_callable(base_ref));
-        let code = match effective(raw_verdict(candidate, base_callable), self.policy) {
+        let code = match effective(
+            raw_verdict(candidate, base_callable, self.policy.sloc_growth),
+            self.policy,
+        ) {
             Verdict::Pass => return,
             Verdict::E101 => CODE_COMPLEXITY_ABOVE_THRESHOLD,
             Verdict::E102 => CODE_COMPLEXITY_INCREASED,

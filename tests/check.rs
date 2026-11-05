@@ -2059,3 +2059,186 @@ fn test_added_file_with_total_parse_loss_raises_a101() {
 
     assert_total_parse_loss(&outcome, "Junk.java");
 }
+
+fn contextual_callback_body(branches: usize, label: &str) -> String {
+    let mut body = String::from("{\n");
+    for index in 0..branches {
+        body.push_str(&format!("if (value === {index}) {{ {label}(); }}\n"));
+    }
+    body.push_str("return value;\n}");
+    body
+}
+
+#[test]
+fn test_distinct_route_callbacks_report_growth_without_match_errors() {
+    let fixture = fixture();
+    let config = b"version: 1\npolicy:\n  NSD-V102: off\n";
+    let base = format!(
+        "router.get('/alpha', () => {});\nrouter.get('/beta', () => {});\n",
+        contextual_callback_body(19, "alpha"),
+        contextual_callback_body(11, "beta"),
+    );
+    fixture.commit(&[("routes.ts", base.as_bytes()), ("nsd.yml", config)]);
+    let candidate = format!(
+        "router.get('/beta', () => {});\nrouter.get('/alpha', () => {});\n",
+        contextual_callback_body(12, "updatedBeta"),
+        contextual_callback_body(18, "updatedAlpha"),
+    );
+    fixture.stage("routes.ts", candidate.as_bytes());
+    let outcome = fixture.staged();
+    assert_eq!(codes(&outcome), vec!["NSD-E102"]);
+    assert_eq!(outcome.exit_status, 1);
+}
+
+#[test]
+fn test_named_tool_methods_report_growth_without_match_errors() {
+    let fixture = fixture();
+    let config = b"version: 1\npolicy:\n  NSD-V102: off\n";
+    let base = format!(
+        "const alpha = {{ execute() {} }};\nconst beta = {{ execute() {} }};\n",
+        contextual_callback_body(19, "alpha"),
+        contextual_callback_body(11, "beta"),
+    );
+    fixture.commit(&[("tools.ts", base.as_bytes()), ("nsd.yml", config)]);
+    let candidate = format!(
+        "const beta = {{ execute() {} }};\nconst alpha = {{ execute() {} }};\n",
+        contextual_callback_body(12, "updatedBeta"),
+        contextual_callback_body(18, "updatedAlpha"),
+    );
+    fixture.stage("tools.ts", candidate.as_bytes());
+    let outcome = fixture.staged();
+    assert_eq!(codes(&outcome), vec!["NSD-E102"]);
+    assert_eq!(outcome.exit_status, 1);
+}
+
+#[test]
+fn test_indistinguishable_route_callbacks_still_fail_closed() {
+    let fixture = fixture();
+    let config = b"version: 1\npolicy:\n  NSD-V102: off\n";
+    let base = format!(
+        "router.get('/same', () => {});\nrouter.get('/same', () => {});\n",
+        contextual_callback_body(19, "alpha"),
+        contextual_callback_body(11, "beta"),
+    );
+    fixture.commit(&[("routes.ts", base.as_bytes()), ("nsd.yml", config)]);
+    let candidate = format!(
+        "router.get('/same', () => {});\n",
+        contextual_callback_body(19, "updated"),
+    );
+    fixture.stage("routes.ts", candidate.as_bytes());
+    let outcome = fixture.staged();
+    assert_eq!(codes(&outcome), vec!["NSD-G102"]);
+    assert_eq!(outcome.exit_status, 2);
+}
+
+#[test]
+fn test_context_edits_cannot_downgrade_legacy_growth_to_warned_e101() {
+    let cases = [
+        (
+            "useEffect(() => BODY, [before]);",
+            "useEffect(() => BODY, [after]);",
+        ),
+        ("before(() => BODY);", "after(() => BODY);"),
+        (
+            "router.get('/before', () => BODY);",
+            "router.get('/after', () => BODY);",
+        ),
+        (
+            "const before = { execute() BODY };",
+            "const after = { execute() BODY };",
+        ),
+    ];
+    for (before, after) in cases {
+        let fixture = fixture();
+        let config = b"version: 1\npolicy:\n  NSD-E101: warn\n  NSD-E102: deny\n  NSD-V102: off\n";
+        let base = before.replace("BODY", &contextual_callback_body(11, "base"));
+        let candidate = after.replace("BODY", &contextual_callback_body(12, "candidate"));
+        fixture.commit(&[("callbacks.ts", base.as_bytes()), ("nsd.yml", config)]);
+        fixture.stage("callbacks.ts", candidate.as_bytes());
+        let outcome = fixture.staged();
+        assert_eq!(codes(&outcome), vec!["NSD-E102"], "{before} -> {after}");
+        assert_eq!(outcome.exit_status, 1);
+    }
+}
+
+#[test]
+fn test_deleted_context_cannot_steal_a_renamed_callbacks_legacy_base() {
+    let fixture = fixture();
+    let config = b"version: 1\npolicy:\n  NSD-E101: warn\n  NSD-E102: deny\n  NSD-V102: off\n";
+    let base = format!(
+        "useEffect(() => {}, [alpha]);\nuseEffect(() => {}, [beta]);\n",
+        contextual_callback_body(19, "alpha"),
+        contextual_callback_body(11, "beta"),
+    );
+    fixture.commit(&[("callbacks.ts", base.as_bytes()), ("nsd.yml", config)]);
+    let candidate = format!(
+        "useEffect(() => {}, [alpha]);\n",
+        contextual_callback_body(19, "updatedBeta")
+    );
+    fixture.stage("callbacks.ts", candidate.as_bytes());
+    let outcome = fixture.staged();
+    assert_eq!(codes(&outcome), vec!["NSD-G102"]);
+    assert_eq!(outcome.exit_status, 2);
+}
+
+#[test]
+fn test_unchanged_bodies_match_before_context_refines_edited_siblings() {
+    let fixture = fixture();
+    let config = b"version: 1\npolicy:\n  NSD-E101: warn\n  NSD-E102: deny\n  NSD-V102: off\n";
+    let base = format!(
+        "useEffect(() => {}, [alpha]);\nuseEffect(() => {}, [beta]);\n",
+        contextual_callback_body(19, "alpha"),
+        contextual_callback_body(11, "beta"),
+    );
+    fixture.commit(&[("callbacks.ts", base.as_bytes()), ("nsd.yml", config)]);
+    let candidate = format!(
+        "useEffect(() => {}, [beta]);\nuseEffect(() => {}, [alpha]);\n",
+        contextual_callback_body(19, "alpha"),
+        contextual_callback_body(19, "updatedBeta"),
+    );
+    fixture.stage("callbacks.ts", candidate.as_bytes());
+    let outcome = fixture.staged();
+    assert_eq!(codes(&outcome), vec!["NSD-E102"]);
+    assert_eq!(outcome.exit_status, 1);
+}
+
+#[test]
+fn test_router_receiver_rename_keeps_edited_routes_distinct() {
+    let fixture = fixture();
+    let config = b"version: 1\npolicy:\n  NSD-E101: warn\n  NSD-E102: deny\n  NSD-V102: off\n";
+    let base = format!(
+        "before.get('/alpha', () => {});\nbefore.get('/beta', () => {});\n",
+        contextual_callback_body(19, "alpha"),
+        contextual_callback_body(11, "beta"),
+    );
+    fixture.commit(&[("routes.ts", base.as_bytes()), ("nsd.yml", config)]);
+    let candidate = format!(
+        "after.get('/beta', () => {});\nafter.get('/alpha', () => {});\n",
+        contextual_callback_body(12, "updatedBeta"),
+        contextual_callback_body(18, "updatedAlpha"),
+    );
+    fixture.stage("routes.ts", candidate.as_bytes());
+    let outcome = fixture.staged();
+    assert_eq!(codes(&outcome), vec!["NSD-E102"]);
+    assert_eq!(outcome.exit_status, 1);
+}
+
+#[test]
+fn test_same_routes_on_distinct_receivers_remain_ambiguous() {
+    let fixture = fixture();
+    let config = b"version: 1\npolicy:\n  NSD-E101: warn\n  NSD-E102: deny\n  NSD-V102: off\n";
+    let base = format!(
+        "alpha.get('/same', () => {});\nbeta.get('/same', () => {});\n",
+        contextual_callback_body(19, "alpha"),
+        contextual_callback_body(11, "beta"),
+    );
+    fixture.commit(&[("routes.ts", base.as_bytes()), ("nsd.yml", config)]);
+    let candidate = format!(
+        "beta.get('/same', () => {});\n",
+        contextual_callback_body(19, "updatedBeta"),
+    );
+    fixture.stage("routes.ts", candidate.as_bytes());
+    let outcome = fixture.staged();
+    assert_eq!(codes(&outcome), vec!["NSD-G102"]);
+    assert_eq!(outcome.exit_status, 2);
+}

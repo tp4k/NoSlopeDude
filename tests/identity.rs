@@ -721,7 +721,7 @@ class Determinism {
 /// one `OwnerEntry` per nesting level, not a deep-copied `Vec<OwnerSegment>`
 /// per callable -- a 15,000-level nested `()=>` chain (the same depth
 /// `tests/metrics.rs::DEEP_NESTING_LEVELS` already exercises for the pre-M1-7
-/// tree build) must give exactly one owner entry per callable, not one entry
+/// tree build) must give one owner entry per callable plus its binding, not one entry
 /// times its own nesting depth.
 #[test]
 fn test_deeply_nested_callables_store_owners_linearly() {
@@ -730,7 +730,8 @@ fn test_deeply_nested_callables_store_owners_linearly() {
     let parsed = parse_inline(&source, Grammar::TypeScript, JS_TS);
     let ir_file = lower::lower_file(&parsed);
     assert_eq!(ir_file.callables.len(), DEPTH);
-    assert_eq!(ir_file.owners.len(), DEPTH);
+    assert_eq!(ir_file.owners.len(), DEPTH + 1);
+    assert_eq!(ir_file.owners[0].segment.kind, OwnerKind::Binding);
 }
 
 /// WS-1 triage row 1 (round 2): a giant declared name shared by many sibling

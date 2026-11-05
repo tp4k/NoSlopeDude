@@ -413,6 +413,8 @@ fn test_render_json_covers_every_diagnostic_kind() {
             candidate_name: "run".to_string(),
             candidate_start_line: 4,
             candidate_end_line: 40,
+            candidate_cc: 14,
+            candidate_sloc: 21,
             base,
         }))
     };
@@ -484,12 +486,12 @@ fn test_render_json_covers_every_diagnostic_kind() {
             {"code": "NSD-C102", "path": "nsd.yml"},
             {"code": "NSD-G101", "message": "cannot read the index"},
             {"code": "NSD-E101", "path": "src/Foo.java", "start_line": 4, "end_line": 40,
-             "callable": "run", "base": null},
+             "callable": "run", "base": null, "candidate": {"cc": 14, "sloc": 21}, "reason": "new_callable"},
             {"code": "NSD-E102", "path": "src/Foo.java", "start_line": 4, "end_line": 40,
-             "callable": "run",
+             "callable": "run", "candidate": {"cc": 14, "sloc": 21}, "reason": "cc_growth",
              "base": {"path": "old/Foo.java", "start_line": 3, "end_line": 30, "cc": 12, "sloc": 25}},
             {"code": "NSD-G102", "path": "src/Foo.java", "start_line": 4, "end_line": 40,
-             "callable": "run", "base": null},
+             "callable": "run", "base": null, "candidate": {"cc": 14, "sloc": 21}, "reason": "match_ambiguity"},
             {"code": "NSD-V101", "path": "W.java", "start_line": 5, "end_line": 6,
              "rule_id": "JAVA-EMPTY-CATCH"},
             {"code": "NSD-S101", "path": "W.java", "directive_line": 4,
@@ -568,6 +570,8 @@ fn test_check_format_json_escapes_control_characters() {
         candidate_name: hostile.to_string(),
         candidate_start_line: 1,
         candidate_end_line: 2,
+        candidate_cc: 14,
+        candidate_sloc: 21,
         base: None,
     }))];
 
@@ -588,6 +592,8 @@ fn test_check_format_json_escapes_control_characters_in_paths() {
         candidate_name: "run".to_string(),
         candidate_start_line: 1,
         candidate_end_line: 2,
+        candidate_cc: 14,
+        candidate_sloc: 21,
         base: None,
     }))];
 
@@ -1564,6 +1570,8 @@ fn test_check_format_json_escapes_bidi_and_c1_controls() {
                     candidate_name: "run".to_string(),
                     candidate_start_line: 1,
                     candidate_end_line: 2,
+                    candidate_cc: 14,
+                    candidate_sloc: 21,
                     base: None,
                 })),
                 CheckDiagnostic::Failure {
@@ -1624,4 +1632,78 @@ fn test_failure_messages_hide_the_resolved_form_of_an_existing_hidden_path() {
         !text.contains(resolved.to_str().expect("UTF-8 path")),
         "{text}"
     );
+}
+
+#[test]
+fn test_complexity_diagnostics_carry_metrics_and_distinct_growth_reasons() {
+    let cases = [
+        (
+            CODE_COMPLEXITY_ABOVE_THRESHOLD,
+            None,
+            12,
+            20,
+            "new_callable",
+        ),
+        (
+            CODE_COMPLEXITY_ABOVE_THRESHOLD,
+            Some((10, 20)),
+            11,
+            20,
+            "threshold_crossed",
+        ),
+        (
+            CODE_COMPLEXITY_INCREASED,
+            Some((12, 20)),
+            13,
+            20,
+            "cc_growth",
+        ),
+        (
+            CODE_COMPLEXITY_INCREASED,
+            Some((12, 20)),
+            12,
+            23,
+            "sloc_growth",
+        ),
+        (
+            CODE_COMPLEXITY_INCREASED,
+            Some((12, 20)),
+            11,
+            23,
+            "sloc_growth",
+        ),
+        (
+            CODE_COMPLEXITY_INCREASED,
+            Some((12, 20)),
+            13,
+            23,
+            "cc_and_sloc_growth",
+        ),
+        (CODE_MATCH_AMBIGUITY, None, 18, 27, "match_ambiguity"),
+    ];
+    for (code, base_metrics, cc, sloc, reason) in cases {
+        let diagnostic = PolicyDiagnostic {
+            code,
+            candidate_path: path("src/Service.java"),
+            candidate_name: "run".to_string(),
+            candidate_start_line: 3,
+            candidate_end_line: 30,
+            candidate_cc: cc,
+            candidate_sloc: sloc,
+            base: base_metrics.map(|(cc, sloc)| BaseCallable {
+                path: path("src/Service.java"),
+                start_line: 2,
+                end_line: 29,
+                cc,
+                sloc,
+            }),
+        };
+        let rendered = render_json(&[CheckDiagnostic::Complexity(Box::new(diagnostic))], 1);
+        let document: Value = serde_json::from_str(&rendered).expect("valid JSON");
+        assert_eq!(document["diagnostics"][0]["reason"], reason);
+        assert_eq!(
+            document["diagnostics"][0]["candidate"],
+            json!({"cc": cc, "sloc": sloc})
+        );
+    }
 }

@@ -90,6 +90,14 @@ Post-freeze amendments (2026-10-20, user request):
 |---|---|---|
 | A12 | **`check --worktree` leaves out untracked files the base `.gitignore` ignores.** This refines D6 and the M1–M2 "base policy" line. An untracked entry is dropped, and an untracked directory is pruned unread, only when the `.gitignore` blobs of the merge-base snapshot (every directory level, git's precedence and negation, case-sensitive) AND the worktree's own on-disk `.gitignore` files both ignore it, so a candidate edit can only expose files, never hide them. Tracked entries always stay. `.git/info/exclude`, `core.excludesFile` and `core.ignoreCase` do not apply. A symlinked `.gitignore` contributes no rules (git does not follow it either). Matching is nsd's own byte-wise implementation of git's wildmatch with `WM_PATHNAME` plus `dir.c` line parsing (BOM, CR, NUL cut, trailing-space trim, `!`, directory-only, anchoring, `**`, bracket and POSIX classes), so the skip decision equals `git check-ignore --no-index` except for the unusable-file cases listed next; a differential test pins it. A `.gitignore` that cannot be used on one side (over `SOURCE_CEILING_BYTES`, containing a line with more than 1000 runs of `*` characters (escaped and bracketed ones count too), or holding more than 1000 special (whole-segment) `**` runs beyond each line's first) makes that side ignore nothing at or below its directory, even when an ancestor directory is excluded on that side; the directory holding the unusable file is still decided by its parent's rules, and a directory both sides ignore is still pruned unread, so an unusable `.gitignore` inside it has no effect. An untracked on-disk `.gitignore` that the check cannot read stops the check with `NSD-G101` and exit 2, naming the file, and no file is skipped. *Amended 2026-10-21 (run 2026-10-21-1052-nsd-git-wildmatch): the earlier Decision 6, a `GitignoreBuilder` matcher fed a safe subset with widened negations, was replaced by nsd's own wildmatch.* `--staged`, commit-to-commit mode and `scan` are unchanged. | *M1–M2*; `WorktreeSnapshot` (D6) |
 
+Post-freeze amendments (2026-11-05, live-trial fixes requested by the user):
+
+| # | Amendment | Where applied |
+|---|---|---|
+| A13 | **JS/TS structural identity includes lexical binding and callsite context.** Named bindings, call expressions with static discriminants, and callback argument slots refine otherwise same-key callables after exact body pairing. Refinement is used only when the remaining base/candidate context inventories agree; changed inventories fall back to the original structural group. Context is line-independent and indistinguishable siblings retain fail-closed G102 behavior. Cache entry version 2 rejects cached pre-context identities. Measurements and the measurement-profile fingerprint do not change. | *Stable data model*; lowering, identity, cache |
+| A14 | **Trusted policy may disable SLOC-only growth.** Optional root `complexity: {sloc_growth: false}` disables the SLOC arm of E102, including ambiguity evaluation; the omitted or explicit `true` value preserves the frozen default. CC growth and E101 remain governed by their existing policy. Candidate config cannot weaken its own check. Configuration fingerprint domain becomes `nsd-config-v2`; measurement fingerprint is unchanged. | *CLI and configuration*; *Diagnostics* |
+| A15 | **Complexity diagnostics are self-contained.** E101/E102/G102 include candidate CC/SLOC and an explicit reason in JSON and readable formats. Existing diagnostic codes and exit meanings remain unchanged; schema 1 gains additive fields. Metrics explain measured growth independently of whether the SLOC arm is enabled. | `docs/report-format.md`; `docs/cli.md` |
+
 R also deleted P's *Settled decisions*, *Architecture*, *Spec deltas* and
 *Rejected during grilling* — roughly half the plan, including the `git2`
 choice, the module map, and the quantified reasons each alternative lost.
@@ -166,7 +174,8 @@ exists, else `10` (amendment A2).
   `measurement.min_clone_lines` (amendment A2), and
   `deny|warn|off` for `NSD-E101`, `E102`, `V101`, `V102` and `S102`.
   Measurement algorithms, the CC threshold, analysis-error handling and
-  suppression policy are immutable; the clone threshold is the one
+  suppression policy are immutable except for the trusted SLOC-growth opt-out
+  in A14; the clone threshold is the one
   configurable measurement input and enters the fingerprint (A2).
 - `NSD-S101` remains denied unless the invocation supplies
   `--allow-new-suppressions`; repository config cannot enable it.

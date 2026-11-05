@@ -120,6 +120,7 @@ fn test_repository_policy_cannot_neutralise_s101() {
                             nsd_v101: v101,
                             nsd_v102: v102,
                             nsd_s102: s102,
+                            sloc_growth: true,
                         };
                         assert_eq!(exit_status([S101], &policy, false), 1);
                     }
@@ -164,6 +165,7 @@ fn test_contribution_is_what_exit_status_ors_for_every_code() {
             nsd_v101: severity,
             nsd_v102: severity,
             nsd_s102: severity,
+            sloc_growth: true,
         };
         for allow in [false, true] {
             for code in [

@@ -32,7 +32,7 @@ pub use payload::{
 };
 
 /// The entry-format version; an entry carrying another one is a miss.
-const CACHE_VERSION: u32 = 1;
+const CACHE_VERSION: u32 = 2;
 const ROOT_COMPONENTS: [&str; 3] = ["nsd", "cache", "v1"];
 const KEY_FAMILY_PREFIX: &str = "analysis-cache-key";
 const PAYLOAD_FAMILY_PREFIX: &str = "analysis-cache-payload";

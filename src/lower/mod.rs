@@ -595,6 +595,7 @@ struct Classification {
     /// own `owner_stack` for the node's descendants once classification
     /// finishes, and pops it again when the node's own frame closes.
     owner_segment: Option<OwnerSegment>,
+    context_segment: Option<OwnerSegment>,
 }
 
 /// D8's per-callable facts a lowering computes once it has already found a
@@ -792,6 +793,16 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
             tables.block_dirty.push(false);
             entity_slot = Some(EntitySlot::Block(tables.block_dirty.len() - 1));
         }
+        let mut owners_pushed = 0;
+        if let Some(segment) = classification.context_segment {
+            tables.owners.push(OwnerEntry {
+                segment,
+                parent: owner_stack.last().copied(),
+            });
+            tables.owner_spans.push(span);
+            owner_stack.push((tables.owners.len() - 1) as u32);
+            owners_pushed += 1;
+        }
         if let Some(callable) = classification.callable {
             tables.callables.push(IrCallable {
                 span,
@@ -809,7 +820,7 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
             );
             entity_slot = Some(EntitySlot::Callable(tables.callable_dirty.len() - 1));
         }
-        let owner_pushed = classification.owner_segment.is_some();
+
         if let Some(segment) = classification.owner_segment {
             tables.owners.push(OwnerEntry {
                 segment,
@@ -817,6 +828,7 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
             });
             tables.owner_spans.push(span);
             owner_stack.push((tables.owners.len() - 1) as u32);
+            owners_pushed += 1;
         }
         let flags = Inherited {
             in_catch_body: classification.is_catch_body_root || parent_flags.in_catch_body,
@@ -840,7 +852,7 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
             flags,
             self_damage,
             entity_slot,
-            owner_pushed,
+            owners_pushed,
         }
     };
 
@@ -866,7 +878,7 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
     // `callable_dirty_out`/`block_dirty_out` its own final bit belongs in.
     let mut dirty: Vec<bool> = vec![root_opened.self_damage];
     let mut entity_slots: Vec<Option<EntitySlot>> = vec![root_opened.entity_slot];
-    let mut owner_pushed_frames: Vec<bool> = vec![root_opened.owner_pushed];
+    let mut owner_pushed_frames: Vec<usize> = vec![root_opened.owners_pushed];
     loop {
         if cursor.goto_first_child() {
             let parent_flags = inherited_flags.last().copied().unwrap_or_default();
@@ -885,7 +897,7 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
             parents.push(cursor.node());
             dirty.push(opened.self_damage);
             entity_slots.push(opened.entity_slot);
-            owner_pushed_frames.push(opened.owner_pushed);
+            owner_pushed_frames.push(opened.owners_pushed);
             continue;
         }
         loop {
@@ -901,7 +913,7 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
                     EntitySlot::Block(index) => tables.block_dirty[index] = own_dirty,
                 }
             }
-            if owner_pushed_frames.pop().unwrap_or(false) {
+            for _ in 0..owner_pushed_frames.pop().unwrap_or_default() {
                 owner_stack.pop();
             }
             let Some(parent) = stack.last_mut() else {
@@ -928,7 +940,7 @@ fn build_ir(root: Node, language: LanguageFamily, source: &str, tables: &mut IrT
                 parents.push(cursor.node());
                 dirty.push(opened.self_damage);
                 entity_slots.push(opened.entity_slot);
-                owner_pushed_frames.push(opened.owner_pushed);
+                owner_pushed_frames.push(opened.owners_pushed);
                 break;
             }
             if !cursor.goto_parent() {
@@ -955,7 +967,7 @@ struct OpenedNode {
     flags: Inherited,
     self_damage: bool,
     entity_slot: Option<EntitySlot>,
-    owner_pushed: bool,
+    owners_pushed: usize,
 }
 
 /// Which of `callable_dirty_out`/`block_dirty_out` (see `build_ir`) one
