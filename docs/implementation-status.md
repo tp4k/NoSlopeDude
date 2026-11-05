@@ -12,7 +12,8 @@ round; see *How to update this file* at the bottom and the matching rule in
 [`AGENTS.md`](../AGENTS.md).
 
 Last updated: 2026-11-05 (live-trial follow-up on `fix/live-trial-diagnostics`,
-based on `main@df7b1e5`; PV-11 to PV-13 validation in progress).
+verified code commit `ef0baba`; PV-11 to PV-13 local validation complete,
+patch version 0.1.4 staged after Greptile reviewed 33 files with no comments).
 
 ## Legend
 
@@ -195,9 +196,9 @@ this repository; committed regression fixtures are synthetic.
 
 | ID | Deliverable | Status |
 |---|---|---|
-| PV-11 | Conservative JS/TS binding/callsite refinement with legacy fallback, context cache round-trip and version-1 cache invalidation; measurements unchanged | `[~]` — `fix/live-trial-diagnostics` atop `df7b1e5`; focused `check` 88, `identity_matching` 32, `identity` 18, `identity_cost` 2 and `cache` 20 pass; `neutrality`, `ir_lowering` and `ir_isolation` pass; independent re-review passes the dependency-edit and context-stealing Git reproductions. Pending final commit and hosted checks. |
-| PV-12 | Self-contained complexity metrics/reasons in JSON, terminal, agent and GitHub output, including explicit ambiguity explanation | `[~]` — `fix/live-trial-diagnostics` atop `df7b1e5`; `cargo test --locked --test format_github --test cli_check_json --test cli_check` 123 passed, including `test_complexity_diagnostics_carry_metrics_and_distinct_growth_reasons`, `test_e102_metrics_do_not_depend_on_details_or_overload_lookup` and `test_ambiguity_explains_why_the_base_is_unknown`. Pending final commit and hosted checks. |
-| PV-13 | Trusted `complexity.sloc_growth` opt-out with backward-compatible defaults, strict parsing, config fingerprint and CC/ambiguity preservation | `[~]` — `fix/live-trial-diagnostics` atop `df7b1e5`; `cargo test --locked --test complexity_policy --test policy_complexity --test config` 75 passed; `candidate_cannot_disable_its_own_sloc_regression` and the CC-only ambiguity tests pass. Independent re-review found no remaining blocker. Pending final commit and hosted checks. |
+| PV-11 | Conservative JS/TS binding/callsite refinement with legacy fallback, context cache round-trip and version-1 cache invalidation; measurements unchanged | `[x]` — `fix/live-trial-diagnostics@ef0baba`; focused `check` 90, `identity_matching` 32, `identity` 18, `identity_cost` 2 and `cache` 20 pass; `neutrality`, `ir_lowering` and `ir_isolation` pass; independent re-review passes the dependency-edit and context-stealing Git reproductions. `cargo test --locked -- --test-threads=1` 1142 passed / 0 failed / 1 ignored; hosted validation tracked on PR #28. |
+| PV-12 | Self-contained complexity metrics/reasons in JSON, terminal, agent and GitHub output, including explicit ambiguity explanation | `[x]` — `fix/live-trial-diagnostics@ef0baba`; `cargo test --locked --test format_github --test cli_check_json --test cli_check` 123 passed, including `test_complexity_diagnostics_carry_metrics_and_distinct_growth_reasons`, `test_e102_metrics_do_not_depend_on_details_or_overload_lookup` and `test_ambiguity_explains_why_the_base_is_unknown`. `cargo test --locked -- --test-threads=1` 1142 passed / 0 failed / 1 ignored; hosted validation tracked on PR #28. |
+| PV-13 | Trusted `complexity.sloc_growth` opt-out with backward-compatible defaults, strict parsing, config fingerprint and CC/ambiguity preservation | `[x]` — `fix/live-trial-diagnostics@ef0baba`; `cargo test --locked --test complexity_policy --test policy_complexity --test config` 75 passed; `candidate_cannot_disable_its_own_sloc_regression` and the CC-only ambiguity tests pass. Independent re-review found no remaining blocker. `cargo test --locked -- --test-threads=1` 1142 passed / 0 failed / 1 ignored; hosted validation tracked on PR #28. |
 
 ## Standing gates and known debt
 
